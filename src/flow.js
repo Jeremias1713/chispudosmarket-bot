@@ -1,174 +1,111 @@
-// Logica de conversacion: decide que responder segun el mensaje entrante y el
-// paso (step) en que esta el cliente. Todo el estado vive en state.js.
-const { sendText, sendButtons, sendLocationRequest } = require('./whatsapp');
+// Logica de conversacion: el bot es un chatbot con IA (OpenAI). Este archivo
+// decide que hacer con cada mensaje entrante: comandos globales, ubicacion
+// (que se resuelve solo, sin IA, para que sea instantaneo y gratis), y todo
+// lo demas se lo pasamos al modelo (ver ./ai.js) que responde como asesor de
+// ventas y decide el texto.
+const { sendText } = require('./whatsapp');
 const { getSession, updateSession, resetSession } = require('./state');
-const { formatCatalog, findProduct, findProductByIndex } = require('./catalog');
 const { nearestByCoords, searchByText, formatAgency } = require('./agencies');
+const { getAssistantReply, splitReply } = require('./ai');
 
 const BUSINESS_NAME = process.env.BUSINESS_NAME || 'nuestro negocio';
+const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '1500', 10);
+const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '3500', 10);
 
-function cartTotal(cart) {
-  return cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function formatCart(cart) {
-  if (!cart.length) return 'Tu pedido esta vacio.';
-  const lines = cart.map(
-    (i) => `${i.qty} x ${i.name} = ${(i.price * i.qty).toFixed(2)} ${i.currency}`
+function randomGap() {
+  return SPLIT_GAP_MIN_MS + Math.random() * (SPLIT_GAP_MAX_MS - SPLIT_GAP_MIN_MS);
+}
+
+async function sendSplit(to, text) {
+  const parts = splitReply(text);
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) await sleep(randomGap());
+    await sendText(to, parts[i]);
+  }
+}
+
+async function sendGreeting(to) {
+  return sendText(
+    to,
+    `Hola! Bienvenido a ${BUSINESS_NAME}. Contame, en que te puedo ayudar hoy?`
     );
-  return lines.join('\n') + `\n\n*Total: ${cartTotal(cart).toFixed(2)} ${cart[0].currency}*`;
 }
 
-async function sendMainMenu(to) {
-  await sendButtons(to, `Bienvenido a ${BUSINESS_NAME}. ¿Que deseas hacer?`, [
-    { id: 'menu_catalogo', title: 'Ver catalogo' },
-    { id: 'menu_agencias', title: 'Agencia cercana' },
-    { id: 'menu_pedido', title: 'Mi pedido' },
-    ]);
-}
-
-// Punto de entrada principal. `message` es el objeto de mensaje tal como lo
-// entrega la API de WhatsApp Cloud (puede ser texto, boton, o ubicacion).
 async function handleIncomingMessage(from, message) {
   const session = getSession(from);
   const type = message.type;
 
-// Comandos globales, funcionan en cualquier paso.
 const rawText =
   type === 'text'
   ? message.text.body.trim()
   : type === 'interactive' && message.interactive?.button_reply
-  ? message.interactive.button_reply.id
+  ? message.interactive.button_reply.title
   : type === 'interactive' && message.interactive?.list_reply
-  ? message.interactive.list_reply.id
+  ? message.interactive.list_reply.title
   : '';
   const lower = rawText.toLowerCase();
 
-if (['menu', 'inicio', 'hola', 'start'].includes(lower)) {
+if (['menu', 'inicio', 'reiniciar', 'start'].includes(lower)) {
   resetSession(from);
-  return sendMainMenu(from);
+  return sendGreeting(from);
 }
-  if (lower === 'reiniciar') {
-    resetSession(from);
-    await sendText(from, 'Listo, empezamos de nuevo.');
-    return sendMainMenu(from);
-  }
 
-// Ubicacion compartida por el cliente (desde cualquier paso).
 if (type === 'location') {
   const { latitude, longitude } = message.location;
   const nearby = nearestByCoords(latitude, longitude, 3);
-  if (!nearby.length) {
-    await sendText(from, 'Aun no tenemos agencias cargadas cerca de tu ubicacion.');
-  } else {
-    const text =
-      'Estas son las agencias mas cercanas a tu ubicacion:\n\n' +
-      nearby.map(formatAgency).join('\n\n');
-    await sendText(from, text);
-  }
-  return sendMainMenu(from);
+  const reply = !nearby.length
+  ? 'Aun no tenemos agencias cargadas cerca de tu ubicacion.'
+    : 'Estas son las agencias mas cercanas a tu ubicacion:\n\n' +
+    nearby.map(formatAgency).join('\n\n');
+  await sendText(from, reply);
+  const history = [...(session.history || [])];
+  history.push({ role: 'user', content: '[Comparti su ubicacion GPS]' });
+  history.push({ role: 'assistant', content: reply });
+  updateSession(from, { history });
+  return;
 }
 
-switch (session.step) {
-  case 'START': {
-    return sendMainMenu(from);
+if (!rawText) {
+  await sendText(
+    from,
+    'Por ahora solo puedo leer mensajes de texto o ubicacion. Me lo escribis, porfa?'
+    );
+  return;
+}
+
+const wordCount = rawText.split(/\s+/).filter(Boolean).length;
+  const cityMatches = wordCount <= 4 ? searchByText(rawText, 3) : [];
+  if (cityMatches.length > 0) {
+    const reply =
+      'Estas son las agencias que encontre:\n\n' +
+      cityMatches.map((a) => formatAgency(a)).join('\n\n');
+    await sendText(from, reply);
+    const history = [...(session.history || [])];
+    history.push({ role: 'user', content: rawText });
+    history.push({ role: 'assistant', content: reply });
+    updateSession(from, { history, lastAssistantText: reply });
+    return;
   }
 
-  case 'MENU':
-  default: {
-    if (lower === 'menu_catalogo' || lower === 'catalogo' || lower === '1') {
-      updateSession(from, { step: 'CATALOG' });
-      return sendText(from, formatCatalog());
-    }
-    if (lower === 'menu_agencias' || lower === 'agencias' || lower === '2') {
-      updateSession(from, { step: 'ASK_LOCATION' });
-      await sendLocationRequest(
-        from,
-        'Comparte tu ubicacion y te muestro la agencia mas cercana, o escribe el nombre de tu ciudad.'
-        );
-      return;
-    }
-    if (lower === 'menu_pedido' || lower === 'pedido' || lower === '3') {
-      updateSession(from, { step: 'CART' });
-      await sendText(from, formatCart(session.cart));
-      return sendButtons(from, '¿Que deseas hacer?', [
-        { id: 'cart_confirm', title: 'Confirmar pedido' },
-        { id: 'cart_add', title: 'Agregar mas' },
-        { id: 'menu', title: 'Menu principal' },
-        ]);
-    }
-    return sendMainMenu(from);
-  }
+try {
+  const history = [...(session.history || [])];
+  const reply = await getAssistantReply(history, rawText);
 
-  case 'CATALOG': {
-    const product = findProductByIndex(rawText) || findProduct(rawText);
-    if (!product) {
-      await sendText(
-        from,
-        'No encontre ese producto. Responde con el numero o nombre exacto del catalogo, o escribe *menu*.'
-        );
-      return sendText(from, formatCatalog());
-    }
-    const cart = [...session.cart];
-    const existing = cart.find((i) => i.id === product.id);
-    if (existing) {
-      existing.qty += 1;
-    } else {
-      cart.push({ id: product.id, name: product.name, price: product.price, currency: product.currency, qty: 1 });
-    }
-    updateSession(from, { step: 'CART', cart });
-    await sendText(from, `Agregado: ${product.name}.\n\n${formatCart(cart)}`);
-    return sendButtons(from, '¿Que deseas hacer ahora?', [
-      { id: 'cart_add', title: 'Agregar mas' },
-      { id: 'cart_confirm', title: 'Confirmar pedido' },
-      { id: 'menu', title: 'Menu principal' },
-      ]);
-  }
+  history.push({ role: 'user', content: rawText });
+  history.push({ role: 'assistant', content: reply });
+  updateSession(from, { history, lastAssistantText: reply });
 
-  case 'CART': {
-    if (lower === 'cart_add') {
-      updateSession(from, { step: 'CATALOG' });
-      return sendText(from, formatCatalog());
-    }
-    if (lower === 'cart_confirm') {
-      if (!session.cart.length) {
-        await sendText(from, 'Tu pedido esta vacio. Agrega productos del catalogo primero.');
-        updateSession(from, { step: 'CATALOG' });
-        return sendText(from, formatCatalog());
-      }
-      updateSession(from, { step: 'ASK_LOCATION_FOR_DELIVERY' });
-      await sendText(
-        from,
-        `Pedido confirmado:\n\n${formatCart(session.cart)}\n\nUn asesor se pondra en contacto para coordinar el pago y la entrega/recogida.`
-        );
-      await sendLocationRequest(
-        from,
-        'Para asignarte la agencia mas cercana, comparte tu ubicacion (o escribe tu ciudad).'
-        );
-      return;
-    }
-    return sendButtons(from, '¿Que deseas hacer?', [
-      { id: 'cart_confirm', title: 'Confirmar pedido' },
-      { id: 'cart_add', title: 'Agregar mas' },
-      { id: 'menu', title: 'Menu principal' },
-      ]);
-  }
-
-  case 'ASK_LOCATION':
-  case 'ASK_LOCATION_FOR_DELIVERY': {
-    // El cliente escribio una ciudad en vez de compartir ubicacion GPS.
-    const matches = searchByText(rawText, 3);
-    if (!matches.length) {
-      await sendText(
-        from,
-        'No encontre agencias para ese texto. Intenta con el nombre de tu ciudad o pais, o comparte tu ubicacion con el boton de WhatsApp.'
-        );
-      return;
-    }
-    await sendText(from, 'Estas son las agencias que encontre:\n\n' + matches.map((a) => formatAgency(a)).join('\n\n'));
-    updateSession(from, { step: 'MENU' });
-    return sendMainMenu(from);
-  }
+  await sendSplit(from, reply);
+} catch (err) {
+  console.error('Error llamando a la IA:', err.message);
+  await sendText(
+    from,
+    'Disculpa, tuve un problema para responderte. Me repetis eso en un momento?'
+    );
 }
 }
 
