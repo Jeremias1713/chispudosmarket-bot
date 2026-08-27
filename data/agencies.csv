@@ -1,0 +1,7 @@
+name,country,city,address,phone,lat,lon
+Agencia Bogota Centro,Colombia,Bogota,"Cra 7 # 32-16, Bogota",+573001112233,4.6126,-74.0705
+Agencia Medellin Poblado,Colombia,Medellin,"Cl 10 # 40-15, El Poblado, Medellin",+573001223344,6.2088,-75.5678
+Agencia Ciudad de Mexico,Mexico,Ciudad de Mexico,"Av. Insurgentes Sur 1234, CDMX",+525511223344,19.3556,-99.1662
+Agencia Buenos Aires,Argentina,Buenos Aires,"Av. Corrientes 1500, CABA",+541122334455,-34.6037,-58.3816
+Agencia Lima Miraflores,Peru,Lima,"Av. Larco 800, Miraflores, Lima",+511998877665,-12.1211,-77.0293
+Agencia Madrid Centro,Espana,Madrid,"Gran Via 45, Madrid",+34911223344,40.4200,-3.7038
