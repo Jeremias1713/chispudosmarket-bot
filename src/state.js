@@ -12,62 +12,108 @@ const path = require('path');
 const STATE_PATH = path.join(__dirname, '..', 'data', 'sessions.json');
 
 function loadAll() {
-    try {
-          return JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-    } catch (err) {
-          return {};
-    }
+  try {
+    return JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+  } catch (err) {
+    return {};
+  }
 }
 
 function saveAll(sessions) {
-    fs.writeFileSync(STATE_PATH, JSON.stringify(sessions, null, 2));
+  fs.writeFileSync(STATE_PATH, JSON.stringify(sessions, null, 2));
 }
 
 function blankSession() {
-    const now = new Date().toISOString();
-    return {
-          step: 'START',
-          cart: [],
-          history: [],
-          stage: 'nuevo',
-          card: { nombre: null, ciudad: null, telefono: null, producto: null, notas: null },
-          createdAt: now,
-          updatedAt: now,
-    };
+  const now = new Date().toISOString();
+  return {
+    step: 'START',
+    cart: [],
+    history: [],
+    name: null,
+    stage: 'nuevo',
+    // Fijar la etapa a mano le apaga el candado al clasificador: no la
+    // vuelve a mover hasta que el panel lo pida explicitamente.
+    stageLocked: false,
+    stageReason: null,
+    // Con el bot pausado, el mensaje entrante se guarda en el historial
+    // (para que el panel lo vea) pero no se le contesta solo.
+    paused: false,
+    pausedReason: null,
+    card: { nombre: null, ciudad: null, telefono: null, producto: null, notas: null },
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 function getSession(phone) {
-    const sessions = loadAll();
-    if (!sessions[phone]) {
-          sessions[phone] = blankSession();
-          saveAll(sessions);
-    }
-    return sessions[phone];
+  const sessions = loadAll();
+  if (!sessions[phone]) {
+    sessions[phone] = blankSession();
+    saveAll(sessions);
+  }
+  return sessions[phone];
 }
 
 function updateSession(phone, patch) {
-    const sessions = loadAll();
-    sessions[phone] = {
-          ...(sessions[phone] || blankSession()),
-          ...patch,
-          updatedAt: new Date().toISOString(),
-    };
-    saveAll(sessions);
-    return sessions[phone];
+  const sessions = loadAll();
+  sessions[phone] = {
+    ...(sessions[phone] || blankSession()),
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  saveAll(sessions);
+  return sessions[phone];
 }
 
 function resetSession(phone) {
-    const sessions = loadAll();
-    sessions[phone] = blankSession();
-    saveAll(sessions);
-    return sessions[phone];
+  const sessions = loadAll();
+  sessions[phone] = blankSession();
+  saveAll(sessions);
+  return sessions[phone];
+}
+
+// Agrega un mensaje al historial con marca de tiempo. role es 'user'
+// (cliente), 'assistant' (IA) o 'human' (mandado a mano desde el panel).
+function appendMessage(phone, role, content) {
+  const sessions = loadAll();
+  const session = sessions[phone] || blankSession();
+  const history = [...(session.history || [])];
+  history.push({ role, content, at: new Date().toISOString() });
+  sessions[phone] = { ...session, history, updatedAt: new Date().toISOString() };
+  saveAll(sessions);
+  return sessions[phone];
+}
+
+// Pausar deja al bot mudo en esa conversacion (para que un humano tome el
+// control a mano desde el panel); reason queda solo para mostrar por que.
+function setPaused(phone, paused, reason) {
+  return updateSession(phone, { paused: Boolean(paused), pausedReason: paused ? (reason || 'manual') : null });
+}
+
+// Fijar la etapa a mano prende el candado: el clasificador por IA deja de
+// tocarla hasta que se llame a unlockStage.
+function setStage(phone, stage, reason) {
+  return updateSession(phone, { stage, stageLocked: true, stageReason: reason || 'Fijada desde el panel' });
+}
+
+function unlockStage(phone) {
+  return updateSession(phone, { stageLocked: false, stageReason: null });
 }
 
 // Devuelve todas las conversaciones, cada una con su numero de telefono
 // incluido. Usado por el panel web para listar chats.
 function listSessions() {
-    const sessions = loadAll();
-    return Object.entries(sessions).map(([phone, data]) => ({ phone, ...data }));
+  const sessions = loadAll();
+  return Object.entries(sessions).map(([phone, data]) => ({ phone, ...data }));
 }
 
-module.exports = { getSession, updateSession, resetSession, listSessions };
+module.exports = {
+  getSession,
+  updateSession,
+  resetSession,
+  appendMessage,
+  setPaused,
+  setStage,
+  unlockStage,
+  listSessions,
+};
