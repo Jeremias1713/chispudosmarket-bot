@@ -105,7 +105,7 @@ function buildSystemPrompt() {
   - Agradece cuando te da un dato, cuando tiene paciencia o cuando decide comprar.
   - Si el cliente cuenta algo suyo, reconocelo antes de ir al grano.
   - Nunca contestes cortante ni con una sola palabra.
-  - Varia las palabras que usas para reaccionar o dar el visto bueno (que bueno, buenisimo, dale, perfecto, listo, me alegra, entre otras). No repitas siempre la misma muletilla como "genial" en cada mensaje.
+  - Varia las palabras que usas para reaccionar o dar el visto bueno (que bueno, buenisimo, dale, perfecto, listo, me alegra, entre otras). NUNCA uses la palabra "genial" en ninguna forma (ni "genial", ni "que genial", ni "genial!"): esta prohibida, elegi siempre otra de las opciones de arriba.
 
   FORMATO DE CADA MENSAJE:
 ${splitEnabled
@@ -137,6 +137,7 @@ ${splitEnabled
 
   CIERRE DEL PEDIDO:
   Cuando ya tenes todos los datos, el mensaje de cierre tiene que incluir: un resumen de lo que pidio, y que un asesor se va a poner en contacto para coordinar el pago y la entrega o el retiro en agencia. No prometas que "ya esta listo para retirar": todavia falta que un asesor lo confirme.
+  Termina ese mensaje de cierre ahi. NO le agregues una pregunta como "¿algo mas en lo que te pueda ayudar?" ni ninguna otra: eso contradice la REGLA DE ORO (ya esta todo cerrado, no hace falta inventar una pregunta de relleno).
 
   CATALOGO ACTUAL (unica fuente de precios y productos, no inventes otros):
   ${catalogText()}
@@ -144,9 +145,10 @@ ${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vi
   AGENCIAS Y COBERTURA:
   - Si el cliente comparte su ubicacion GPS, el sistema ya se encarga de mostrarle las agencias mas cercanas automaticamente: vos no necesitas hacer nada en ese caso.
   - Cuando el cliente nombra una ciudad, estado o zona por CUALQUIER motivo relacionado a donde le llega el pedido, usa la herramienta buscar_agencias_por_zona. Esto incluye tanto cuando pregunta explicitamente por cobertura (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira", "estoy en ciudad bolivar") COMO cuando te esta diciendo esa ciudad como parte de cerrar el pedido, aunque no te lo pregunte (ej. "en que ciudad esta" del paso 2 del pedido, o "me lo envias a cd bolivar", "mandalo a valencia", "vivo en la ciudad de merida"). En estos casos SIEMPRE llama a la herramienta antes de contestar: nunca digas frases como "necesito saber si hay una agencia ahi" sin haber llamado ya a la herramienta, la respuesta tiene que traer el resultado real, no una intencion de averiguarlo despues. Pasale SIEMPRE el estado de Venezuela (deducilo vos con tu conocimiento de la geografia del pais si el cliente solo nombro una ciudad), y ademas la ciudad puntual si el cliente dijo algo mas especifico que el estado. Si el cliente usa una abreviatura o forma corta (ej. "cd bolivar" = Ciudad Bolivar), reconocela igual. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
+  - IMPORTANTE: si lo que dijo el cliente NO es un lugar real de Venezuela que reconozcas con confianza (una descripcion vaga como "un caserio alejado", "el campo", "bien lejos de todo", o cualquier cosa que no puedas ubicar en un estado concreto), NO llames a la herramienta y NO inventes ni adivines un estado al azar. En vez de eso, pedile al cliente que te confirme el nombre de su ciudad o estado para poder buscar la cobertura real.
   - NUNCA uses esa herramienta para numeros sueltos que sean cantidad de producto, telefono, respuestas de si/no, ni ningun otro dato del pedido que no sea explicitamente el nombre de un lugar. Un mensaje como "4" respondiendo cuantas unidades quiere NO es una zona.
-  - Si la herramienta encuentra agencias en la ciudad puntual, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion.
-  - Si la herramienta te avisa que en esa ciudad puntual no hay agencia pero si hay cobertura en el estado, decile al cliente claramente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas numeradas igual.
+  - Si la herramienta encuentra agencias en la ciudad puntual, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion. Esta lista, sin importar cuantas agencias tenga, va SIEMPRE junta en un solo mensaje de WhatsApp (es un caso de "QUE NUNCA SE PARTE"): no dejes ningun renglon en blanco entre una agencia y la siguiente, usa un solo salto de linea, para que no se corte en varios mensajes.
+  - Si la herramienta te avisa que en esa ciudad puntual no hay agencia pero si hay cobertura en el estado, decile al cliente claramente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas numeradas igual (misma regla: todas juntas en un solo mensaje).
   - Si la herramienta no encuentra nada ni en la ciudad ni en el estado, decile que por ahora no hay cobertura confirmada ahi, sin inventar una direccion.
   - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.
 ${libraryImagesText() ? `
@@ -316,6 +318,11 @@ function searchAgenciesByZone(estado, ciudad) {
   return { scope: 'ninguno', results: [] };
 }
 
+// OJO: se unen con UN SOLO salto de linea entre agencia y agencia (nunca
+// renglon en blanco). Esto es a proposito: el bot corta un mensaje nuevo en
+// cada renglon en blanco (ver splitReply), y esta lista tiene que llegarle
+// al cliente entera en un solo mensaje de WhatsApp. Si el modelo copia este
+// mismo formato (sin blancos) en su respuesta final, la lista no se corta.
 function formatAgencyList(results) {
   return results
     .map((a, i) => {
@@ -323,7 +330,7 @@ function formatAgencyList(results) {
       const phone = a.phone ? ` (Tel: ${a.phone})` : '';
       return `${i + 1}. ${a.name}${region}\n${a.address}${phone}`;
     })
-    .join('\n\n');
+    .join('\n');
 }
 
 // Arma el texto de resultado de la herramienta: lista numerada para que el
@@ -331,20 +338,21 @@ function formatAgencyList(results) {
 // referencias tipo "la cuatro" sin volver a buscar. Distingue el caso
 // "encontre justo en tu ciudad" del caso "en tu ciudad no, pero en tu estado
 // si", que es el pedido puntual: nunca decir que no hay cobertura si el
-// estado si la tiene.
+// estado si la tiene. Todo el bloque (encabezado + lista) va con saltos de
+// linea simples, nunca renglon en blanco: tiene que ser un solo mensaje.
 function formatAgencyToolResult(estado, ciudad, scope, results) {
   if (scope === 'ciudad') {
-    return `Agencias encontradas en "${ciudad}":\n\n${formatAgencyList(results)}`;
+    return `Agencias encontradas en "${ciudad}" (mandaselas todas juntas en un solo mensaje, sin renglones en blanco entre ellas):\n${formatAgencyList(results)}`;
   }
   if (scope === 'estado' && ciudad) {
     return (
       `No hay agencia puntual en "${ciudad}", pero si hay cobertura en el estado ${estado}. ` +
-      `Decile al cliente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas:\n\n` +
+      `Decile al cliente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas todas juntas en un solo mensaje (sin renglones en blanco entre ellas):\n` +
       formatAgencyList(results)
     );
   }
   if (scope === 'estado') {
-    return `Agencias encontradas en el estado ${estado}:\n\n${formatAgencyList(results)}`;
+    return `Agencias encontradas en el estado ${estado} (mandaselas todas juntas en un solo mensaje, sin renglones en blanco entre ellas):\n${formatAgencyList(results)}`;
   }
   const lugar = ciudad || estado;
   return `No se encontraron agencias ni en "${ciudad || ''}" ni en el estado ${estado}. Decile al cliente que por ahora no hay cobertura confirmada en ${lugar}, sin inventar una direccion.`;

@@ -21,7 +21,13 @@ const STAGES = [
 let _client = null;
 function client() {
     if (!_client) {
-    const apiKey = process.env.OPENAI_API_KEY;
+    // OJO: hay que hacer .trim() igual que en ai.js. Si la variable de
+    // entorno tiene un espacio o salto de linea invisible al final (pasa
+    // seguido al pegarla en el dashboard de Render), el header Authorization
+    // queda mal formado y el fetch de Node falla con "Connection error" en
+    // TODAS las llamadas, sin ningun mensaje mas claro. Este bug hizo que la
+    // clasificacion (Etapa + ficha del cliente) estuviera rota siempre.
+    const apiKey = (process.env.OPENAI_API_KEY || '').trim();
     if (!apiKey) {
       throw new Error('Falta OPENAI_API_KEY en las variables de entorno.');
     }
