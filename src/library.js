@@ -39,8 +39,9 @@ function getImage(id) {
 
 // buffer: Buffer del archivo subido (multer memoryStorage). name: como la
 // va a nombrar el negocio (para reconocerla en la grilla y como referencia
-// para el bot).
-function addImage({ buffer, mime, name }) {
+// para el bot). folder: carpeta opcional para organizar la biblioteca (solo
+// una etiqueta de texto, no una carpeta real en disco).
+function addImage({ buffer, mime, name, folder }) {
   const ext = EXT_BY_MIME[mime];
   if (!ext) throw new Error('Formato no soportado. Usa JPG, PNG o WebP.');
   if (buffer.length > 5 * 1024 * 1024) throw new Error('La imagen pesa mas de 5 MB.');
@@ -51,10 +52,38 @@ function addImage({ buffer, mime, name }) {
   fs.writeFileSync(path.join(MEDIA_DIR, filename), buffer);
 
   const items = loadIndex();
-  const item = { id, filename, mime, name: name || filename, createdAt: new Date().toISOString() };
+  const item = {
+    id,
+    filename,
+    mime,
+    name: name || filename,
+    folder: folder ? String(folder).trim().slice(0, 60) || null : null,
+    createdAt: new Date().toISOString(),
+  };
   items.push(item);
   saveIndex(items);
   return item;
+}
+
+// Cambia el nombre y/o la carpeta de una imagen ya subida (no toca el
+// archivo en disco, solo el indice).
+function updateImage(id, patch) {
+  const items = loadIndex();
+  const idx = items.findIndex((i) => i.id === id);
+  if (idx === -1) return null;
+  items[idx] = { ...items[idx], ...patch };
+  saveIndex(items);
+  return items[idx];
+}
+
+// Lista de carpetas ya usadas (para armar el selector sin tener que
+// escribirla de nuevo cada vez).
+function listFolders() {
+  const set = new Set();
+  for (const item of loadIndex()) {
+    if (item.folder) set.add(item.folder);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'es'));
 }
 
 function deleteImage(id) {
@@ -74,4 +103,4 @@ function mediaPath(filename) {
   return path.join(MEDIA_DIR, filename);
 }
 
-module.exports = { listImages, getImage, addImage, deleteImage, mediaPath, MEDIA_DIR };
+module.exports = { listImages, getImage, addImage, updateImage, deleteImage, listFolders, mediaPath, MEDIA_DIR };
