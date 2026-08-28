@@ -48,12 +48,21 @@ async function sendMessage(rawText) {
   const product = !state.linkedProductId ? matchTrigger(rawText) : null;
   if (product && product.intro && product.intro.trim()) {
     state.linkedProductId = product.id;
-    push('assistant', product.intro.trim());
-    return { parts: splitForPreview(product.intro.trim()), state };
+    const intro = product.intro.trim();
+    const imgCount = (product.introImageIds || []).length;
+    // El simulador no manda fotos de verdad: solo lo deja ver en el
+    // historial, igual que ya se hacia con una sola foto.
+    const preview = imgCount ? `[${imgCount === 1 ? 'imagen' : imgCount + ' imagenes'}] ${intro}` : intro;
+    push('assistant', preview);
+    return { parts: splitForPreview(intro), state };
   }
 
   const history = state.history.map((m) => ({ role: m.role, content: m.content }));
-  const reply = await getAssistantReply(history.slice(0, -1), rawText);
+  const { text: reply, images } = await getAssistantReply(history.slice(0, -1), rawText);
+
+  for (const img of images) {
+    push('assistant', `[imagen] ${img.name}`);
+  }
   push('assistant', reply);
 
   const classification = await classifyConversation(state.history.map((m) => ({ role: m.role, content: m.content })));
@@ -62,7 +71,7 @@ async function sendMessage(rawText) {
     state.card = classification.card;
   }
 
-  return { parts: splitForPreview(reply), state };
+  return { parts: [...images.map((img) => `[imagen] ${img.name}`), ...splitForPreview(reply)], state };
 }
 
 async function sendLocation(latitude, longitude) {

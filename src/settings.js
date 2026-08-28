@@ -14,7 +14,7 @@ const DEFAULTS = {
   botEnabled: true,
   businessName: null, // null = usa BUSINESS_NAME del .env
   welcomeMessage: null, // null = usa el saludo por defecto de flow.js
-  welcomeImageId: null, // id de una imagen de la biblioteca para mandar junto al saludo inicial
+  welcomeImageIds: [], // ids de imagenes de la biblioteca para mandar junto al saludo inicial (puede ser mas de una)
   knowledgeBase: '', // datos de envio/pago/promos que el bot da por ciertos
   openaiModel: null,
   openaiTemperature: null,
@@ -40,11 +40,18 @@ const DEFAULTS = {
 };
 
 function load() {
+  let settings;
   try {
-    return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')) };
+    settings = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')) };
   } catch (err) {
-    return { ...DEFAULTS };
+    settings = { ...DEFAULTS };
   }
+  // Migracion: dato viejo de antes de soportar varias fotos en el saludo
+  // (welcomeImageId, una sola imagen) todavia sin migrar a welcomeImageIds.
+  if (settings.welcomeImageId && (!Array.isArray(settings.welcomeImageIds) || !settings.welcomeImageIds.length)) {
+    settings.welcomeImageIds = [settings.welcomeImageId];
+  }
+  return settings;
 }
 
 function save(settings) {

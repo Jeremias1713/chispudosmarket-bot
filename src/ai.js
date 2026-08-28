@@ -4,6 +4,7 @@ const OpenAI = require('openai');
 const { loadProducts } = require('./catalog');
 const { getSettings } = require('./settings');
 const agencies = require('./agencies');
+const library = require('./library');
 
 let _client = null;
 function client() {
@@ -34,6 +35,21 @@ function catalogText() {
       return `- ${p.name}: ${Number(p.price).toFixed(2)} ${p.currency}. ${p.description}${extra}${upsell}`;
     })
     .join('\n');
+}
+
+// Lista los nombres de las imagenes de la biblioteca (panel > Imagenes) para
+// que el modelo sepa que fotos existen y como se llaman, y pueda usarlas con
+// la herramienta mostrar_foto SOLO cuando las instrucciones de un producto o
+// la base de conocimiento se lo pidan por nombre (nunca por iniciativa propia).
+function libraryImagesText() {
+  let images = [];
+  try {
+    images = library.listImages();
+  } catch (err) {
+    images = [];
+  }
+  if (!images.length) return '';
+  return images.map((img) => `- ${img.name}`).join('\n');
 }
 
 function buildSystemPrompt() {
@@ -91,10 +107,17 @@ function buildSystemPrompt() {
 ${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vigentes):\n  ${knowledge}\n` : ''}
   AGENCIAS Y COBERTURA:
   - Si el cliente comparte su ubicacion GPS, el sistema ya se encarga de mostrarle las agencias mas cercanas automaticamente: vos no necesitas hacer nada en ese caso.
-  - Cuando el cliente nombra una ciudad, estado o zona porque quiere saber si hay cobertura ahi o quiere que le muestres las agencias disponibles (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira"), usa la herramienta buscar_agencias_por_zona con esa zona. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
+  - Cuando el cliente nombra una ciudad, estado o zona porque quiere saber si hay cobertura ahi o quiere que le muestres las agencias disponibles (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira", "estoy en ciudad bolivar"), usa la herramienta buscar_agencias_por_zona. Pasale SIEMPRE el estado de Venezuela (deducilo vos con tu conocimiento de la geografia del pais si el cliente solo nombro una ciudad), y ademas la ciudad puntual si el cliente dijo algo mas especifico que el estado. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
   - NUNCA uses esa herramienta para numeros sueltos que sean cantidad de producto, telefono, respuestas de si/no, ni ningun otro dato del pedido que no sea explicitamente el nombre de un lugar. Un mensaje como "4" respondiendo cuantas unidades quiere NO es una zona.
-  - Cuando la herramienta te devuelva agencias, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion. Esa lista queda en la conversacion.
-  - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.`;
+  - Si la herramienta encuentra agencias en la ciudad puntual, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion.
+  - Si la herramienta te avisa que en esa ciudad puntual no hay agencia pero si hay cobertura en el estado, decile al cliente claramente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas numeradas igual.
+  - Si la herramienta no encuentra nada ni en la ciudad ni en el estado, decile que por ahora no hay cobertura confirmada ahi, sin inventar una direccion.
+  - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.
+${libraryImagesText() ? `
+  FOTOS DURANTE LA CHARLA:
+  Estas son las imagenes cargadas en la biblioteca del negocio:
+${libraryImagesText()}
+  Podes mandar una de estas fotos en medio de la charla usando la herramienta mostrar_foto con el nombre EXACTO tal cual aparece arriba, pero SOLO cuando las instrucciones de un producto (arriba, en el catalogo) o la base de conocimiento del negocio te digan explicitamente que mandes esa foto en ese momento. Nunca la uses por iniciativa propia sin que te lo hayan indicado asi.` : ''}`;
 }
 
 function splitReply(reply) {
@@ -133,49 +156,158 @@ function enforceMessageLimits(parts, maxWords, maxParts) {
   return chunks;
 }
 
-// Herramienta que el modelo puede invocar cuando decide, por el contexto de
-// la charla, que el cliente esta nombrando un lugar porque quiere saber de
-// cobertura o de agencias ahi (no para cantidades, telefonos ni otros datos
-// del pedido: eso lo deja claro el system prompt). El modelo elige CUANDO
-// llamarla; la busqueda real la hace este codigo, no el modelo.
-const AGENCY_TOOLS = [
+// Herramientas que el modelo puede invocar cuando decide, por el contexto de
+// la charla, que corresponde buscar agencias o mandar una foto (nunca por su
+// cuenta: el system prompt deja claro cuando usar cada una). El modelo elige
+// CUANDO llamarlas; la busqueda/el envio real los hace este codigo, no el
+// modelo.
+const TOOLS = [
   {
     type: 'function',
     function: {
       name: 'buscar_agencias_por_zona',
       description:
-        'Busca agencias de envio disponibles en una ciudad, estado o zona que el cliente menciono porque quiere saber si hay cobertura ahi o quiere ver las agencias disponibles. No usar para cantidades, telefonos, confirmaciones ni otros datos del pedido.',
+        'Busca agencias de envio disponibles segun el estado (y opcionalmente la ciudad puntual) que el cliente menciono porque quiere saber si hay cobertura ahi o quiere ver las agencias disponibles. No usar para cantidades, telefonos, confirmaciones ni otros datos del pedido.',
       parameters: {
         type: 'object',
         properties: {
-          zona: {
+          estado: {
             type: 'string',
-            description: 'Ciudad, estado o zona que menciono el cliente, ej. "Bolivar", "Maracaibo", "Tachira".',
+            description:
+              'El estado de Venezuela al que pertenece el lugar que menciono el cliente (ej. "Bolivar", "Zulia", "Tachira"). Si el cliente solo nombro una ciudad, deducilo vos con tu conocimiento de la geografia de Venezuela.',
+          },
+          ciudad: {
+            type: 'string',
+            description:
+              'La ciudad, sector o zona puntual que nombro el cliente, si dijo algo mas especifico que el estado (ej. "Ciudad Bolivar", "Maracaibo"). Dejalo vacio si el cliente solo nombro el estado.',
           },
         },
-        required: ['zona'],
+        required: ['estado'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'mostrar_foto',
+      description:
+        'Manda una foto de la biblioteca de imagenes del negocio durante la charla. Usar SOLO si las instrucciones de un producto o la base de conocimiento piden explicitamente mandar esa foto en ese momento. Nunca por iniciativa propia.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nombre: {
+            type: 'string',
+            description: 'El nombre EXACTO de la imagen, tal cual aparece en la lista de imagenes disponibles del system prompt.',
+          },
+        },
+        required: ['nombre'],
       },
     },
   },
 ];
 
-// Arma el texto de resultado de la herramienta: lista numerada para que el
-// modelo (y el propio historial de la charla) pueda despues resolver
-// referencias tipo "la cuatro" sin volver a buscar.
-function formatAgencyToolResult(zona, results) {
-  if (!results.length) {
-    return `No se encontraron agencias para "${zona}". Decile al cliente que por ahora no hay cobertura confirmada ahi, sin inventar una direccion.`;
+// Busca primero por la ciudad puntual (si el cliente dijo una); si no
+// encuentra nada ahi, cae al estado completo. Devuelve de donde salieron los
+// resultados (scope) para que el mensaje al cliente sea preciso: no es lo
+// mismo "esta es tu agencia" que "a tu ciudad no llega pero al estado si".
+function searchAgenciesByZone(estado, ciudad) {
+  const cityResults = ciudad ? agencies.searchByText(ciudad, 3) : [];
+  if (cityResults.length) {
+    return { scope: 'ciudad', results: cityResults };
   }
-  const list = results
+  const stateResults = estado ? agencies.searchByText(estado, 5) : [];
+  if (stateResults.length) {
+    return { scope: 'estado', results: stateResults };
+  }
+  return { scope: 'ninguno', results: [] };
+}
+
+function formatAgencyList(results) {
+  return results
     .map((a, i) => {
       const region = a.region ? ` — ${a.region}` : '';
       const phone = a.phone ? ` (Tel: ${a.phone})` : '';
       return `${i + 1}. ${a.name}${region}\n${a.address}${phone}`;
     })
     .join('\n\n');
-  return `Agencias encontradas para "${zona}":\n\n${list}`;
 }
 
+// Arma el texto de resultado de la herramienta: lista numerada para que el
+// modelo (y el propio historial de la charla) pueda despues resolver
+// referencias tipo "la cuatro" sin volver a buscar. Distingue el caso
+// "encontre justo en tu ciudad" del caso "en tu ciudad no, pero en tu estado
+// si", que es el pedido puntual: nunca decir que no hay cobertura si el
+// estado si la tiene.
+function formatAgencyToolResult(estado, ciudad, scope, results) {
+  if (scope === 'ciudad') {
+    return `Agencias encontradas en "${ciudad}":\n\n${formatAgencyList(results)}`;
+  }
+  if (scope === 'estado' && ciudad) {
+    return (
+      `No hay agencia puntual en "${ciudad}", pero si hay cobertura en el estado ${estado}. ` +
+      `Decile al cliente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas:\n\n` +
+      formatAgencyList(results)
+    );
+  }
+  if (scope === 'estado') {
+    return `Agencias encontradas en el estado ${estado}:\n\n${formatAgencyList(results)}`;
+  }
+  const lugar = ciudad || estado;
+  return `No se encontraron agencias ni en "${ciudad || ''}" ni en el estado ${estado}. Decile al cliente que por ahora no hay cobertura confirmada en ${lugar}, sin inventar una direccion.`;
+}
+
+// Busca la imagen por nombre exacto (como aparece en la biblioteca); si no
+// hay match exacto, prueba una coincidencia parcial por si el modelo no
+// copio el nombre letra por letra.
+function findImageByName(nombre) {
+  const q = String(nombre || '').trim().toLowerCase();
+  if (!q) return null;
+  let images = [];
+  try {
+    images = library.listImages();
+  } catch (err) {
+    images = [];
+  }
+  return (
+    images.find((img) => String(img.name || '').trim().toLowerCase() === q) ||
+    images.find((img) => String(img.name || '').trim().toLowerCase().includes(q)) ||
+    null
+  );
+}
+
+// Ejecuta una tool call del modelo y devuelve tanto el texto que va de vuelta
+// al modelo (para que redacte la respuesta final) como, si corresponde, la
+// imagen que hay que mandar de verdad por WhatsApp (eso lo hace el llamador
+// de getAssistantReply: flow.js o simulator.js, no este archivo).
+function runTool(call) {
+  let args = {};
+  try {
+    args = JSON.parse(call.function.arguments || '{}');
+  } catch (err) {
+    args = {};
+  }
+
+  if (call.function.name === 'mostrar_foto') {
+    const nombre = String(args.nombre || '').trim();
+    const img = nombre ? findImageByName(nombre) : null;
+    if (!img) {
+      return { content: `No se encontro ninguna imagen llamada "${nombre}" en la biblioteca. No le digas al cliente que le mandaste una foto.`, image: null };
+    }
+    return { content: `Foto "${img.name}" enviada correctamente. Podes mencionarla con naturalidad si corresponde.`, image: img };
+  }
+
+  // buscar_agencias_por_zona (default: es la unica otra herramienta disponible)
+  const estado = String(args.estado || '').trim();
+  const ciudad = String(args.ciudad || '').trim();
+  const { scope, results } = searchAgenciesByZone(estado, ciudad);
+  return { content: formatAgencyToolResult(estado, ciudad, scope, results), image: null };
+}
+
+// Devuelve { text, images }: el texto que hay que mandar por WhatsApp, y la
+// lista de imagenes (de la biblioteca) que el modelo decidio mandar durante
+// la charla via la herramienta mostrar_foto. Quien llama a esta funcion
+// (flow.js o simulator.js) es quien manda esas imagenes de verdad: este
+// archivo solo decide el contenido, nunca habla directo con WhatsApp.
 async function getAssistantReply(history, userText) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
@@ -192,32 +324,29 @@ async function getAssistantReply(history, userText) {
     model,
     temperature,
     messages,
-    tools: AGENCY_TOOLS,
+    tools: TOOLS,
   });
 
   const responseMessage = completion.choices[0].message;
   const toolCalls = responseMessage.tool_calls;
 
   if (!toolCalls || !toolCalls.length) {
-    return responseMessage.content.trim();
+    return { text: responseMessage.content.trim(), images: [] };
   }
 
-  // El modelo decidio buscar agencias: ejecutamos la busqueda real (deterministica,
-  // contra el CSV) por cada llamada y le devolvemos el resultado como mensajes 'tool'.
+  // El modelo decidio usar una o mas herramientas: las ejecutamos de verdad
+  // (busqueda contra el CSV, o resolver el nombre de una imagen) y le
+  // devolvemos el resultado como mensajes 'tool' para que arme la respuesta
+  // final con esa info real.
   messages.push(responseMessage);
+  const images = [];
   for (const call of toolCalls) {
-    let zona = '';
-    try {
-      const args = JSON.parse(call.function.arguments || '{}');
-      zona = String(args.zona || '').trim();
-    } catch (err) {
-      zona = '';
-    }
-    const results = zona ? agencies.searchByText(zona, 3) : [];
+    const result = runTool(call);
+    if (result.image) images.push(result.image);
     messages.push({
       role: 'tool',
       tool_call_id: call.id,
-      content: formatAgencyToolResult(zona, results),
+      content: result.content,
     });
   }
 
@@ -225,10 +354,10 @@ async function getAssistantReply(history, userText) {
     model,
     temperature,
     messages,
-    tools: AGENCY_TOOLS,
+    tools: TOOLS,
   });
 
-  return followUp.choices[0].message.content.trim();
+  return { text: followUp.choices[0].message.content.trim(), images };
 }
 
 module.exports = { getAssistantReply, splitReply, enforceMessageLimits, buildSystemPrompt, catalogText };

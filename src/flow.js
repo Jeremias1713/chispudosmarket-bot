@@ -103,26 +103,61 @@ async function sendReply(to, text) {
   return parts;
 }
 
-// Manda un mensaje con foto si hay una imagen de biblioteca valida y URL
-// publica disponible; si no, cae a texto solo. Uso compartido por el saludo
-// inicial y por el mensaje inicial de un producto (ambos con la misma logica
-// de "intentar mandar la foto, si falla seguir solo con texto").
-async function sendTextOrImage(to, text, imageId) {
-  if (imageId) {
-    const img = getImage(imageId);
-    const url = img && mediaUrl(img.filename);
-    if (url) {
-      try {
-        await sendImageByLink(to, url, text);
-        appendMessage(to, 'assistant', `[imagen] ${text}`);
-        await maybeSendAudio(to, text);
-        return;
-      } catch (err) {
-        console.error('No se pudo mandar la foto, sigo solo con texto:', err.message);
-      }
+// Manda un mensaje con una o varias fotos (de la biblioteca) mas el texto
+// como caption de la ultima, si hay imagenes validas con URL publica; si no
+// hay ninguna, o todas fallan, cae a texto solo (nunca se pierde el
+// mensaje). Uso compartido por el saludo inicial y por el mensaje inicial de
+// un producto.
+async function sendTextOrImage(to, text, imageIds) {
+  const ids = Array.isArray(imageIds) ? imageIds.filter(Boolean) : imageIds ? [imageIds] : [];
+  const resolved = ids
+    .map((id) => getImage(id))
+    .filter(Boolean)
+    .map((img) => ({ img, url: mediaUrl(img.filename) }))
+    .filter((x) => x.url);
+
+  if (!resolved.length) {
+    await sendReply(to, text);
+    return;
+  }
+
+  let captionSent = false;
+  for (let i = 0; i < resolved.length; i++) {
+    const isLast = i === resolved.length - 1;
+    const caption = isLast ? text : undefined;
+    try {
+      await sendImageByLink(to, resolved[i].url, caption);
+      appendMessage(to, 'assistant', caption ? `[imagen] ${caption}` : '[imagen]');
+      if (isLast) captionSent = true;
+    } catch (err) {
+      console.error('No se pudo mandar una foto, sigo con las demas:', err.message);
     }
   }
-  await sendReply(to, text);
+
+  if (captionSent) {
+    await maybeSendAudio(to, text);
+  } else {
+    // Ninguna foto salio con el texto como caption (fallaron todas, o
+    // fallo justo la ultima): igual mandamos el texto solo, para no
+    // perder el mensaje.
+    await sendReply(to, text);
+  }
+}
+
+// Manda, sin caption, las fotos que la IA decidio mostrar durante la charla
+// (herramienta mostrar_foto en ai.js). Se llama antes de mandar la
+// respuesta de texto normal.
+async function sendConversationImages(to, images) {
+  for (const img of images || []) {
+    const url = mediaUrl(img.filename);
+    if (!url) continue;
+    try {
+      await sendImageByLink(to, url);
+      appendMessage(to, 'assistant', `[imagen] ${img.name}`);
+    } catch (err) {
+      console.error('No se pudo mandar una foto durante la charla:', err.message);
+    }
+  }
 }
 
 async function sendGreeting(to) {
@@ -130,7 +165,7 @@ async function sendGreeting(to) {
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const text = (settings.welcomeMessage && settings.welcomeMessage.trim())
     || `Hola! Bienvenido a ${businessName}. Contame, en que te puedo ayudar hoy?`;
-  await sendTextOrImage(to, text, settings.welcomeImageId);
+  await sendTextOrImage(to, text, settings.welcomeImageIds);
 }
 
 // Contexto del ultimo mensaje de cada conversacion en lo que va de la espera
@@ -245,7 +280,7 @@ async function processReply(from) {
     if (product && product.intro && product.intro.trim()) {
       updateSession(from, { linkedProductId: product.id });
       const intro = product.intro.trim();
-      await sendTextOrImage(from, intro, product.introImageId);
+      await sendTextOrImage(from, intro, product.introImageIds);
       return;
     }
   }
@@ -258,8 +293,9 @@ async function processReply(from) {
     const fullHistory = [...(getSession(from).history || [])].map((m) => ({ role: m.role, content: m.content }));
     const history = fullHistory.slice(0, -1);
     const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
-    const reply = await getAssistantReply(history, userText);
+    const { text: reply, images } = await getAssistantReply(history, userText);
 
+    if (images.length) await sendConversationImages(from, images);
     await sendReply(from, reply);
     updateSession(from, { lastAssistantText: reply });
 

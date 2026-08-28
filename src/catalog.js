@@ -10,11 +10,19 @@ const crypto = require('crypto');
 const CATALOG_PATH = path.join(__dirname, '..', 'data', 'products.json');
 
 function loadProducts() {
+  let products;
   try {
-    return JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
+    products = JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
   } catch (err) {
     return [];
   }
+  // Normaliza introImageIds al leer (no solo al guardar): cubre productos
+  // guardados antes de soportar varias fotos, que todavia tienen el campo
+  // viejo introImageId (una sola imagen) en vez del array nuevo.
+  return products.map((p) => ({
+    ...p,
+    introImageIds: normalizeImageIds(p.introImageIds && p.introImageIds.length ? p.introImageIds : p.introImageId),
+  }));
 }
 
 function saveProducts(products) {
@@ -38,9 +46,10 @@ function blankProduct() {
     // Si hay mensaje inicial, sale TAL CUAL (sin pasar por la IA) apenas se
     // detecta un trigger.
     intro: '',
-    // id de una imagen de la biblioteca (ver library.js) para mandar junto
-    // con el mensaje inicial.
-    introImageId: null,
+    // ids de imagenes de la biblioteca (ver library.js) para mandar junto
+    // con el mensaje inicial. Puede ser mas de una: se mandan todas, una
+    // detras de otra, y el texto va como caption de la ultima.
+    introImageIds: [],
     // Oferta que la IA puede ofrecer una sola vez, justo cuando el cliente
     // ya dijo que si a este producto.
     upsell: '',
@@ -63,6 +72,15 @@ function normalizeTriggers(value) {
     .split(',')
     .map((t) => t.trim())
     .filter(Boolean);
+}
+
+// Igual que normalizeTriggers pero para los ids de imagenes: siempre
+// devuelve un array de ids limpios (sin vacios ni duplicados), venga como
+// venga (array, id suelto, o string separado por comas).
+function normalizeImageIds(value) {
+  const arr = Array.isArray(value) ? value : String(value || '').split(',');
+  const clean = arr.map((v) => String(v || '').trim()).filter(Boolean);
+  return [...new Set(clean)];
 }
 
 function findProduct(idOrName) {
@@ -130,6 +148,7 @@ function createProduct(data) {
   const products = loadProducts();
   const product = { ...blankProduct(), ...data, id: blankProduct().id };
   product.triggers = normalizeTriggers(product.triggers);
+  product.introImageIds = normalizeImageIds(product.introImageIds);
   products.push(product);
   saveProducts(products);
   return product;
@@ -141,6 +160,7 @@ function updateProduct(id, patch) {
   if (i === -1) return null;
   const merged = { ...products[i], ...patch, id };
   if (patch.triggers !== undefined) merged.triggers = normalizeTriggers(patch.triggers);
+  if (patch.introImageIds !== undefined) merged.introImageIds = normalizeImageIds(patch.introImageIds);
   products[i] = merged;
   saveProducts(products);
   return products[i];
