@@ -27,6 +27,7 @@ const broadcasts = require('../broadcasts');
 const simulator = require('../simulator');
 const coupons = require('../coupons');
 const { mediaUrl } = require('../flow');
+const push = require('../push');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -159,8 +160,39 @@ router.post('/api/conversations/:phone/stage', (req, res) => {
   const stage = String(req.body?.stage ?? '');
   if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Etapa desconocida' });
 
-  setStage(phone, stage, 'Fijada desde el panel');
+  const before = getSession(phone);
+  const updated = setStage(phone, stage, 'Fijada desde el panel');
+  if (stage === 'vendido' && before.stage !== 'vendido') push.notifySale(phone, updated);
   res.json({ ok: true, locked: true, stage });
+});
+
+/* ---------- notificaciones push (venta nueva, tipo Shopify) ---------- */
+
+router.get('/api/push/public-key', (_req, res) => {
+  res.json({ publicKey: push.getPublicKey() });
+});
+
+router.post('/api/push/subscribe', (req, res) => {
+  const subscription = req.body?.subscription;
+  if (!subscription?.endpoint) return res.status(400).json({ error: 'Suscripción inválida' });
+  push.addSubscription(subscription);
+  res.json({ ok: true });
+});
+
+router.post('/api/push/unsubscribe', (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (endpoint) push.removeSubscription(endpoint);
+  res.json({ ok: true });
+});
+
+router.post('/api/push/test', async (_req, res) => {
+  const result = await push.sendToAll({
+    title: '🔔 Notificación de prueba',
+    body: 'Si ves esto, las notificaciones de venta van a funcionar.',
+    tag: 'prueba',
+    url: '/panel/',
+  });
+  res.json({ ok: true, ...result });
 });
 
 // Marca que se le mando la guia de envio (seguimiento) a esta conversacion.
