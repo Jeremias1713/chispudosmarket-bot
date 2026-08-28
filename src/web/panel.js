@@ -240,6 +240,10 @@ router.post('/api/settings', (req, res) => {
   if (body.openaiTemperature != null) patch.openaiTemperature = Number(body.openaiTemperature);
   if (body.openaiHistoryN != null) patch.openaiHistoryN = Number(body.openaiHistoryN);
   if (body.botEnabled != null) patch.botEnabled = Boolean(body.botEnabled);
+  if (body.replyDelayMs != null) patch.replyDelayMs = Number(body.replyDelayMs);
+  if (body.maxWordsPerMessage != null) patch.maxWordsPerMessage = Number(body.maxWordsPerMessage);
+  if (body.maxMessageParts != null) patch.maxMessageParts = Number(body.maxMessageParts);
+  if (body.audioReplyEnabled != null) patch.audioReplyEnabled = Boolean(body.audioReplyEnabled);
   res.json(settingsStore.updateSettings(patch));
 });
 
