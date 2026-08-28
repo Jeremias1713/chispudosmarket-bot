@@ -100,6 +100,13 @@ function unlockStage(phone) {
   return updateSession(phone, { stageLocked: false, stageReason: null });
 }
 
+// Marca que se le mando la guia de envio (o se hizo el seguimiento) a esta
+// conversacion, con la hora actual. Solo guarda la marca de tiempo; el panel
+// la usa para mostrar "hace cuanto" y para el listado de seguimiento.
+function markFollowUp(phone) {
+  return updateSession(phone, { lastFollowUpAt: new Date().toISOString() });
+}
+
 // Devuelve todas las conversaciones, cada una con su numero de telefono
 // incluido. Usado por el panel web para listar chats.
 function listSessions() {
@@ -115,5 +122,6 @@ module.exports = {
   setPaused,
   setStage,
   unlockStage,
+  markFollowUp,
   listSessions,
 };

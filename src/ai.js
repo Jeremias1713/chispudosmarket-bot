@@ -5,6 +5,7 @@ const { loadProducts } = require('./catalog');
 const { getSettings } = require('./settings');
 const agencies = require('./agencies');
 const library = require('./library');
+const { listCoupons } = require('./coupons');
 
 let _client = null;
 function client() {
@@ -50,6 +51,21 @@ function libraryImagesText() {
   }
   if (!images.length) return '';
   return images.map((img) => `- ${img.name}`).join('\n');
+}
+
+// Lista los cupones activos (panel > Cupones) para que el modelo los pueda
+// mencionar o aplicar naturalmente cuando corresponda, nunca inventar otros.
+function couponsText() {
+  let list = [];
+  try {
+    list = listCoupons().filter((c) => c.active !== false);
+  } catch (err) {
+    list = [];
+  }
+  if (!list.length) return '';
+  return list
+    .map((c) => `- ${c.code}: ${c.discountPercent}% de descuento. ${c.description || ''}`.trim())
+    .join('\n');
 }
 
 // Instrucciones de partido de mensajes que van al prompt cuando esta
@@ -148,7 +164,10 @@ ${splitEnabled
 
   CATALOGO ACTUAL (unica fuente de precios y productos, no inventes otros):
   ${catalogText()}
-${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vigentes):\n  ${knowledge}\n` : ''}
+${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vigentes):\n  ${knowledge}\n` : ''}${couponsText() ? `
+  CUPONES DE DESCUENTO VIGENTES (unicos validos, no inventes otros):
+${couponsText()}
+` : ''}
   AGENCIAS Y COBERTURA:
   - Si el cliente comparte su ubicacion GPS, el sistema ya se encarga de mostrarle las agencias mas cercanas automaticamente: vos no necesitas hacer nada en ese caso.
   - Cuando el cliente nombra una ciudad, estado o zona por CUALQUIER motivo relacionado a donde le llega el pedido, usa la herramienta buscar_agencias_por_zona. Esto incluye tanto cuando pregunta explicitamente por cobertura (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira", "estoy en ciudad bolivar") COMO cuando te esta diciendo esa ciudad como parte de cerrar el pedido, aunque no te lo pregunte (ej. "en que ciudad esta" del paso 2 del pedido, o "me lo envias a cd bolivar", "mandalo a valencia", "vivo en la ciudad de merida"). En estos casos SIEMPRE llama a la herramienta antes de contestar: nunca digas frases como "necesito saber si hay una agencia ahi" sin haber llamado ya a la herramienta, la respuesta tiene que traer el resultado real, no una intencion de averiguarlo despues. Pasale SIEMPRE el estado de Venezuela (deducilo vos con tu conocimiento de la geografia del pais si el cliente solo nombro una ciudad), y ademas la ciudad puntual si el cliente dijo algo mas especifico que el estado. Si el cliente usa una abreviatura o forma corta (ej. "cd bolivar" = Ciudad Bolivar), reconocela igual. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
