@@ -123,24 +123,27 @@ ${splitEnabled
   2. No le preguntes algo que ya te contesto. Mira la conversacion antes de preguntar.
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
 
-  ENTREGA: por ahora SOLO se retira en agencia (TEALCA). NO hay entrega a domicilio en ninguna ciudad, ni siquiera en Caracas o Maracaibo. Si el cliente pide que se lo lleven a su casa, decile con naturalidad que por el momento solo se retira en agencia, no ofrezcas ni prometas domicilio bajo ningun motivo, y segui ayudandolo a elegir la agencia mas cercana.
+  ENTREGA: depende de la ciudad.
+  - CARACAS (Distrito Capital, incluye todos sus municipios/parroquias): hay dos formas de recibirlo, domicilio (te lo llevan hasta la puerta) o retiro en agencia. Ofrecele PRIMERO la opcion de domicilio, es la mas comoda para el cliente, y si prefiere retirar en agencia esa tambien esta disponible.
+  - RESTO DE VENEZUELA (todos los demas estados, Maracaibo incluida): SOLO se retira en agencia (TEALCA), no hay entrega a domicilio ahi. Si un cliente fuera de Caracas pide que se lo lleven a la casa, decile con naturalidad que fuera de Caracas por ahora solo se retira en agencia, no ofrezcas ni prometas domicilio en esos casos, y segui ayudandolo a elegir la agencia mas cercana.
 
   COMO SE ARMA EL PEDIDO:
   Antes que nada, fijate si el cliente ya mostro interes real en comprar (pregunto por un producto, dijo que lo quiere, o vos ya se lo presentaste y sigue la charla). Si todavia no, no le pidas ciudad ni datos del pedido, primero entendes que necesita o le presentas el catalogo.
   Cuando ya hay interes real, necesitas estos datos, en este orden, de a uno por vez:
   1. Que producto quiere y cuantos.
-  2. En que ciudad esta (para buscarle la agencia mas cercana con buscar_agencias_por_zona).
-  3. Cual de las agencias que le mostraste le queda bien (ver AGENCIAS Y COBERTURA para como resolver esto).
+  2. En que ciudad esta.
+  3. Segun la ciudad (ver ENTREGA arriba):
+     - Si es Caracas: preguntale si prefiere domicilio o agencia (ofrecele domicilio primero). Si elige domicilio, pedile la direccion exacta con un punto de referencia. Si elige agencia, buscale las agencias con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA).
+     - Si es cualquier otra ciudad: buscale la agencia mas cercana con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA). NUNCA pidas direccion exacta ni punto de referencia fuera de Caracas: no hace falta, todo se retira en agencia.
   4. Nombre y apellido.
   5. Telefono de contacto.
   6. Numero de cedula.
-  NUNCA pidas direccion exacta ni punto de referencia: no hace falta, todo se retira en agencia.
   Si te dice una cantidad sin precio confirmado, nunca inventes ni calcules el precio total: segui tomando los datos y decile que confirmas el precio exacto en un momento.
   Si no sabes un precio, un plazo de envio o un dato del producto, decilo asi de simple: que lo confirmas en un momento. Nunca lo inventes.
   Si el cliente pide hablar con una persona, se queja o reclama algo serio, decile que ya lo pasas con un asesor humano y no sigas insistiendo con el guion de venta.
 
   CIERRE DEL PEDIDO:
-  Cuando ya tenes todos los datos (producto y cantidad, agencia elegida, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir: un resumen de lo que pidio (incluyendo en que agencia va a retirar), y que un asesor se va a poner en contacto para coordinar el pago y el retiro. No prometas que "ya esta listo para retirar": todavia falta que un asesor lo confirme.
+  Cuando ya tenes todos los datos (producto y cantidad, como lo va a recibir -agencia elegida, o direccion con punto de referencia si es domicilio en Caracas-, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir: un resumen de lo que pidio (incluyendo la agencia donde va a retirar, o la direccion si es domicilio), y que un asesor se va a poner en contacto para coordinar el pago y la entrega/retiro. No prometas que "ya esta listo para retirar/entregar": todavia falta que un asesor lo confirme.
   Termina ese mensaje de cierre ahi. NO le agregues una pregunta como "¿algo mas en lo que te pueda ayudar?" ni ninguna otra: eso contradice la REGLA DE ORO (ya esta todo cerrado, no hace falta inventar una pregunta de relleno).
 
   CATALOGO ACTUAL (unica fuente de precios y productos, no inventes otros):
@@ -151,7 +154,8 @@ ${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vi
   - Cuando el cliente nombra una ciudad, estado o zona por CUALQUIER motivo relacionado a donde le llega el pedido, usa la herramienta buscar_agencias_por_zona. Esto incluye tanto cuando pregunta explicitamente por cobertura (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira", "estoy en ciudad bolivar") COMO cuando te esta diciendo esa ciudad como parte de cerrar el pedido, aunque no te lo pregunte (ej. "en que ciudad esta" del paso 2 del pedido, o "me lo envias a cd bolivar", "mandalo a valencia", "vivo en la ciudad de merida"). En estos casos SIEMPRE llama a la herramienta antes de contestar: nunca digas frases como "necesito saber si hay una agencia ahi" sin haber llamado ya a la herramienta, la respuesta tiene que traer el resultado real, no una intencion de averiguarlo despues. Pasale SIEMPRE el estado de Venezuela (deducilo vos con tu conocimiento de la geografia del pais si el cliente solo nombro una ciudad), y ademas la ciudad puntual si el cliente dijo algo mas especifico que el estado. Si el cliente usa una abreviatura o forma corta (ej. "cd bolivar" = Ciudad Bolivar), reconocela igual. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
   - IMPORTANTE: si lo que dijo el cliente NO es un lugar real de Venezuela que reconozcas con confianza (una descripcion vaga como "un caserio alejado", "el campo", "bien lejos de todo", o cualquier cosa que no puedas ubicar en un estado concreto), NO llames a la herramienta y NO inventes ni adivines un estado al azar. En vez de eso, pedile al cliente que te confirme el nombre de su ciudad o estado para poder buscar la cobertura real.
   - NUNCA uses esa herramienta para numeros sueltos que sean cantidad de producto, telefono, respuestas de si/no, ni ningun otro dato del pedido que no sea explicitamente el nombre de un lugar. Un mensaje como "4" respondiendo cuantas unidades quiere NO es una zona.
-  - Si la herramienta encuentra agencias en la ciudad puntual, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion. Esta lista, sin importar cuantas agencias tenga, va SIEMPRE junta en un solo mensaje de WhatsApp (es un caso de "QUE NUNCA SE PARTE"): no dejes ningun renglon en blanco entre una agencia y la siguiente, usa un solo salto de linea, para que no se corte en varios mensajes.
+  - Si la herramienta encuentra agencias en la ciudad puntual, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion, con TODAS las agencias que encontro la herramienta en esa ciudad (nunca le muestres solo algunas si hay mas disponibles: si pregunta por las agencias, la lista tiene que ser la completa). Esta lista, sin importar cuantas agencias tenga, va SIEMPRE junta en un solo mensaje de WhatsApp (es un caso de "QUE NUNCA SE PARTE"): no dejes ningun renglon en blanco entre una agencia y la siguiente, usa un solo salto de linea, para que no se corte en varios mensajes.
+  - Si el cliente todavia no te dijo una ciudad puntual, solo un estado (o una zona muy amplia), buscale por estado directamente: no le muestres una lista de una ciudad que vos elegiste por tu cuenta, dejá que la herramienta busque por el estado completo.
   - Si la herramienta te avisa que en esa ciudad puntual no hay agencia pero si hay cobertura en el estado, decile al cliente claramente que a esa ciudad no llega de forma directa, pero que en el estado si hay agencias, y mostraselas numeradas igual (misma regla: todas juntas en un solo mensaje).
   - Si la herramienta no encuentra nada ni en la ciudad ni en el estado, decile que por ahora no hay cobertura confirmada ahi, sin inventar una direccion.
   - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.
@@ -223,8 +227,52 @@ function applySplitPolicy(text, settings) {
     parts = [parts.join(' ')];
   } else {
     parts = mergeShortParts(parts, minWords);
+    // Red de seguridad ademas de las instrucciones del prompt: el cliente
+    // pidio que la lista de agencias SIEMPRE vaya en un solo mensaje de
+    // WhatsApp. El modelo no siempre respeta al 100% "no dejes renglones en
+    // blanco", asi que si igual llegan a quedar varias partes que son items
+    // de una lista numerada (1., 2., 3., ...), las volvemos a pegar aca.
+    parts = mergeAgencyListParts(parts);
   }
   return enforceMessageLimits(parts, maxWordsHardCap, maxParts);
+}
+
+// Une en un solo mensaje cualquier corrida de partes consecutivas que
+// empiecen con un item de lista numerada (1. , 2. , 3. , ...): es la forma
+// en la que se presentan las agencias (ver formatAgencyList). Si el modelo
+// termino separando "1. Agencia A" y "2. Agencia B" en mensajes distintos
+// (por un ||| de mas o un renglon en blanco), esto los vuelve a juntar.
+function looksLikeListItemStart(text) {
+  return /^\s*\d+[.)]\s/.test(String(text || ''));
+}
+function mergeAgencyListParts(parts) {
+  const merged = [];
+  let i = 0;
+  while (i < parts.length) {
+    if (looksLikeListItemStart(parts[i])) {
+      const block = [parts[i]];
+      let j = i + 1;
+      while (j < parts.length && looksLikeListItemStart(parts[j])) {
+        block.push(parts[j]);
+        j++;
+      }
+      merged.push(block.join('\n'));
+      i = j;
+    } else {
+      merged.push(parts[i]);
+      i++;
+    }
+  }
+  return merged;
+}
+
+// Un bloque de texto "es" una lista de agencias si tiene al menos dos items
+// numerados seguidos (1. ... y 2. ...). A estos bloques no les aplicamos el
+// tope de palabras por mensaje (chunkByWords): cortarlos a la mitad rompe la
+// regla de "siempre en un solo mensaje", y en la practica nunca son tantas
+// agencias como para que el mensaje sea un problema real de WhatsApp.
+function isAgencyListBlock(text) {
+  return /(^|\n)\s*1[.)]\s[\s\S]*(^|\n)\s*2[.)]\s/m.test(String(text || ''));
 }
 
 // Corta un texto en pedazos de como mucho maxWords palabras cada uno. Si ya
@@ -246,6 +294,12 @@ function chunkByWords(text, maxWords) {
 function enforceMessageLimits(parts, maxWords, maxParts) {
   let chunks = [];
   for (const part of parts) {
+    if (isAgencyListBlock(part)) {
+      // Nunca cortamos una lista de agencias a la mitad por el tope de
+      // palabras: tiene que llegar siempre entera en un solo mensaje.
+      chunks.push(part);
+      continue;
+    }
     chunks.push(...chunkByWords(part, maxWords));
   }
   if (maxParts && chunks.length > maxParts) {
@@ -310,12 +364,17 @@ const TOOLS = [
 // encuentra nada ahi, cae al estado completo. Devuelve de donde salieron los
 // resultados (scope) para que el mensaje al cliente sea preciso: no es lo
 // mismo "esta es tu agencia" que "a tu ciudad no llega pero al estado si".
+// OJO: antes esto cortaba en 3 agencias por ciudad. El cliente pidio
+// explicitamente que, cuando pregunten por las agencias, se les pase la
+// lista COMPLETA de la ciudad (no solo algunas), asi que el limite ahora es
+// alto a proposito (no hay tantas agencias por ciudad como para que esto
+// sea un problema de tamano de mensaje real).
 function searchAgenciesByZone(estado, ciudad) {
-  const cityResults = ciudad ? agencies.searchByText(ciudad, 3) : [];
+  const cityResults = ciudad ? agencies.searchByText(ciudad, 50) : [];
   if (cityResults.length) {
     return { scope: 'ciudad', results: cityResults };
   }
-  const stateResults = estado ? agencies.searchByText(estado, 5) : [];
+  const stateResults = estado ? agencies.searchByText(estado, 50) : [];
   if (stateResults.length) {
     return { scope: 'estado', results: stateResults };
   }
