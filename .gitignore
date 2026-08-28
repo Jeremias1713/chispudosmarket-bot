@@ -6,6 +6,8 @@ data/settings.json
 data/library.json
 data/broadcasts.json
 data/coupons.json
+data/push-vapid.json
+data/push-subscriptions.json
 data/media/*
 !data/media/.gitkeep
 npm-debug.log*
