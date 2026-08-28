@@ -414,6 +414,26 @@ function runTool(call) {
 // la charla via la herramienta mostrar_foto. Quien llama a esta funcion
 // (flow.js o simulator.js) es quien manda esas imagenes de verdad: este
 // archivo solo decide el contenido, nunca habla directo con WhatsApp.
+// Red de seguridad ademas de la instruccion en el prompt: el modelo NO
+// siempre respeta al 100% una instruccion de "nunca uses esta palabra"
+// (es una regla probabilistica, no un filtro), y el cliente pidio
+// explicitamente que la palabra "genial" quede prohibida siempre. Esto
+// la reemplaza de forma determinista por si se cuela igual.
+const GENIAL_REPLACEMENTS = ['que bueno', 'perfecto', 'buenisimo', 'dale', 'listo'];
+let _genialCounter = 0;
+function scrubGenial(text) {
+  if (!text) return text;
+  return text.replace(/\b(que\s+)?genial\b!?/gi, (match) => {
+    const repl = GENIAL_REPLACEMENTS[_genialCounter % GENIAL_REPLACEMENTS.length];
+    _genialCounter++;
+    // Si el original empezaba con mayuscula (inicio de frase), respetamos eso.
+    if (match[0] === match[0].toUpperCase() && match[0] !== match[0].toLowerCase()) {
+      return repl.charAt(0).toUpperCase() + repl.slice(1);
+    }
+    return repl;
+  });
+}
+
 async function getAssistantReply(history, userText) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
@@ -437,7 +457,7 @@ async function getAssistantReply(history, userText) {
   const toolCalls = responseMessage.tool_calls;
 
   if (!toolCalls || !toolCalls.length) {
-    return { text: responseMessage.content.trim(), images: [] };
+    return { text: scrubGenial(responseMessage.content.trim()), images: [] };
   }
 
   // El modelo decidio usar una o mas herramientas: las ejecutamos de verdad
@@ -463,7 +483,7 @@ async function getAssistantReply(history, userText) {
     tools: TOOLS,
   });
 
-  return { text: followUp.choices[0].message.content.trim(), images };
+  return { text: scrubGenial(followUp.choices[0].message.content.trim()), images };
 }
 
 module.exports = { getAssistantReply, splitReply, enforceMessageLimits, applySplitPolicy, buildSystemPrompt, catalogText };
