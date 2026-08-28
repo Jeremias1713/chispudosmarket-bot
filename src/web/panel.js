@@ -10,6 +10,7 @@ const axios = require('axios');
 const {
   listSessions,
   getSession,
+  updateSession,
   appendMessage,
   setPaused,
   setStage,
@@ -191,6 +192,17 @@ router.get('/api/metrics', (_req, res) => {
   const vendidos = byStage.vendido || 0;
   const conversionRate = total > 0 ? (vendidos / total) * 100 : null;
 
+  // Ingresos: suma del monto cargado a mano (panel > conversacion > "Monto
+  // vendido") en las conversaciones que estan en la etapa 'vendido'. No
+  // convierte monedas, asume que todos los montos cargados usan la misma.
+  let revenue = 0;
+  for (const s of sessions) {
+    if (s.stage === 'vendido' && s.card?.monto != null) {
+      const monto = Number(s.card.monto);
+      if (!Number.isNaN(monto)) revenue += monto;
+    }
+  }
+
   const today = new Date().toDateString();
   let messagesToday = 0;
   for (const s of sessions) {
@@ -238,7 +250,22 @@ router.get('/api/metrics', (_req, res) => {
       return (b.hoursSinceLastMessage || 0) - (a.hoursSinceLastMessage || 0);
     });
 
-  res.json({ byStage, total, conversionRate, messagesToday, topLocations, staleAttention });
+  res.json({ byStage, total, conversionRate, messagesToday, topLocations, staleAttention, revenue });
+});
+
+// Guarda el monto vendido de una conversacion (cargado a mano desde el
+// panel). Vive dentro de card para reusar el mismo objeto que ya guarda
+// nombre/ciudad/telefono/producto/notas.
+router.post('/api/conversations/:phone/amount', (req, res) => {
+  const phone = req.params.phone;
+  const raw = req.body?.monto;
+  const monto = raw === '' || raw == null ? null : Number(raw);
+  if (monto != null && Number.isNaN(monto)) return res.status(400).json({ error: 'Monto invalido' });
+
+  const s = getSession(phone);
+  const card = { ...(s.card || {}), monto };
+  const updated = updateSession(phone, { card });
+  res.json({ ok: true, card: updated.card });
 });
 
 /* ---------- catalogo ---------- */
@@ -470,6 +497,24 @@ router.post('/api/simulator/location', async (req, res) => {
   if (lat == null || lng == null) return res.status(400).json({ error: 'Faltan lat/lng' });
   const result = await simulator.sendLocation(Number(lat), Number(lng));
   res.json(result);
+});
+
+/* ---------- copia de seguridad ---------- */
+
+// Junta lo que no esta en el codigo (y por lo tanto se puede perder si el
+// servicio se reinicia sin disco persistente): conversaciones, catalogo,
+// cupones y configuracion. Se descarga como un solo JSON desde el panel.
+router.get('/api/backup', (_req, res) => {
+  const backup = {
+    generatedAt: new Date().toISOString(),
+    sessions: listSessions(),
+    products: catalog.listProducts(),
+    coupons: coupons.listCoupons(),
+    settings: settingsStore.getSettings(),
+  };
+  const filename = `chispudos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.json(backup);
 });
 
 module.exports = router;
