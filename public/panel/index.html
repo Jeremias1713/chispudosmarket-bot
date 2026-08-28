@@ -144,10 +144,19 @@
       <section class="view" id="view-pipeline">
         <div class="run-filters" id="pipelineFilters">
           <button class="filter-chip is-on" type="button" data-window="">Todas</button>
+          <button class="filter-chip" type="button" data-window="hoy">Hoy</button>
           <button class="filter-chip" type="button" data-window="24h">Últimas 24h</button>
           <button class="filter-chip" type="button" data-window="3d">Últimos 3 días</button>
           <button class="filter-chip" type="button" data-window="7d">Última semana</button>
           <button class="filter-chip" type="button" data-window="stale">Sin novedad hace +7 días</button>
+        </div>
+        <div class="pipeline-range" id="pipelineRange">
+          <label for="pipelineFrom">Desde</label>
+          <input type="date" id="pipelineFrom">
+          <label for="pipelineTo">Hasta</label>
+          <input type="date" id="pipelineTo">
+          <button class="btn" id="pipelineApplyRange" type="button">Aplicar rango</button>
+          <button class="btn" id="pipelineClearRange" type="button" hidden>Quitar filtro</button>
         </div>
         <div class="board" id="board"></div>
       </section>

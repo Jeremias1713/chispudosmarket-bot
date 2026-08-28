@@ -11,6 +11,8 @@ const state = {
   activeView: 'view-convos',
   stages: [],
   pipelineWindow: '',
+  pipelineFrom: '',
+  pipelineTo: '',
   chatPhone: null,
 }
 
@@ -398,17 +400,76 @@ const PIPELINE_WINDOWS = {
 }
 
 function filtrarPorTiempo(list, ventana) {
+  if (ventana === 'custom') {
+    return filtrarPorRango(list, state.pipelineFrom, state.pipelineTo)
+  }
+  if (ventana === 'hoy') {
+    const hoy = new Date().toDateString()
+    return list.filter((c) => {
+      const t = c.lastMessageAt ?? c.createdAt
+      return t && new Date(t).toDateString() === hoy
+    })
+  }
   const filtro = PIPELINE_WINDOWS[ventana]
   if (!filtro) return list
   const ahora = Date.now()
   return list.filter((c) => filtro(ahora - new Date(c.lastMessageAt ?? c.createdAt ?? ahora).getTime()))
 }
 
+// Rango manual (Desde/Hasta), inclusive en ambas puntas. Si falta uno de los
+// dos, el rango queda abierto de ese lado (ej. solo "Desde" = desde esa fecha
+// hasta hoy).
+function filtrarPorRango(list, from, to) {
+  if (!from && !to) return list
+  const fromTs = from ? new Date(from + 'T00:00:00').getTime() : -Infinity
+  const toTs = to ? new Date(to + 'T23:59:59').getTime() : Infinity
+  return list.filter((c) => {
+    const t = c.lastMessageAt ?? c.createdAt
+    if (!t) return false
+    const ts = new Date(t).getTime()
+    return ts >= fromTs && ts <= toTs
+  })
+}
+
+function clearPipelineChips() {
+  $('pipelineFilters').querySelectorAll('.filter-chip').forEach((c) => c.classList.remove('is-on'))
+}
+
 $('pipelineFilters').addEventListener('click', (e) => {
   const chip = e.target.closest('.filter-chip')
   if (!chip) return
   state.pipelineWindow = chip.dataset.window
-  $('pipelineFilters').querySelectorAll('.filter-chip').forEach((c) => c.classList.toggle('is-on', c === chip))
+  state.pipelineFrom = ''
+  state.pipelineTo = ''
+  $('pipelineFrom').value = ''
+  $('pipelineTo').value = ''
+  $('pipelineClearRange').hidden = true
+  clearPipelineChips()
+  chip.classList.add('is-on')
+  pollPipeline()
+})
+
+$('pipelineApplyRange').addEventListener('click', () => {
+  const from = $('pipelineFrom').value
+  const to = $('pipelineTo').value
+  if (!from && !to) return
+  state.pipelineWindow = 'custom'
+  state.pipelineFrom = from
+  state.pipelineTo = to
+  clearPipelineChips()
+  $('pipelineClearRange').hidden = false
+  pollPipeline()
+})
+
+$('pipelineClearRange').addEventListener('click', () => {
+  state.pipelineWindow = ''
+  state.pipelineFrom = ''
+  state.pipelineTo = ''
+  $('pipelineFrom').value = ''
+  $('pipelineTo').value = ''
+  $('pipelineClearRange').hidden = true
+  clearPipelineChips()
+  $('pipelineFilters').querySelector('.filter-chip[data-window=""]').classList.add('is-on')
   pollPipeline()
 })
 
