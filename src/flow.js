@@ -21,6 +21,7 @@ const { matchTrigger } = require('./catalog');
 const { getImage } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
+const push = require('./push');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -308,7 +309,8 @@ async function processReply(from) {
     if (!current.stageLocked) {
       const classification = await classifyConversation(current.history.map((m) => ({ role: m.role, content: m.content })));
       if (classification) {
-        updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
+        const updated = updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
+        if (classification.stage === 'vendido' && current.stage !== 'vendido') push.notifySale(from, updated);
       }
     }
   } catch (err) {
