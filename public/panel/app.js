@@ -816,6 +816,9 @@ const updateReplyDelayDisplay = bindRangeDisplay('cfg_replyDelay', 'cfg_replyDel
 const updateMaxWordsDisplay = bindRangeDisplay('cfg_maxWords', 'cfg_maxWords_val', ' palabras')
 const updateMaxWordsHardCapDisplay = bindRangeDisplay('cfg_maxWordsHardCap', 'cfg_maxWordsHardCap_val', ' palabras')
 const updateMaxPartsDisplay = bindRangeDisplay('cfg_maxParts', 'cfg_maxParts_val', ' mensajes')
+const updateSplitMinWordsDisplay = bindRangeDisplay('cfg_splitMinWords', 'cfg_splitMinWords_val', ' palabras')
+const updateSplitGapMinDisplay = bindRangeDisplay('cfg_splitGapMin', 'cfg_splitGapMin_val', ' s')
+const updateSplitGapMaxDisplay = bindRangeDisplay('cfg_splitGapMax', 'cfg_splitGapMax_val', ' s')
 
 async function loadSettings() {
   let s
@@ -831,6 +834,10 @@ async function loadSettings() {
   $('cfg_maxWords').value = s.maxWordsPerMessage ?? 30
   $('cfg_maxWordsHardCap').value = s.maxWordsHardCap ?? 90
   $('cfg_maxParts').value = s.maxMessageParts ?? 5
+  $('cfg_splitEnabled').checked = s.splitRepliesEnabled !== false
+  $('cfg_splitMinWords').value = s.splitMinWords ?? 3
+  $('cfg_splitGapMin').value = (s.splitGapMinMs ?? 6000) / 1000
+  $('cfg_splitGapMax').value = (s.splitGapMaxMs ?? 9500) / 1000
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
   try { libraryCache = await api('/library') } catch { /* si falla, el select queda solo con "Sin foto" */ }
   fillWelcomeImageSelect(s.welcomeImageIds)
@@ -840,6 +847,9 @@ async function loadSettings() {
   updateMaxWordsDisplay()
   updateMaxWordsHardCapDisplay()
   updateMaxPartsDisplay()
+  updateSplitMinWordsDisplay()
+  updateSplitGapMinDisplay()
+  updateSplitGapMaxDisplay()
   $('cfg_msg').textContent = ''
   loadAgenciesMeta()
 }
@@ -858,6 +868,10 @@ $('cfg_save').addEventListener('click', async () => {
     maxWordsPerMessage: Number($('cfg_maxWords').value),
     maxWordsHardCap: Number($('cfg_maxWordsHardCap').value),
     maxMessageParts: Number($('cfg_maxParts').value),
+    splitRepliesEnabled: $('cfg_splitEnabled').checked,
+    splitMinWords: Number($('cfg_splitMinWords').value),
+    splitGapMinMs: Math.round(Number($('cfg_splitGapMin').value) * 1000),
+    splitGapMaxMs: Math.round(Number($('cfg_splitGapMax').value) * 1000),
     audioReplyEnabled: $('cfg_audioEnabled').checked,
   }
   $('cfg_save').disabled = true

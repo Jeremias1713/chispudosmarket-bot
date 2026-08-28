@@ -501,6 +501,38 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
 
                 <div class="field field-master">
                   <label class="switch">
+                    <input type="checkbox" id="cfg_splitEnabled">
+                    <span>Partir respuestas largas en varios mensajes</span>
+                  </label>
+                  <div class="help">
+                    Si está apagado, el bot siempre contesta en un solo mensaje de WhatsApp,
+                    sin importar cuántas ideas tenga la respuesta.
+                  </div>
+                </div>
+
+                <div class="field-row">
+                  <div class="field">
+                    <label for="cfg_splitMinWords">Mínimo de palabras para partir <span class="range-value" id="cfg_splitMinWords_val"></span></label>
+                    <div class="help">Un fragmento más corto que esto se pega al de al lado, para no mandar un mensaje de una sola palabra.</div>
+                    <input type="range" id="cfg_splitMinWords" min="1" max="10" step="1">
+                  </div>
+                </div>
+
+                <div class="field-row">
+                  <div class="field">
+                    <label for="cfg_splitGapMin">Espera mínima entre mensajes <span class="range-value" id="cfg_splitGapMin_val"></span></label>
+                    <div class="help">Cuando la respuesta se manda partida, esto es lo mínimo que espera entre un mensaje y el siguiente.</div>
+                    <input type="range" id="cfg_splitGapMin" min="1" max="15" step="0.5">
+                  </div>
+                  <div class="field">
+                    <label for="cfg_splitGapMax">Espera máxima entre mensajes <span class="range-value" id="cfg_splitGapMax_val"></span></label>
+                    <div class="help">Y esto lo máximo. El bot elige un tiempo al azar entre los dos, como si estuviera escribiendo.</div>
+                    <input type="range" id="cfg_splitGapMax" min="1" max="20" step="0.5">
+                  </div>
+                </div>
+
+                <div class="field field-master">
+                  <label class="switch">
                     <input type="checkbox" id="cfg_audioEnabled">
                     <span>Responder también con una nota de voz</span>
                   </label>
