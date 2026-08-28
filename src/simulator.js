@@ -58,7 +58,15 @@ async function sendMessage(rawText) {
   for (const img of images) {
     push('assistant', `[imagen] ${img.name}`);
   }
-  push('assistant', reply);
+
+  // Partimos la respuesta igual que el bot real (mismo applySplitPolicy) y
+  // metemos cada parte como un mensaje separado en el historial, para que
+  // el simulador se vea EXACTAMENTE como se veria en WhatsApp: una burbuja
+  // por cada mensaje, no todo el texto pegado en una sola burbuja.
+  const parts = splitForPreview(reply);
+  for (const part of parts) {
+    push('assistant', part);
+  }
 
   const classification = await classifyConversation(state.history.map((m) => ({ role: m.role, content: m.content })));
   if (classification) {
@@ -66,7 +74,7 @@ async function sendMessage(rawText) {
     state.card = classification.card;
   }
 
-  return { parts: [...images.map((img) => `[imagen] ${img.name}`), ...splitForPreview(reply)], state };
+  return { parts: [...images.map((img) => `[imagen] ${img.name}`), ...parts], state };
 }
 
 async function sendLocation(latitude, longitude) {
