@@ -89,6 +89,7 @@ function toConvo(s) {
     lastMessageAt: last ? last.at : s.updatedAt || s.createdAt || null,
     createdAt: s.createdAt || null,
     lastFollowUpAt: s.lastFollowUpAt || null,
+    note: s.internalNote || null,
   };
 }
 
@@ -224,6 +225,24 @@ router.get('/api/metrics', (_req, res) => {
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 
+  // Productos mas vendidos: se agrupan por el texto libre de card.producto
+  // (lo que anoto el bot/vendedor), contando solo conversaciones en 'vendido'.
+  const productStats = new Map();
+  for (const s of sessions) {
+    if (s.stage !== 'vendido') continue;
+    const producto = String(s.card?.producto || '').trim();
+    if (!producto) continue;
+    const key = producto.toLowerCase();
+    const entry = productStats.get(key) || { producto, count: 0, revenue: 0 };
+    entry.count++;
+    const monto = Number(s.card?.monto);
+    if (s.card?.monto != null && !Number.isNaN(monto)) entry.revenue += monto;
+    productStats.set(key, entry);
+  }
+  const topProducts = [...productStats.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
   const staleAttention = sessions
     .map((s) => {
       const history = s.history || [];
@@ -250,7 +269,7 @@ router.get('/api/metrics', (_req, res) => {
       return (b.hoursSinceLastMessage || 0) - (a.hoursSinceLastMessage || 0);
     });
 
-  res.json({ byStage, total, conversionRate, messagesToday, topLocations, staleAttention, revenue });
+  res.json({ byStage, total, conversionRate, messagesToday, topLocations, topProducts, staleAttention, revenue });
 });
 
 // Guarda el monto vendido de una conversacion (cargado a mano desde el
@@ -266,6 +285,16 @@ router.post('/api/conversations/:phone/amount', (req, res) => {
   const card = { ...(s.card || {}), monto };
   const updated = updateSession(phone, { card });
   res.json({ ok: true, card: updated.card });
+});
+
+// Nota interna del negocio sobre este cliente (tags, recordatorios, lo que
+// sea). No la toca el bot ni el clasificador: es aparte de "notas" dentro de
+// card, que es lo que la IA infiere sola de la conversacion.
+router.post('/api/conversations/:phone/note', (req, res) => {
+  const phone = req.params.phone;
+  const note = String(req.body?.note ?? '').trim();
+  const updated = updateSession(phone, { internalNote: note || null });
+  res.json({ ok: true, note: updated.internalNote || null });
 });
 
 /* ---------- catalogo ---------- */
@@ -353,6 +382,10 @@ router.get('/api/library', (_req, res) => {
   res.json(library.listImages());
 });
 
+router.get('/api/library/folders', (_req, res) => {
+  res.json(library.listFolders());
+});
+
 router.post('/api/library', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
   try {
@@ -360,11 +393,28 @@ router.post('/api/library', upload.single('file'), (req, res) => {
       buffer: req.file.buffer,
       mime: req.file.mimetype,
       name: req.body?.name || req.file.originalname,
+      folder: req.body?.folder || null,
     });
     res.json(item);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Renombrar una imagen y/o moverla de carpeta.
+router.post('/api/library/:id', (req, res) => {
+  const patch = {};
+  if (req.body?.name != null) {
+    const name = String(req.body.name).trim();
+    if (!name) return res.status(400).json({ error: 'El nombre no puede quedar vacio' });
+    patch.name = name;
+  }
+  if (req.body?.folder !== undefined) {
+    patch.folder = req.body.folder ? String(req.body.folder).trim().slice(0, 60) || null : null;
+  }
+  const item = library.updateImage(req.params.id, patch);
+  if (!item) return res.status(404).json({ error: 'No existe esa imagen' });
+  res.json(item);
 });
 
 router.delete('/api/library/:id', (req, res) => {
@@ -515,6 +565,48 @@ router.get('/api/backup', (_req, res) => {
   const filename = `chispudos-backup-${new Date().toISOString().slice(0, 10)}.json`;
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.json(backup);
+});
+
+// Igual que el backup pero en CSV, pensado para abrir en Excel/Sheets: una
+// fila por conversacion con lo que sirve para llevar cuentas o declarar.
+router.get('/api/export.csv', (_req, res) => {
+  const sessions = listSessions();
+  const header = [
+    'Telefono',
+    'Nombre',
+    'Etapa',
+    'Producto',
+    'Ciudad',
+    'Monto vendido',
+    'Nota interna',
+    'Ultimo mensaje',
+    'Creado',
+  ];
+  const csvEscape = (value) => {
+    const str = String(value ?? '');
+    return /[",\n;]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  };
+  const rows = sessions.map((s) => {
+    const history = s.history || [];
+    const last = history[history.length - 1];
+    return [
+      s.phone,
+      s.name || '',
+      STAGE_LABELS[s.stage] || s.stage || '',
+      s.card?.producto || '',
+      s.card?.ciudad || '',
+      s.card?.monto != null ? s.card.monto : '',
+      s.internalNote || '',
+      (last ? last.at : s.updatedAt) || '',
+      s.createdAt || '',
+    ];
+  });
+  const csv = [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\r\n');
+  const filename = `chispudos-ventas-${new Date().toISOString().slice(0, 10)}.csv`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  // BOM al inicio para que Excel muestre bien las tildes/eñes.
+  res.send('\uFEFF' + csv);
 });
 
 module.exports = router;
