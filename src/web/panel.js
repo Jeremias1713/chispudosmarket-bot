@@ -1,134 +1,148 @@
-// Panel web simple de solo lectura para ver las conversaciones sin abrir
-// WhatsApp: lista de chats con su etapa y ficha del cliente, y el historial
-// completo de cada uno. Protegido con usuario/clave (HTTP Basic Auth) leidos
-// de las variables de entorno PANEL_USER / PANEL_PASS.
+// Panel web para ver y manejar las conversaciones del bot sin abrir WhatsApp:
+// lista de chats con su etapa, ficha del cliente e historial completo de cada
+// uno, con la posibilidad de pausar el bot y responder a mano. Protegido con
+// usuario/clave (HTTP Basic Auth) leidos de las variables de entorno
+// PANEL_USER / PANEL_PASS.
 const express = require('express');
-const { listSessions, getSession } = require('../state');
+const path = require('path');
+const {
+  listSessions,
+  getSession,
+  appendMessage,
+  setPaused,
+  setStage,
+  unlockStage,
+} = require('../state');
+const { sendText } = require('../whatsapp');
+const { STAGES } = require('../classifier');
+
+const STAGE_LABELS = {
+  nuevo: 'Nuevo',
+  interesado: 'Interesado',
+  negociando: 'Negociando',
+  vendido: 'Vendido',
+  esperando_retiro: 'Esperando retiro',
+  en_camino: 'En camino',
+  entregado: 'Entregado',
+  necesita_atencion: 'Necesita atención',
+  perdido: 'Perdido',
+};
 
 function basicAuth(req, res, next) {
   const user = process.env.PANEL_USER;
-    const pass = process.env.PANEL_PASS;
+  const pass = process.env.PANEL_PASS;
 
-      if (!user || !pass) {
-          return res
-                .status(503)
-                      .send('El panel no esta configurado. Falta PANEL_USER / PANEL_PASS en las variables de entorno.');
-                        }
+  if (!user || !pass) {
+    return res
+      .status(503)
+      .send('El panel no esta configurado. Falta PANEL_USER / PANEL_PASS en las variables de entorno.');
+  }
 
-                          const header = req.headers.authorization || '';
-                            const [scheme, encoded] = header.split(' ');
+  const header = req.headers.authorization || '';
+  const [scheme, encoded] = header.split(' ');
 
-                              if (scheme === 'Basic' && encoded) {
-                                  const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-                                      const sep = decoded.indexOf(':');
-                                          const u = decoded.slice(0, sep);
-                                              const p = decoded.slice(sep + 1);
-                                                  if (u === user && p === pass) return next();
-                                                    }
+  if (scheme === 'Basic' && encoded) {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    const sep = decoded.indexOf(':');
+    const u = decoded.slice(0, sep);
+    const p = decoded.slice(sep + 1);
+    if (u === user && p === pass) return next();
+  }
 
-                                                      res.set('WWW-Authenticate', 'Basic realm="Panel de ventas"');
-                                                        return res.status(401).send('Autenticacion requerida.');
-                                                        }
+  res.set('WWW-Authenticate', 'Basic realm="Panel ChispudosMarket"');
+  return res.status(401).send('Autenticacion requerida.');
+}
 
-                                                        const router = express.Router();
-                                                        router.use(basicAuth);
+const router = express.Router();
+router.use(basicAuth);
+router.use(express.static(path.join(__dirname, '..', '..', 'public', 'panel')));
 
-                                                        router.get('/api/sessions', (_req, res) => {
-                                                          const sessions = listSessions()
-                                                              .map((s) => ({
-                                                                    phone: s.phone,
-                                                                          stage: s.stage || 'nuevo',
-                                                                                card: s.card || {},
-                                                                                      lastMessage: (s.history || []).slice(-1)[0]?.content || '',
-                                                                                            updatedAt: s.updatedAt || s.createdAt || null,
-                                                                                                }))
-                                                                                                    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
-                                                                                                      res.json(sessions);
-                                                                                                      });
-                                                                                                      
-                                                                                                      router.get('/api/sessions/:phone', (req, res) => {
-                                                                                                        const session = getSession(req.params.phone);
-                                                                                                          res.json({ phone: req.params.phone, ...session });
-                                                                                                          });
-                                                                                                          
-                                                                                                          router.get('/', (_req, res) => {
-                                                                                                            res.type('html').send(PANEL_HTML);
-                                                                                                            });
-                                                                                                            
-                                                                                                            const PANEL_HTML = `<!doctype html>
-                                                                                                            <html lang="es">
-                                                                                                            <head>
-                                                                                                            <meta charset="utf-8" />
-                                                                                                            <meta name="viewport" content="width=device-width, initial-scale=1" />
-                                                                                                            <title>Panel de ventas</title>
-                                                                                                            <style>
-                                                                                                              :root { color-scheme: light dark; }
-                                                                                                                body { margin: 0; font-family: system-ui, sans-serif; display: flex; height: 100vh; }
-                                                                                                                  #list { width: 320px; border-right: 1px solid #8884; overflow-y: auto; }
-                                                                                                                    #list h1 { font-size: 15px; padding: 12px; margin: 0; border-bottom: 1px solid #8884; }
-                                                                                                                      .chat-item { padding: 10px 12px; border-bottom: 1px solid #8882; cursor: pointer; }
-                                                                                                                        .chat-item:hover { background: #8881; }
-                                                                                                                          .chat-item .phone { font-weight: 600; font-size: 13px; }
-                                                                                                                            .chat-item .stage { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #4a90e233; margin-left: 6px; }
-                                                                                                                              .chat-item .last { font-size: 12px; opacity: .7; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                                                                                                                                #detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-                                                                                                                                  #card { padding: 12px; border-bottom: 1px solid #8884; font-size: 13px; }
-                                                                                                                                    #card b { display: inline-block; min-width: 80px; }
-                                                                                                                                      #messages { flex: 1; overflow-y: auto; padding: 12px; }
-                                                                                                                                        .msg { max-width: 70%; padding: 8px 10px; border-radius: 10px; margin-bottom: 8px; font-size: 14px; white-space: pre-wrap; }
-                                                                                                                                          .msg.user { background: #4a90e233; margin-right: auto; }
-                                                                                                                                            .msg.assistant { background: #8882; margin-left: auto; }
-                                                                                                                                              .empty { padding: 24px; opacity: .6; font-size: 14px; }
-                                                                                                                                              </style>
-                                                                                                                                              </head>
-                                                                                                                                              <body>
-                                                                                                                                                <div id="list"><h1>Conversaciones</h1><div id="items"></div></div>
-                                                                                                                                                  <div id="detail"><div class="empty">Elegi una conversacion de la lista.</div></div>
-                                                                                                                                                  
-                                                                                                                                                  <script>
-                                                                                                                                                  let current = null;
-                                                                                                                                                  
-                                                                                                                                                  async function loadList() {
-                                                                                                                                                    const res = await fetch('/panel/api/sessions');
-                                                                                                                                                      const sessions = await res.json();
-                                                                                                                                                        const items = document.getElementById('items');
-                                                                                                                                                          items.innerHTML = '';
-                                                                                                                                                            sessions.forEach((s) => {
-                                                                                                                                                                const div = document.createElement('div');
-                                                                                                                                                                    div.className = 'chat-item';
-                                                                                                                                                                        div.innerHTML = '<div class="phone">' + s.phone + '<span class="stage">' + s.stage + '</span></div>' +
-                                                                                                                                                                              '<div class="last">' + (s.card.nombre ? s.card.nombre + ' &middot; ' : '') + (s.lastMessage || '') + '</div>';
-                                                                                                                                                                                  div.onclick = () => loadDetail(s.phone);
-                                                                                                                                                                                      items.appendChild(div);
-                                                                                                                                                                                        });
-                                                                                                                                                                                        }
-                                                                                                                                                                                        
-                                                                                                                                                                                        async function loadDetail(phone) {
-                                                                                                                                                                                          current = phone;
-                                                                                                                                                                                            const res = await fetch('/panel/api/sessions/' + encodeURIComponent(phone));
-                                                                                                                                                                                              const s = await res.json();
-                                                                                                                                                                                                const card = s.card || {};
-                                                                                                                                                                                                  const detail = document.getElementById('detail');
-                                                                                                                                                                                                    const cardHtml = ['nombre', 'ciudad', 'telefono', 'producto', 'notas']
-                                                                                                                                                                                                        .map((k) => '<div><b>' + k + ':</b> ' + (card[k] || '-') + '</div>')
-                                                                                                                                                                                                            .join('');
-                                                                                                                                                                                                              const msgsHtml = (s.history || [])
-                                                                                                                                                                                                                  .map((m) => '<div class="msg ' + m.role + '">' + m.content.replace(/</g, '&lt;') + '</div>')
-                                                                                                                                                                                                                      .join('');
-                                                                                                                                                                                                                        detail.innerHTML =
-                                                                                                                                                                                                                            '<div id="card"><b>Telefono:</b> ' + phone + ' &middot; <b>Etapa:</b> ' + (s.stage || 'nuevo') + '<br/>' + cardHtml + '</div>' +
-                                                                                                                                                                                                                                '<div id="messages">' + (msgsHtml || '<div class="empty">Sin mensajes todavia.</div>') + '</div>';
-                                                                                                                                                                                                                                  detail.querySelector('#messages').scrollTop = detail.querySelector('#messages').scrollHeight;
-                                                                                                                                                                                                                                  }
-                                                                                                                                                                                                                                  
-                                                                                                                                                                                                                                  loadList();
-                                                                                                                                                                                                                                  setInterval(() => {
-                                                                                                                                                                                                                                    loadList();
-                                                                                                                                                                                                                                      if (current) loadDetail(current);
-                                                                                                                                                                                                                                      }, 5000);
-                                                                                                                                                                                                                                      </script>
-                                                                                                                                                                                                                                      </body>
-                                                                                                                                                                                                                                      </html>`;
-                                                                                                                                                                                                                                      
-                                                                                                                                                                                                                                      module.exports = router;
-                                                                                                                                                                                                                                      
+function toConvo(s) {
+  const history = s.history || [];
+  const last = history[history.length - 1];
+  return {
+    phone: s.phone,
+    name: s.name || null,
+    stage: s.stage || 'nuevo',
+    stageLocked: Boolean(s.stageLocked),
+    stageReason: s.stageReason || null,
+    paused: Boolean(s.paused),
+    pausedReason: s.pausedReason || null,
+    card: s.card || {},
+    lastMessage: last ? last.content : '',
+    lastMessageAt: last ? last.at : s.updatedAt || s.createdAt || null,
+    createdAt: s.createdAt || null,
+  };
+}
+
+router.get('/api/stages', (_req, res) => {
+  res.json(STAGES.map((id) => ({ id, label: STAGE_LABELS[id] || id })));
+});
+
+router.get('/api/conversations', (req, res) => {
+  const search = String(req.query.search || '').trim().toLowerCase();
+  let list = listSessions().map(toConvo);
+
+  if (search) {
+    list = list.filter(
+      (c) =>
+        c.phone.includes(search) ||
+        (c.name || '').toLowerCase().includes(search) ||
+        (c.lastMessage || '').toLowerCase().includes(search)
+    );
+  }
+
+  list.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
+  res.json(list);
+});
+
+router.get('/api/conversations/:phone', (req, res) => {
+  const phone = req.params.phone;
+  const s = getSession(phone);
+  const messages = (s.history || []).map((m, i) => ({
+    id: i,
+    role: m.role,
+    content: m.content,
+    at: m.at || null,
+  }));
+  res.json({ conversation: toConvo({ phone, ...s }), messages });
+});
+
+router.post('/api/conversations/:phone/send', async (req, res) => {
+  const phone = req.params.phone;
+  const text = String(req.body?.text ?? '').trim();
+  if (!text) return res.status(400).json({ error: 'El mensaje esta vacio' });
+
+  try {
+    await sendText(phone, text);
+  } catch (err) {
+    return res.status(502).json({ error: 'No se pudo mandar el mensaje por WhatsApp: ' + err.message });
+  }
+
+  appendMessage(phone, 'human', text);
+  res.json({ ok: true });
+});
+
+router.post('/api/conversations/:phone/pause', (req, res) => {
+  const phone = req.params.phone;
+  const paused = Boolean(req.body?.paused);
+  const s = setPaused(phone, paused, paused ? 'manual' : null);
+  res.json({ ok: true, paused: s.paused });
+});
+
+router.post('/api/conversations/:phone/stage', (req, res) => {
+  const phone = req.params.phone;
+
+  if (req.body?.auto) {
+    unlockStage(phone);
+    return res.json({ ok: true, locked: false });
+  }
+
+  const stage = String(req.body?.stage ?? '');
+  if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Etapa desconocida' });
+
+  setStage(phone, stage, 'Fijada desde el panel');
+  res.json({ ok: true, locked: true, stage });
+});
+
+module.exports = router;
