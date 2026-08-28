@@ -3,6 +3,7 @@ const express = require('express');
 const { handleIncomingMessage } = require('./flow');
 const { markAsRead } = require('./whatsapp');
 const panelRouter = require('./web/panel');
+const siteRouter = require('./web/site');
 
 const app = express();
 app.use(express.json());
@@ -12,54 +13,51 @@ const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || '';
 
 // Meta llama a este GET una sola vez para verificar que el webhook es tuyo.
 app.get('/webhook', (req, res) => {
-      const mode = req.query['hub.mode'];
-      const token = req.query['hub.verify_token'];
-      const challenge = req.query['hub.challenge'];
+        const mode = req.query['hub.mode'];
+        const token = req.query['hub.verify_token'];
+        const challenge = req.query['hub.challenge'];
 
           if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-                  console.log('Webhook verificado correctamente.');
-                  return res.status(200).send(challenge);
+                    console.log('Webhook verificado correctamente.');
+                    return res.status(200).send(challenge);
           }
-      return res.sendStatus(403);
+        return res.sendStatus(403);
 });
 
 // Meta envia aqui cada mensaje/evento entrante.
 app.post('/webhook', async (req, res) => {
-      // Responder rapido a Meta; procesar despues.
+        // Responder rapido a Meta; procesar despues.
            res.sendStatus(200);
 
            try {
-                   const entry = req.body.entry?.[0];
-                   const change = entry?.changes?.[0];
-                   const value = change?.value;
-                   const message = value?.messages?.[0];
+                     const entry = req.body.entry?.[0];
+                     const change = entry?.changes?.[0];
+                     const value = change?.value;
+                     const message = value?.messages?.[0];
 
-        if (!message) {
-                  // Puede ser un evento de estado (entregado/leido), lo ignoramos.
-                     return;
-        }
+          if (!message) {
+                      // Puede ser un evento de estado (entregado/leido), lo ignoramos.
+                       return;
+          }
 
-        const from = message.from; // numero del cliente
-        if (message.id) {
-                  markAsRead(message.id).catch(() => {});
-        }
+          const from = message.from; // numero del cliente
+          if (message.id) {
+                      markAsRead(message.id).catch(() => {});
+          }
 
-        await handleIncomingMessage(from, message);
+          await handleIncomingMessage(from, message);
            } catch (err) {
-                   console.error('Error procesando mensaje entrante:', err);
+                     console.error('Error procesando mensaje entrante:', err);
            }
 });
 
 app.use('/panel', panelRouter);
-
-app.get('/', (_req, res) => {
-      res.send('Bot de ventas por WhatsApp activo.');
-});
+app.use('/', siteRouter);
 
 app.get('/health', (_req, res) => {
-      res.json({ ok: true, uptime: process.uptime() });
+        res.json({ ok: true, uptime: process.uptime() });
 });
 
 app.listen(PORT, () => {
-      console.log(`Servidor escuchando en el puerto ${PORT}`);
+        console.log(`Servidor escuchando en el puerto ${PORT}`);
 });
