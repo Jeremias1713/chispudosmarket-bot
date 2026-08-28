@@ -186,7 +186,7 @@ function sanitizeProductInput(body) {
   if (body.name != null) patch.name = String(body.name).trim();
   if (body.sku != null) patch.sku = String(body.sku).trim();
   if (body.price != null) patch.price = Number(body.price) || 0;
-  if (body.currency != null) patch.currency = String(body.currency).trim() || 'USD';
+  if (body.currency != null) patch.currency = String(body.currency).trim() || 'Bs';
   if (body.description != null) patch.description = String(body.description);
   if (body.active != null) patch.active = Boolean(body.active);
   if (body.prompt != null) patch.prompt = String(body.prompt);
@@ -254,6 +254,7 @@ router.post('/api/settings', (req, res) => {
   const patch = {};
   const fields = ['businessName', 'welcomeMessage', 'knowledgeBase', 'openaiModel'];
   for (const f of fields) if (body[f] != null) patch[f] = String(body[f]);
+  if (body.welcomeImageId !== undefined) patch.welcomeImageId = body.welcomeImageId || null;
   if (body.openaiTemperature != null) patch.openaiTemperature = Number(body.openaiTemperature);
   if (body.openaiHistoryN != null) patch.openaiHistoryN = Number(body.openaiHistoryN);
   if (body.botEnabled != null) patch.botEnabled = Boolean(body.botEnabled);
