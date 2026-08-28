@@ -14,6 +14,7 @@ const {
   setPaused,
   setStage,
   unlockStage,
+  markFollowUp,
 } = require('../state');
 const { sendText } = require('../whatsapp');
 const { STAGES } = require('../classifier');
@@ -23,6 +24,7 @@ const agencies = require('../agencies');
 const settingsStore = require('../settings');
 const broadcasts = require('../broadcasts');
 const simulator = require('../simulator');
+const coupons = require('../coupons');
 const { mediaUrl } = require('../flow');
 
 const STAGE_LABELS = {
@@ -85,6 +87,7 @@ function toConvo(s) {
     lastMessage: last ? last.content : '',
     lastMessageAt: last ? last.at : s.updatedAt || s.createdAt || null,
     createdAt: s.createdAt || null,
+    lastFollowUpAt: s.lastFollowUpAt || null,
   };
 }
 
@@ -158,6 +161,86 @@ router.post('/api/conversations/:phone/stage', (req, res) => {
   res.json({ ok: true, locked: true, stage });
 });
 
+// Marca que se le mando la guia de envio (seguimiento) a esta conversacion.
+router.post('/api/conversations/:phone/follow-up', (req, res) => {
+  const phone = req.params.phone;
+  const s = markFollowUp(phone);
+  res.json({ ok: true, lastFollowUpAt: s.lastFollowUpAt });
+});
+
+/* ---------- metricas ---------- */
+
+// Conversaciones que necesitan seguimiento: interesado/negociando/necesita_atencion
+// con mas de 4 horas sin novedad, o cualquiera en necesita_atencion (sin
+// importar la antiguedad, esa etapa siempre merece atencion).
+const STALE_STAGES = ['interesado', 'negociando', 'necesita_atencion'];
+const STALE_HOURS = 4;
+
+router.get('/api/metrics', (_req, res) => {
+  const sessions = listSessions();
+  const now = Date.now();
+
+  const byStage = {};
+  for (const id of STAGES) byStage[id] = 0;
+  for (const s of sessions) {
+    const stage = STAGES.includes(s.stage) ? s.stage : 'nuevo';
+    byStage[stage] = (byStage[stage] || 0) + 1;
+  }
+
+  const total = sessions.length;
+  const vendidos = byStage.vendido || 0;
+  const conversionRate = total > 0 ? (vendidos / total) * 100 : null;
+
+  const today = new Date().toDateString();
+  let messagesToday = 0;
+  for (const s of sessions) {
+    for (const m of s.history || []) {
+      if (m.at && new Date(m.at).toDateString() === today) messagesToday++;
+    }
+  }
+
+  const locationCounts = new Map();
+  for (const s of sessions) {
+    const ciudad = String(s.card?.ciudad || '').trim();
+    if (!ciudad) continue;
+    const key = ciudad.toLowerCase();
+    const entry = locationCounts.get(key) || { ciudad, count: 0 };
+    entry.count++;
+    locationCounts.set(key, entry);
+  }
+  const topLocations = [...locationCounts.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  const staleAttention = sessions
+    .map((s) => {
+      const history = s.history || [];
+      const last = history[history.length - 1];
+      const lastMessageAt = last ? last.at : s.updatedAt || s.createdAt || null;
+      const hoursSinceLastMessage = lastMessageAt ? (now - new Date(lastMessageAt).getTime()) / 3600000 : null;
+      return {
+        phone: s.phone,
+        name: s.name || null,
+        stage: s.stage || 'nuevo',
+        lastMessageAt,
+        hoursSinceLastMessage,
+        lastFollowUpAt: s.lastFollowUpAt || null,
+      };
+    })
+    .filter((c) => {
+      if (c.stage === 'necesita_atencion') return true;
+      if (!STALE_STAGES.includes(c.stage)) return false;
+      return c.hoursSinceLastMessage != null && c.hoursSinceLastMessage > STALE_HOURS;
+    })
+    .sort((a, b) => {
+      if (a.stage === 'necesita_atencion' && b.stage !== 'necesita_atencion') return -1;
+      if (b.stage === 'necesita_atencion' && a.stage !== 'necesita_atencion') return 1;
+      return (b.hoursSinceLastMessage || 0) - (a.hoursSinceLastMessage || 0);
+    });
+
+  res.json({ byStage, total, conversionRate, messagesToday, topLocations, staleAttention });
+});
+
 /* ---------- catalogo ---------- */
 
 router.get('/api/products', (_req, res) => {
@@ -202,6 +285,38 @@ function sanitizeProductInput(body) {
       ? body.triggers
       : String(body.triggers).split(',').map((t) => t.trim()).filter(Boolean);
   }
+  return patch;
+}
+
+/* ---------- cupones ---------- */
+
+router.get('/api/coupons', (_req, res) => {
+  res.json(coupons.listCoupons());
+});
+
+router.post('/api/coupons', (req, res) => {
+  const coupon = coupons.createCoupon(sanitizeCouponInput(req.body));
+  res.json(coupon);
+});
+
+router.post('/api/coupons/:id', (req, res) => {
+  const coupon = coupons.updateCoupon(req.params.id, sanitizeCouponInput(req.body));
+  if (!coupon) return res.status(404).json({ error: 'No existe ese cupon' });
+  res.json(coupon);
+});
+
+router.delete('/api/coupons/:id', (req, res) => {
+  const ok = coupons.deleteCoupon(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'No existe ese cupon' });
+  res.json({ ok: true });
+});
+
+function sanitizeCouponInput(body) {
+  const patch = {};
+  if (body.code != null) patch.code = String(body.code).trim().toUpperCase();
+  if (body.discountPercent != null) patch.discountPercent = Number(body.discountPercent) || 0;
+  if (body.description != null) patch.description = String(body.description);
+  if (body.active != null) patch.active = Boolean(body.active);
   return patch;
 }
 
