@@ -2,16 +2,12 @@
 // OpenAI y decide como partir la respuesta en varios mensajes de WhatsApp.
 const OpenAI = require('openai');
 const { loadProducts } = require('./catalog');
-
-const BUSINESS_NAME = process.env.BUSINESS_NAME || 'nuestro negocio';
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const TEMPERATURE = parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
-const HISTORY_N = parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
+const { getSettings } = require('./settings');
 
 let _client = null;
 function client() {
   if (!_client) {
-    const apiKey = (process.env.OPENAI_API_KEY || '').trim();    
+    const apiKey = (process.env.OPENAI_API_KEY || '').trim();
     if (!apiKey) {
       throw new Error('Falta OPENAI_API_KEY en las variables de entorno.');
     }
@@ -23,7 +19,7 @@ function client() {
 function catalogText() {
   let products = [];
   try {
-    products = loadProducts();
+    products = loadProducts().filter((p) => p.active !== false);
   } catch (err) {
     products = [];
   }
@@ -31,12 +27,20 @@ function catalogText() {
     return '(Todavia no hay productos cargados en el catalogo. Si preguntan por productos o precios, di que en un momento te confirman el detalle, no inventes nada.)';
   }
   return products
-  .map((p) => `- ${p.name}: ${p.price.toFixed(2)} ${p.currency}. ${p.description}`)
-  .join('\n');
+    .map((p) => {
+      const extra = p.prompt ? `\n  Instrucciones para este producto: ${p.prompt}` : '';
+      const upsell = p.upsell ? `\n  Oferta para sumar (ofrecela una sola vez, recien cuando ya dijo que si a este producto): ${p.upsell}` : '';
+      return `- ${p.name}: ${Number(p.price).toFixed(2)} ${p.currency}. ${p.description}${extra}${upsell}`;
+    })
+    .join('\n');
 }
 
 function buildSystemPrompt() {
-  return `Sos un asesor/a de ventas por WhatsApp de ${BUSINESS_NAME}.
+  const settings = getSettings();
+  const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
+  const knowledge = (settings.knowledgeBase || '').trim();
+
+  return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
 
   COMO HABLAS:
@@ -78,31 +82,36 @@ function buildSystemPrompt() {
 
   CATALOGO ACTUAL (unica fuente de precios y productos, no inventes otros):
   ${catalogText()}
-
+${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vigentes):\n  ${knowledge}\n` : ''}
   Si el cliente comparte su ubicacion o pregunta por la agencia mas cercana, el sistema ya se encarga de mostrarle las agencias automaticamente: vos no necesitas calcular distancias ni inventar direcciones de agencias.`;
 }
 
 function splitReply(reply) {
   return reply
-  .split('|||')
-  .map((s) => s.trim())
-  .filter(Boolean);
+    .split('|||')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 async function getAssistantReply(history, userText) {
+  const settings = getSettings();
+  const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
+  const historyN = settings.openaiHistoryN != null ? Number(settings.openaiHistoryN) : parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
+
   const messages = [
     { role: 'system', content: buildSystemPrompt() },
-    ...history.slice(-HISTORY_N),
+    ...history.slice(-historyN),
     { role: 'user', content: userText },
-    ];
+  ];
 
-const completion = await client().chat.completions.create({
-  model: MODEL,
-  temperature: TEMPERATURE,
-  messages,
-});
+  const completion = await client().chat.completions.create({
+    model,
+    temperature,
+    messages,
+  });
 
-return completion.choices[0].message.content.trim();
+  return completion.choices[0].message.content.trim();
 }
 
-module.exports = { getAssistantReply, splitReply, buildSystemPrompt };
+module.exports = { getAssistantReply, splitReply, buildSystemPrompt, catalogText };

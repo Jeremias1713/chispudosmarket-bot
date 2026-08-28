@@ -1,17 +1,23 @@
 // Logica de conversacion: el bot es un chatbot con IA (OpenAI). Este archivo
 // decide que hacer con cada mensaje entrante: comandos globales, ubicacion
-// (que se resuelve solo, sin IA, para que sea instantaneo y gratis), y todo
+// (que se resuelve solo, sin IA, para que sea instantaneo y gratis), el
+// gatillo de un producto (mensaje inicial fijo, sin pasar por la IA), y todo
 // lo demas se lo pasamos al modelo (ver ./ai.js) que responde como asesor de
 // ventas y decide el texto.
-const { sendText } = require('./whatsapp');
+const { sendText, sendImageByLink } = require('./whatsapp');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, searchByText, formatAgency } = require('./agencies');
 const { getAssistantReply, splitReply } = require('./ai');
 const { classifyConversation } = require('./classifier');
+const { matchTrigger } = require('./catalog');
+const { getImage } = require('./library');
+const { getSettings } = require('./settings');
 
-const BUSINESS_NAME = process.env.BUSINESS_NAME || 'nuestro negocio';
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '1500', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '3500', 10);
+// Render define RENDER_EXTERNAL_URL solo automaticamente; PUBLIC_URL es el
+// override manual por si se corre en otro lado.
+const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,8 +36,18 @@ async function sendSplit(to, text) {
   return parts;
 }
 
+function mediaUrl(filename) {
+  // Sin PUBLIC_URL configurado no se puede armar un link publico: se manda
+  // solo texto (WhatsApp no acepta una foto sin URL alcanzable desde afuera).
+  if (!PUBLIC_URL) return null;
+  return `${PUBLIC_URL}/media/${filename}`;
+}
+
 async function sendGreeting(to) {
-  const text = `Hola! Bienvenido a ${BUSINESS_NAME}. Contame, en que te puedo ayudar hoy?`;
+  const settings = getSettings();
+  const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
+  const text = (settings.welcomeMessage && settings.welcomeMessage.trim())
+    || `Hola! Bienvenido a ${businessName}. Contame, en que te puedo ayudar hoy?`;
   await sendText(to, text);
   appendMessage(to, 'assistant', text);
 }
@@ -57,15 +73,17 @@ async function handleIncomingMessage(from, message, profileName) {
           : '';
   const lower = rawText.toLowerCase();
 
-  // El mensaje entrante se guarda SIEMPRE, aunque el bot este pausado: el
-  // panel tiene que ver la conversacion completa para que alguien pueda
-  // tomarla a mano.
+  // El mensaje entrante se guarda SIEMPRE, aunque el bot este apagado o
+  // pausado en esta conversacion: el panel tiene que ver la conversacion
+  // completa para que alguien pueda tomarla a mano.
   if (rawText) appendMessage(from, 'user', rawText);
   else if (type === 'location') appendMessage(from, 'user', '[Comparti su ubicacion GPS]');
   else appendMessage(from, 'user', `[${type || 'mensaje'}]`);
 
-  // Con el bot pausado desde el panel, un humano esta atendiendo esta
-  // conversacion a mano: no se le contesta solo.
+  // Switch maestro (Configuracion, apaga TODO el bot) o pausa de esta
+  // conversacion puntual (panel, boton "Bot activo" del chat): en cualquiera
+  // de los dos casos un humano esta atendiendo, asi que no se contesta solo.
+  if (!getSettings().botEnabled) return;
   if (session.paused) return;
 
   if (['menu', 'inicio', 'reiniciar', 'start'].includes(lower)) {
@@ -90,6 +108,35 @@ async function handleIncomingMessage(from, message, profileName) {
     await sendText(from, reply);
     appendMessage(from, 'assistant', reply);
     return;
+  }
+
+  // Gatillo de producto: solo la primera vez que se detecta en la
+  // conversacion (no cada vez que menciona la palabra de nuevo), y solo si
+  // el producto tiene mensaje inicial cargado. Sale tal cual, sin pasar por
+  // la IA: es la presentacion que el negocio escribio a mano.
+  if (!session.linkedProductId) {
+    const product = matchTrigger(rawText);
+    if (product && product.intro && product.intro.trim()) {
+      updateSession(from, { linkedProductId: product.id });
+
+      if (product.introImageId) {
+        const img = getImage(product.introImageId);
+        const url = img && mediaUrl(img.filename);
+        if (url) {
+          try {
+            await sendImageByLink(from, url, product.intro.trim());
+            appendMessage(from, 'assistant', `[imagen] ${product.intro.trim()}`);
+            return;
+          } catch (err) {
+            console.error('No se pudo mandar la foto del producto, sigo solo con texto:', err.message);
+          }
+        }
+      }
+
+      await sendText(from, product.intro.trim());
+      appendMessage(from, 'assistant', product.intro.trim());
+      return;
+    }
   }
 
   const wordCount = rawText.split(/\s+/).filter(Boolean).length;
@@ -143,4 +190,4 @@ async function handleIncomingMessage(from, message, profileName) {
   }
 }
 
-module.exports = { handleIncomingMessage, sendSplit, sendGreeting };
+module.exports = { handleIncomingMessage, sendSplit, sendGreeting, mediaUrl };

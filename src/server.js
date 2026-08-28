@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { handleIncomingMessage } = require('./flow');
 const { markAsRead } = require('./whatsapp');
+const { MEDIA_DIR } = require('./library');
 const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
 
@@ -52,6 +53,10 @@ app.post('/webhook', async (req, res) => {
     console.error('Error procesando mensaje entrante:', err);
   }
 });
+
+// Imagenes de la biblioteca: tienen que ser publicas y sin auth porque las
+// va a buscar WhatsApp (Meta), no un navegador logueado.
+app.use('/media', express.static(MEDIA_DIR));
 
 app.use('/panel', panelRouter);
 app.use('/', siteRouter);

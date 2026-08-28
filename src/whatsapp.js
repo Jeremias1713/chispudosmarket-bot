@@ -61,6 +61,19 @@ async function sendLocationRequest(to, bodyText) {
   });
 }
 
+// Manda una imagen por URL publica (nuestro propio /media/<archivo>), sin
+// pasar por el endpoint de subida de Meta: mas simple y alcanza porque el
+// servidor ya es publico. caption es opcional.
+async function sendImageByLink(to, link, caption) {
+  const api = client();
+  await api.post('/messages', {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'image',
+    image: caption ? { link, caption } : { link },
+  });
+}
+
 async function sendTemplate(to, templateName, languageCode, params) {
   languageCode = languageCode || 'es';
   params = params || [];
@@ -92,4 +105,4 @@ async function markAsRead(messageId) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendLocationRequest, sendTemplate, markAsRead };
+module.exports = { sendText, sendButtons, sendLocationRequest, sendImageByLink, sendTemplate, markAsRead };
