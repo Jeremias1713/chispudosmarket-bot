@@ -803,6 +803,7 @@ const updateTempDisplay = bindRangeDisplay('cfg_temperature', 'cfg_temperature_v
 const updateHistoryDisplay = bindRangeDisplay('cfg_historyN', 'cfg_historyN_val')
 const updateReplyDelayDisplay = bindRangeDisplay('cfg_replyDelay', 'cfg_replyDelay_val', ' s')
 const updateMaxWordsDisplay = bindRangeDisplay('cfg_maxWords', 'cfg_maxWords_val', ' palabras')
+const updateMaxWordsHardCapDisplay = bindRangeDisplay('cfg_maxWordsHardCap', 'cfg_maxWordsHardCap_val', ' palabras')
 const updateMaxPartsDisplay = bindRangeDisplay('cfg_maxParts', 'cfg_maxParts_val', ' mensajes')
 
 async function loadSettings() {
@@ -817,14 +818,17 @@ async function loadSettings() {
   $('cfg_historyN').value = s.openaiHistoryN ?? 12
   $('cfg_replyDelay').value = Math.round((s.replyDelayMs ?? 8000) / 1000)
   $('cfg_maxWords').value = s.maxWordsPerMessage ?? 30
+  $('cfg_maxWordsHardCap').value = s.maxWordsHardCap ?? 90
   $('cfg_maxParts').value = s.maxMessageParts ?? 5
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
   updateTempDisplay()
   updateHistoryDisplay()
   updateReplyDelayDisplay()
   updateMaxWordsDisplay()
+  updateMaxWordsHardCapDisplay()
   updateMaxPartsDisplay()
   $('cfg_msg').textContent = ''
+  loadAgenciesMeta()
 }
 
 $('cfg_save').addEventListener('click', async () => {
@@ -838,6 +842,7 @@ $('cfg_save').addEventListener('click', async () => {
     openaiHistoryN: Number($('cfg_historyN').value),
     replyDelayMs: Number($('cfg_replyDelay').value) * 1000,
     maxWordsPerMessage: Number($('cfg_maxWords').value),
+    maxWordsHardCap: Number($('cfg_maxWordsHardCap').value),
     maxMessageParts: Number($('cfg_maxParts').value),
     audioReplyEnabled: $('cfg_audioEnabled').checked,
   }
@@ -850,6 +855,50 @@ $('cfg_save').addEventListener('click', async () => {
     $('cfg_msg').textContent = err.message
   } finally {
     $('cfg_save').disabled = false
+  }
+})
+
+/* ---------- cobertura de agencias ---------- */
+
+async function loadAgenciesMeta() {
+  const box = $('agencies_meta')
+  try {
+    const meta = await api('/agencies/meta')
+    if (!meta.count) {
+      box.textContent = 'Todavía no hay agencias cargadas.'
+      return
+    }
+    const fecha = meta.updatedAt ? new Date(meta.updatedAt).toLocaleString('es-VE') : ''
+    box.textContent = `${meta.count} agencias cargadas en ${meta.regions} estados/regiones.` + (fecha ? ` Actualizado: ${fecha}.` : '')
+  } catch (err) {
+    box.textContent = 'No pude leer el listado de agencias.'
+  }
+}
+
+$('agencies_upload').addEventListener('click', async () => {
+  const file = $('agencies_file').files?.[0]
+  if (!file) { $('agencies_msg').textContent = 'Elegí un archivo primero'; return }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  $('agencies_upload').disabled = true
+  $('agencies_msg').textContent = 'Importando…'
+  try {
+    const res = await fetch('/panel/api/agencies/import', { method: 'POST', body: formData })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    const meta = await res.json()
+    $('agencies_file').value = ''
+    $('agencies_msg').textContent = `Listo: ${meta.count} agencias cargadas`
+    setTimeout(() => { $('agencies_msg').textContent = '' }, 2500)
+    loadAgenciesMeta()
+  } catch (err) {
+    $('agencies_msg').textContent = err.message
+  } finally {
+    $('agencies_upload').disabled = false
   }
 })
 

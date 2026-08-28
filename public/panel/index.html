@@ -468,15 +468,21 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
 
                 <div class="field-row">
                   <div class="field">
-                    <label for="cfg_maxWords">Máximo de palabras por mensaje <span class="range-value" id="cfg_maxWords_val"></span></label>
-                    <div class="help">Si el modelo se pasa, se corta y se reparte en el siguiente mensaje.</div>
+                    <label for="cfg_maxWords">Objetivo de palabras por mensaje <span class="range-value" id="cfg_maxWords_val"></span></label>
+                    <div class="help">Para algo simple: saludar, confirmar un dato, un sí o un no. No es un tope duro.</div>
                     <input type="range" id="cfg_maxWords" min="10" max="80" step="5">
                   </div>
                   <div class="field">
-                    <label for="cfg_maxParts">Máximo de mensajes por respuesta <span class="range-value" id="cfg_maxParts_val"></span></label>
-                    <div class="help">Lo que sobre se pega al último: nunca se descarta texto.</div>
-                    <input type="range" id="cfg_maxParts" min="1" max="8" step="1">
+                    <label for="cfg_maxWordsHardCap">Tope al explicar algo <span class="range-value" id="cfg_maxWordsHardCap_val"></span></label>
+                    <div class="help">Producto, datos del formulario o una agencia: recién si se pasa de esto se corta.</div>
+                    <input type="range" id="cfg_maxWordsHardCap" min="40" max="200" step="10">
                   </div>
+                </div>
+
+                <div class="field">
+                  <label for="cfg_maxParts">Máximo de mensajes por respuesta <span class="range-value" id="cfg_maxParts_val"></span></label>
+                  <div class="help">Lo que sobre se pega al último: nunca se descarta texto.</div>
+                  <input type="range" id="cfg_maxParts" min="1" max="8" step="1">
                 </div>
 
                 <div class="field field-master">
@@ -488,6 +494,29 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                     Además del texto, el bot manda un audio leyendo la misma respuesta.
                     Necesita que el servidor tenga una URL pública (ya la tiene en Render).
                   </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="card cfg">
+              <summary class="cfg-head">
+                <span class="cfg-title">Cobertura de agencias</span>
+                <span class="cfg-sub">Subí un Excel para actualizar el listado</span>
+              </summary>
+
+              <div class="cfg-body">
+                <div class="cfg-note" id="agencies_meta">Cargando…</div>
+                <div class="field">
+                  <label for="agencies_file">Excel de agencias</label>
+                  <div class="help">
+                    Columnas esperadas: <strong>ESTADO</strong>, <strong>AGENCIA</strong>, <strong>DIRECCIÓN</strong> (como la planilla de Tealca).
+                    Al subirlo se reemplaza el listado completo que usa el bot para ubicar la agencia más cercana.
+                  </div>
+                  <input type="file" id="agencies_file" accept=".xlsx,.xls">
+                </div>
+                <div class="settings-actions">
+                  <button class="btn btn-primary" id="agencies_upload">Importar Excel</button>
+                  <span class="save-msg" id="agencies_msg"></span>
                 </div>
               </div>
             </details>
