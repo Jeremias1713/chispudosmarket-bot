@@ -119,10 +119,12 @@ function showView(viewId) {
   const tab = document.querySelector(`.tab[data-view="${viewId}"]`)
   $('viewTitle').textContent = tab?.dataset.label ?? ''
   if (viewId === 'view-pipeline') pollPipeline()
+  if (viewId === 'view-metrics') pollMetrics()
   if (viewId === 'view-products') pollProducts()
   if (viewId === 'view-library') pollLibrary()
   if (viewId === 'view-broadcast') loadBroadcastView()
   if (viewId === 'view-sim') pollSimulator()
+  if (viewId === 'view-coupons') pollCoupons()
   if (viewId === 'view-config') loadSettings()
 }
 
@@ -316,8 +318,33 @@ async function loadChat() {
   }
 
   renderStagePicker(conversation)
+  renderFollowUp(conversation)
   renderMemory(conversation)
   renderMessages(messages)
+}
+
+/* ---------- guía enviada (seguimiento) ---------- */
+
+async function markFollowUpSent(phone) {
+  try {
+    await api('/conversations/' + encodeURIComponent(phone) + '/follow-up', { method: 'POST' })
+  } catch (err) {
+    showError(err)
+    return
+  }
+  if (phone === state.selectedPhone) loadChat()
+  if (state.activeView === 'view-metrics') pollMetrics()
+}
+
+function followUpLabel(ts) {
+  return ts ? `Última guía enviada: ${timeInStage(ts)}` : 'Última guía enviada: nunca'
+}
+
+function renderFollowUp(convo) {
+  const bar = $('followupBar')
+  bar.hidden = false
+  $('followupInfo').textContent = followUpLabel(convo.lastFollowUpAt)
+  $('followupBtn').onclick = () => markFollowUpSent(convo.phone)
 }
 
 async function sendManual() {
@@ -462,6 +489,91 @@ async function pollPipeline() {
     return
   }
   renderBoard(filtrarPorTiempo(list, state.pipelineWindow))
+}
+
+/* ---------- métricas ---------- */
+
+function fmtPercent(value) {
+  return value == null ? '—' : `${value.toFixed(1)}%`
+}
+
+function metricsTiles(m) {
+  const tiles = [
+    ['Conversaciones', m.total],
+    ['Mensajes hoy', m.messagesToday],
+    ['Conversión (nuevo→vendido)', fmtPercent(m.conversionRate)],
+    ['Necesitan seguimiento', m.staleAttention.length],
+  ]
+  return tiles.map(([label, value]) => `
+    <div class="metric-tile">
+      <div class="metric-tile-value">${esc(value)}</div>
+      <div class="metric-tile-label">${esc(label)}</div>
+    </div>`).join('')
+}
+
+function metricsFunnel(byStage) {
+  const max = Math.max(1, ...state.stages.map((s) => byStage[s.id] || 0))
+  return state.stages.map((s) => {
+    const count = byStage[s.id] || 0
+    const pct = Math.round((count / max) * 100)
+    return `<div class="funnel-row">
+      <span class="funnel-label">${esc(s.label)}</span>
+      <span class="funnel-track"><span class="funnel-fill" style="width:${pct}%"></span></span>
+      <span class="funnel-count">${esc(count)}</span>
+    </div>`
+  }).join('')
+}
+
+function staleRow(c) {
+  const doneTag = c.lastFollowUpAt
+    ? `<span class="stale-followup-done">Guía: ${esc(timeInStage(c.lastFollowUpAt))}</span>`
+    : ''
+  return `<div class="stale-row" data-phone="${esc(c.phone)}">
+    <div class="stale-who">
+      <div class="stale-name">${esc(c.name || `+${c.phone}`)}</div>
+      <div class="stale-phone">+${esc(c.phone)}</div>
+    </div>
+    <span class="badge" data-stage="${esc(c.stage)}">${esc(stageLabel(c.stage))}</span>
+    <span class="stale-since">${c.hoursSinceLastMessage != null ? esc(timeInStage(c.lastMessageAt)) : 'sin mensajes'}</span>
+    <div class="stale-actions">
+      ${doneTag}
+      <button class="btn stale-open" type="button">Abrir</button>
+      <button class="btn stale-followup" type="button">Marcar guía enviada</button>
+    </div>
+  </div>`
+}
+
+function locationRow(loc) {
+  return `<div class="location-row">
+    <span class="location-name">${esc(loc.ciudad)}</span>
+    <span class="location-count">${esc(loc.count)} pedido${loc.count === 1 ? '' : 's'}</span>
+  </div>`
+}
+
+async function pollMetrics() {
+  if (state.activeView !== 'view-metrics') return
+  let m
+  try { m = await api('/metrics') } catch { return }
+
+  $('metricsCards').innerHTML = metricsTiles(m)
+  $('metricsFunnel').innerHTML = metricsFunnel(m.byStage)
+
+  $('metricsStale').innerHTML = m.staleAttention.length
+    ? m.staleAttention.map(staleRow).join('')
+    : emptyState('✅', 'Nadie esperando seguimiento', 'Cuando una conversación se quede sin novedad, va a aparecer acá.')
+
+  $('metricsStale').querySelectorAll('.stale-row').forEach((row) => {
+    const phone = row.dataset.phone
+    row.querySelector('.stale-open').addEventListener('click', () => {
+      showView('view-convos')
+      selectConversation(phone)
+    })
+    row.querySelector('.stale-followup').addEventListener('click', () => markFollowUpSent(phone))
+  })
+
+  $('metricsLocations').innerHTML = m.topLocations.length
+    ? m.topLocations.map(locationRow).join('')
+    : emptyState('📍', 'Todavía no hay ciudades cargadas', 'Aparecen apenas el bot anote la ciudad de algún cliente.')
 }
 
 /* ---------- catálogo de productos ---------- */
@@ -930,6 +1042,86 @@ $('agencies_upload').addEventListener('click', async () => {
   }
 })
 
+/* ---------- cupones ---------- */
+
+let couponCache = []
+
+function couponRow(c) {
+  const stateBadge = c.active === false
+    ? '<span class="badge badge-warning">Pausado</span>'
+    : '<span class="badge">Activo</span>'
+  return `<div class="coupon-row" data-id="${esc(c.id)}">
+    <span class="coupon-code">${esc(c.code)}</span>
+    <span class="coupon-discount">${esc(c.discountPercent)}%</span>
+    <span class="coupon-desc">${esc(c.description || 'Sin descripción')}</span>
+    ${stateBadge}
+    <div class="coupon-actions">
+      <button class="btn coupon-toggle" type="button">${c.active === false ? 'Activar' : 'Pausar'}</button>
+      <button class="btn btn-danger coupon-del" type="button">Borrar</button>
+    </div>
+  </div>`
+}
+
+async function pollCoupons() {
+  if (state.activeView !== 'view-coupons') return
+  let list
+  try { list = await api('/coupons') } catch { return }
+  couponCache = list
+
+  $('cp_list').innerHTML = list.length
+    ? list.map(couponRow).join('')
+    : emptyState('🏷️', 'Todavía no hay cupones', 'Cargá el primero para que el bot lo pueda ofrecer.')
+
+  $('cp_list').querySelectorAll('.coupon-row').forEach((row) => {
+    const id = row.dataset.id
+    const coupon = couponCache.find((c) => c.id === id)
+    row.querySelector('.coupon-toggle').addEventListener('click', async () => {
+      try {
+        await api('/coupons/' + encodeURIComponent(id), {
+          method: 'POST',
+          body: JSON.stringify({ active: coupon.active === false }),
+        })
+        pollCoupons()
+      } catch (err) { showError(err) }
+    })
+    row.querySelector('.coupon-del').addEventListener('click', async () => {
+      if (!confirm('¿Borrar este cupón?')) return
+      try {
+        await api('/coupons/' + encodeURIComponent(id), { method: 'DELETE' })
+        pollCoupons()
+      } catch (err) { showError(err) }
+    })
+  })
+}
+
+$('cp_save').addEventListener('click', async () => {
+  const body = {
+    code: $('cp_code').value.trim(),
+    discountPercent: Number($('cp_discount').value) || 0,
+    description: $('cp_description').value.trim(),
+    active: $('cp_active').value === '1',
+  }
+  if (!body.code) {
+    $('cp_msg').textContent = 'Falta el código'
+    return
+  }
+  $('cp_save').disabled = true
+  try {
+    await api('/coupons', { method: 'POST', body: JSON.stringify(body) })
+    $('cp_code').value = ''
+    $('cp_discount').value = ''
+    $('cp_description').value = ''
+    $('cp_active').value = '1'
+    $('cp_msg').textContent = 'Cupón agregado'
+    setTimeout(() => { $('cp_msg').textContent = '' }, 1600)
+    pollCoupons()
+  } catch (err) {
+    $('cp_msg').textContent = err.message
+  } finally {
+    $('cp_save').disabled = false
+  }
+})
+
 /* ---------- arranque ---------- */
 
 async function boot() {
@@ -939,10 +1131,12 @@ async function boot() {
     pollConversations()
     if (state.selectedPhone) loadChat()
     if (state.activeView === 'view-pipeline') pollPipeline()
+    if (state.activeView === 'view-metrics') pollMetrics()
     if (state.activeView === 'view-products') pollProducts()
     if (state.activeView === 'view-library') pollLibrary()
     if (state.activeView === 'view-broadcast') pollBroadcasts()
     if (state.activeView === 'view-sim') pollSimulator()
+    if (state.activeView === 'view-coupons') pollCoupons()
   }, POLL_MS)
 }
 

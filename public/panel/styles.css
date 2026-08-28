@@ -205,6 +205,8 @@ body {
 .tab[data-view="view-orders"],   #view-orders   { --view: var(--c-orders);   --view-soft: var(--c-orders-soft);   --view-ink: var(--c-orders-ink); }
 .tab[data-view="view-resources"],#view-resources{ --view: var(--c-resources);--view-soft: var(--c-resources-soft);--view-ink: var(--c-resources-ink); }
 .tab[data-view="view-sim"],      #view-sim      { --view: var(--c-sim);      --view-soft: var(--c-sim-soft);      --view-ink: var(--c-sim-ink); }
+.tab[data-view="view-metrics"],  #view-metrics  { --view: var(--c-orders);   --view-soft: var(--c-orders-soft);   --view-ink: var(--c-orders-ink); }
+.tab[data-view="view-coupons"],  #view-coupons  { --view: var(--c-resources);--view-soft: var(--c-resources-soft);--view-ink: var(--c-resources-ink); }
 
 /* Fuera de una vista con color propio, manda el índigo de siempre. */
 .app-shell { --view: var(--primary); --view-soft: var(--primary-soft); --view-ink: var(--primary-hover); }
@@ -1623,6 +1625,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible,
 .app-shell[data-view="view-offices"]  { --view: var(--c-offices);  --view-soft: var(--c-offices-soft);  --view-ink: var(--c-offices-ink); }
 .app-shell[data-view="view-resources"]{ --view: var(--c-resources);--view-soft: var(--c-resources-soft);--view-ink: var(--c-resources-ink); }
 .app-shell[data-view="view-sim"]      { --view: var(--c-sim);      --view-soft: var(--c-sim-soft);      --view-ink: var(--c-sim-ink); }
+.app-shell[data-view="view-metrics"]  { --view: var(--c-orders);   --view-soft: var(--c-orders-soft);   --view-ink: var(--c-orders-ink); }
+.app-shell[data-view="view-coupons"]  { --view: var(--c-resources);--view-soft: var(--c-resources-soft);--view-ink: var(--c-resources-ink); }
 
 /* Marca de color contra el título, que es donde el ojo entra a la pantalla. */
 .view-title {
@@ -1854,4 +1858,74 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
   font: inherit; box-sizing: border-box;
 }
 #resCustomPhraseList { padding: 0 var(--s4) var(--s4); }
+
+/* ============================================================
+   Métricas
+   ============================================================ */
+.metrics-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--s4); margin-bottom: var(--s6);
+}
+.metric-tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+  padding: var(--s4) var(--s5);
+}
+.metric-tile-value { font-size: 26px; font-weight: 700; color: var(--view-ink); line-height: 1.2; }
+.metric-tile-label { font-size: 12px; color: var(--text-muted); margin-top: var(--s1); }
+
+.metrics-funnel { padding: var(--s2) 0; }
+.funnel-row {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) var(--s4);
+}
+.funnel-label { width: 130px; flex-shrink: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.funnel-track { flex: 1; height: 10px; border-radius: var(--radius-pill); background: var(--surface-soft); overflow: hidden; }
+.funnel-fill { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--view); transition: width .3s ease; }
+.funnel-count { width: 28px; flex-shrink: 0; text-align: right; font-size: 12px; color: var(--text-muted); }
+
+.stale-row {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.stale-row:last-child { border-bottom: none; }
+.stale-who { width: 160px; flex-shrink: 0; min-width: 0; }
+.stale-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stale-phone { font-size: 11px; color: var(--text-muted); }
+.stale-since { flex: 1; font-size: 12px; color: var(--text-muted); }
+.stale-actions { display: flex; align-items: center; gap: var(--s2); flex-shrink: 0; }
+.stale-followup-done { font-size: 11px; color: var(--success); white-space: nowrap; }
+
+.location-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.location-row:last-child { border-bottom: none; }
+.location-name { font-size: 13px; font-weight: 600; }
+.location-count { font-size: 12px; color: var(--text-muted); }
+
+/* Barra de "guía enviada" en el header de la conversación */
+.followup-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  padding: var(--s2) var(--s6);
+  background: var(--surface-soft); border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.followup-info { color: var(--text-muted); }
+
+/* ============================================================
+   Cupones
+   ============================================================ */
+.coupon-row {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.coupon-row:last-child { border-bottom: none; }
+.coupon-code { width: 130px; flex-shrink: 0; font-weight: 700; font-size: 13px; letter-spacing: .02em; }
+.coupon-discount { width: 70px; flex-shrink: 0; font-size: 13px; color: var(--view-ink); font-weight: 600; }
+.coupon-desc { flex: 1; min-width: 0; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coupon-actions { display: flex; align-items: center; gap: var(--s2); flex-shrink: 0; }
 #resCustomPhraseList .res-phrase-row:first-child { border-top: none; }

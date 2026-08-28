@@ -28,6 +28,12 @@
         <span class="rail-tip">Pipeline</span>
       </button>
 
+      <button class="tab" role="tab" data-view="view-metrics" data-label="Métricas"
+              aria-selected="false" aria-label="Métricas">
+        <svg viewBox="0 0 24 24"><path d="M3 3v18h18v-2H5V3zm4 14h2V9H7zm4 0h2V5h-2zm4 0h2v-6h-2z"/></svg>
+        <span class="rail-tip">Métricas</span>
+      </button>
+
       <button class="tab" role="tab" data-view="view-products" data-label="Productos"
               aria-selected="false" aria-label="Productos">
         <svg viewBox="0 0 24 24"><path d="M12 2 3 6.2v11.6L12 22l9-4.2V6.2zm0 2.35 6.1 2.85L12 10.05 5.9 7.2zM5 8.95l6 2.8v7.5l-6-2.8zm8 10.3v-7.5l6-2.8v7.5z"/></svg>
@@ -50,6 +56,12 @@
               aria-selected="false" aria-label="Simulador">
         <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM7 9h10v2H7zm0 4h7v2H7zM7 5h10v2H7z"/></svg>
         <span class="rail-tip">Simulador</span>
+      </button>
+
+      <button class="tab" role="tab" data-view="view-coupons" data-label="Cupones"
+              aria-selected="false" aria-label="Cupones">
+        <svg viewBox="0 0 24 24"><path d="M20 8h-3.18A3 3 0 1 0 12 5.06 3 3 0 1 0 7.18 8H4a1 1 0 0 0-1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-3a3 3 0 0 0 0-6V9a1 1 0 0 0-1-1zM12 4a1 1 0 1 1-1 1 1 1 0 0 1 1-1zm-4 3a1 1 0 1 1 1-1 1 1 0 0 1-1 1zm5 12h-2v-2h2zm0-4h-2v-2h2zm0-4h-2V9h2z"/></svg>
+        <span class="rail-tip">Cupones</span>
       </button>
 
       <button class="tab" role="tab" data-view="view-config" data-label="Configuración"
@@ -106,6 +118,11 @@
               </label>
             </div>
 
+            <div class="followup-bar" id="followupBar" hidden>
+              <span class="followup-info" id="followupInfo"></span>
+              <button class="btn" id="followupBtn" type="button">Marcar guía enviada</button>
+            </div>
+
             <div class="memory-card" id="memoryCard" hidden></div>
 
             <div class="chat-messages" id="chatMessages">
@@ -133,6 +150,26 @@
           <button class="filter-chip" type="button" data-window="stale">Sin novedad hace +7 días</button>
         </div>
         <div class="board" id="board"></div>
+      </section>
+
+      <!-- Métricas -->
+      <section class="view" id="view-metrics">
+        <div class="autos-scroll">
+          <div class="autos-inner">
+
+            <div class="metrics-cards" id="metricsCards"></div>
+
+            <h2 class="section-title">Embudo de ventas</h2>
+            <div class="card metrics-funnel" id="metricsFunnel"></div>
+
+            <h2 class="section-title">Necesitan seguimiento</h2>
+            <div class="card" id="metricsStale"></div>
+
+            <h2 class="section-title">Ciudades con más pedidos</h2>
+            <div class="card" id="metricsLocations"></div>
+
+          </div>
+        </div>
       </section>
 
       <!-- Catálogo de productos -->
@@ -364,6 +401,51 @@
               <input type="text" id="simInput" placeholder="Escribir como si fueras el cliente…">
               <button class="btn btn-primary" id="simSend">Enviar</button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Cupones / codigos de descuento -->
+      <section class="view" id="view-coupons">
+        <div class="autos-scroll">
+          <div class="autos-inner">
+
+            <div class="card cfg" style="padding: var(--s5);">
+              <p class="help">
+                Los cupones activos se los pasamos al bot para que los mencione o los
+                aplique cuando corresponda. El código sale siempre en mayúsculas.
+              </p>
+              <div class="field field-row">
+                <div>
+                  <label for="cp_code">Código</label>
+                  <input type="text" id="cp_code" placeholder="CHISPA10">
+                </div>
+                <div>
+                  <label for="cp_discount">Descuento (%)</label>
+                  <input type="number" id="cp_discount" min="0" max="100" step="1" placeholder="10">
+                </div>
+                <div>
+                  <label for="cp_active">Estado</label>
+                  <select id="cp_active">
+                    <option value="1">Activo</option>
+                    <option value="0">Pausado</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="cp_description">Descripción</label>
+                <div class="help">Cuándo aplica, condiciones, hasta cuándo dura.</div>
+                <textarea id="cp_description" rows="2" placeholder="10% off en la primera compra, válido todo agosto"></textarea>
+              </div>
+              <div class="settings-actions">
+                <button class="btn btn-primary" id="cp_save">Agregar cupón</button>
+                <span class="save-msg" id="cp_msg"></span>
+              </div>
+            </div>
+
+            <h2 class="section-title">Cupones cargados</h2>
+            <div class="card run-table" id="cp_list"></div>
+
           </div>
         </div>
       </section>
