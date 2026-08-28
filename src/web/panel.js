@@ -270,6 +270,10 @@ router.post('/api/settings', (req, res) => {
   if (body.maxWordsPerMessage != null) patch.maxWordsPerMessage = Number(body.maxWordsPerMessage);
   if (body.maxWordsHardCap != null) patch.maxWordsHardCap = Number(body.maxWordsHardCap);
   if (body.maxMessageParts != null) patch.maxMessageParts = Number(body.maxMessageParts);
+  if (body.splitRepliesEnabled != null) patch.splitRepliesEnabled = Boolean(body.splitRepliesEnabled);
+  if (body.splitMinWords != null) patch.splitMinWords = Number(body.splitMinWords);
+  if (body.splitGapMinMs != null) patch.splitGapMinMs = Number(body.splitGapMinMs);
+  if (body.splitGapMaxMs != null) patch.splitGapMaxMs = Number(body.splitGapMaxMs);
   if (body.audioReplyEnabled != null) patch.audioReplyEnabled = Boolean(body.audioReplyEnabled);
   res.json(settingsStore.updateSettings(patch));
 });
