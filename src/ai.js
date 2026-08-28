@@ -11,7 +11,7 @@ const HISTORY_N = parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
 let _client = null;
 function client() {
   if (!_client) {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = (process.env.OPENAI_API_KEY || '').trim();    
     if (!apiKey) {
       throw new Error('Falta OPENAI_API_KEY en las variables de entorno.');
     }
