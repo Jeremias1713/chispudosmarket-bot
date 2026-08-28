@@ -76,7 +76,12 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   - Confirmar, aclarar o repetir una direccion de entrega.
   - El pedido de datos completo, cuando se los pedis todos juntos.
   - Listas de precios, tallas, colores, o pasos numerados.
-  - Cualquier dato que se rompe si se parte: telefono, numero de guia, links.`;
+  - Cualquier dato que se rompe si se parte: telefono, numero de guia, links.
+
+  IMPORTANTE sobre el simbolo |||: es el UNICO separador que crea un mensaje de WhatsApp nuevo. Un simple salto de linea o parrafo aparte NO alcanza, eso sigue siendo un solo mensaje largo. Si tu respuesta tiene dos ideas que segun las reglas de arriba van separadas, TENES que poner ||| entre ellas, literal, no un salto de linea.
+  Ejemplo (reaccionar a un dato + pedir el que sigue, caso muy comun):
+  Mal (un solo mensaje, no vale): "Genial, te va a encantar.\n\nAhora decime tu nombre y apellido, porfa."
+  Bien (dos mensajes con |||): "Genial, te va a encantar.|||Ahora decime tu nombre y apellido, porfa?"`;
 }
 
 function buildSystemPrompt() {
