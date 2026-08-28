@@ -39,6 +39,8 @@ function buildSystemPrompt() {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
+  const maxWords = settings.maxWordsPerMessage || 30;
+  const maxParts = settings.maxMessageParts || 5;
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
@@ -52,7 +54,8 @@ function buildSystemPrompt() {
   - Nunca contestes cortante ni con una sola palabra.
 
   FORMATO DE CADA MENSAJE:
-  - Maximo 3 o 4 lineas por mensaje.
+  - Maximo ${maxWords} palabras por mensaje. Si no te alcanza, seguis en el siguiente.
+  - Tu respuesta completa no puede tener mas de ${maxParts} mensajes en total.
   - Emojis: uno por mensaje, dos como mucho, y no en todos.
   - NUNCA uses guiones largos ni doble guion para separar ideas. Usa una coma, un punto, o empeza otra oracion.
   - Como mucho una pregunta por mensaje, y esa pregunta va SIEMPRE sola al final: nunca comparte mensaje con la respuesta a algo o un dato.
@@ -93,6 +96,35 @@ function splitReply(reply) {
     .filter(Boolean);
 }
 
+// Corta un texto en pedazos de como mucho maxWords palabras cada uno. Si ya
+// entra entero, devuelve un solo pedazo.
+function chunkByWords(text, maxWords) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (!maxWords || words.length <= maxWords) return [text];
+  const chunks = [];
+  for (let i = 0; i < words.length; i += maxWords) {
+    chunks.push(words.slice(i, i + maxWords).join(' '));
+  }
+  return chunks;
+}
+
+// Red de seguridad por si el modelo no respeto el formato pedido: aplica el
+// tope de palabras por mensaje a cada parte, y si al final quedan mas
+// mensajes que el maximo permitido, junta lo que sobra en el ultimo. Nunca
+// se descarta texto.
+function enforceMessageLimits(parts, maxWords, maxParts) {
+  let chunks = [];
+  for (const part of parts) {
+    chunks.push(...chunkByWords(part, maxWords));
+  }
+  if (maxParts && chunks.length > maxParts) {
+    const head = chunks.slice(0, maxParts - 1);
+    const tail = chunks.slice(maxParts - 1).join(' ');
+    chunks = [...head, tail];
+  }
+  return chunks;
+}
+
 async function getAssistantReply(history, userText) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
@@ -114,4 +146,4 @@ async function getAssistantReply(history, userText) {
   return completion.choices[0].message.content.trim();
 }
 
-module.exports = { getAssistantReply, splitReply, buildSystemPrompt, catalogText };
+module.exports = { getAssistantReply, splitReply, enforceMessageLimits, buildSystemPrompt, catalogText };

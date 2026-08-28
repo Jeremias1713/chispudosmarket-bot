@@ -74,6 +74,18 @@ async function sendImageByLink(to, link, caption) {
   });
 }
 
+// Manda una nota de voz por URL publica (mismo mecanismo que sendImageByLink):
+// nuestro propio /media/<archivo>.mp3, generado por tts.js.
+async function sendAudioByLink(to, link) {
+  const api = client();
+  await api.post('/messages', {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'audio',
+    audio: { link },
+  });
+}
+
 async function sendTemplate(to, templateName, languageCode, params) {
   languageCode = languageCode || 'es';
   params = params || [];
@@ -105,4 +117,4 @@ async function markAsRead(messageId) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendLocationRequest, sendImageByLink, sendTemplate, markAsRead };
+module.exports = { sendText, sendButtons, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead };

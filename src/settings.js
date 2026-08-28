@@ -18,6 +18,18 @@ const DEFAULTS = {
   openaiModel: null,
   openaiTemperature: null,
   openaiHistoryN: null,
+  // Cuanto espera el bot en milisegundos DESPUES del ultimo mensaje del
+  // cliente antes de contestar. Si el cliente manda varios mensajes
+  // seguidos, cada uno reinicia la espera: el bot recien contesta cuando
+  // el cliente se queda callado ese rato.
+  replyDelayMs: 8000,
+  // Tope de palabras por mensaje y de mensajes por respuesta. Si el modelo
+  // se pasa, se corta y se reparte en varios mensajes; nunca se descarta
+  // texto (lo que sobra se pega al ultimo mensaje permitido).
+  maxWordsPerMessage: 30,
+  maxMessageParts: 5,
+  // Ademas del texto, manda una nota de voz con la misma respuesta.
+  audioReplyEnabled: true,
 };
 
 function load() {

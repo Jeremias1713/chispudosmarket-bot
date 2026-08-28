@@ -34,21 +34,21 @@ app.post('/webhook', async (req, res) => {
     const entry = req.body.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
-    const message = value?.messages?.[0];
+    const messages = value?.messages || [];
 
-    if (!message) {
-      // Puede ser un evento de estado (entregado/leido), lo ignoramos.
-      return;
+    // Normalmente Meta manda un mensaje por webhook, pero a veces junta
+    // varios en un mismo POST (por ejemplo si el cliente escribio rapido):
+    // se procesan todos, uno por uno, en el orden en que llegaron.
+    for (const message of messages) {
+      const from = message.from; // numero del cliente
+      const profileName = value?.contacts?.find((c) => c.wa_id === from)?.profile?.name || null;
+
+      if (message.id) {
+        markAsRead(message.id).catch(() => {});
+      }
+
+      await handleIncomingMessage(from, message, profileName);
     }
-
-    const from = message.from; // numero del cliente
-    const profileName = value?.contacts?.find((c) => c.wa_id === from)?.profile?.name || null;
-
-    if (message.id) {
-      markAsRead(message.id).catch(() => {});
-    }
-
-    await handleIncomingMessage(from, message, profileName);
   } catch (err) {
     console.error('Error procesando mensaje entrante:', err);
   }
