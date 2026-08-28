@@ -129,6 +129,12 @@
               <button class="btn" id="amountSaveBtn" type="button">Guardar</button>
             </div>
 
+            <div class="followup-bar note-bar" id="noteBar" hidden>
+              <span class="followup-info">Nota interna</span>
+              <input type="text" id="noteInput" placeholder="Ej: cliente frecuente, pide al mayor..." style="flex:1;min-width:160px">
+              <button class="btn" id="noteSaveBtn" type="button">Guardar</button>
+            </div>
+
             <div class="memory-card" id="memoryCard" hidden></div>
 
             <div class="chat-messages" id="chatMessages">
@@ -182,6 +188,9 @@
 
             <h2 class="section-title">Ciudades con más pedidos</h2>
             <div class="card" id="metricsLocations"></div>
+
+            <h2 class="section-title">Productos más vendidos</h2>
+            <div class="card" id="metricsProducts"></div>
 
           </div>
         </div>
@@ -276,14 +285,17 @@
               </div>
 
               <div class="field">
-                <label for="p_introImage">Fotos del mensaje inicial (opcional)</label>
+                <label>Fotos del mensaje inicial (opcional)</label>
                 <div class="help">
-                  Se eligen de la biblioteca de imágenes. Podés elegir más de una
-                  (mantené Ctrl o Cmd apretado para seleccionar varias): se mandan
-                  una detrás de otra, y el texto de arriba va con la última.
+                  Se eligen de la biblioteca de imágenes. Tocá las que quieras (podés
+                  elegir más de una): se mandan una detrás de otra, y el texto de
+                  arriba va con la última.
                 </div>
-                <select id="p_introImage" multiple size="5">
-                </select>
+                <div class="img-picker" data-picker="introImage">
+                  <input type="text" class="img-picker-search" placeholder="Buscar imagen por nombre...">
+                  <div class="img-picker-grid"></div>
+                  <div class="img-picker-empty help" hidden>No hay imágenes con ese nombre. Subilas desde la pestaña Imágenes.</div>
+                </div>
               </div>
 
               <div class="field">
@@ -314,13 +326,20 @@
               <p class="help">
                 Las fotos que subas acá se pueden usar como mensaje inicial de un
                 producto. <strong>El nombre importa</strong>: es la referencia con la que
-                las vas a reconocer en la grilla.
+                las vas a reconocer en la grilla. Podés subir varias a la vez y
+                organizarlas en carpetas.
               </p>
               <label class="btn btn-primary lib-upload">
-                Subir imagen
-                <input type="file" id="libFile" accept="image/jpeg,image/png,image/webp" hidden>
+                <span id="libUploadLabel">Subir imágenes</span>
+                <input type="file" id="libFile" accept="image/jpeg,image/png,image/webp" multiple hidden>
               </label>
             </div>
+
+            <div class="lib-toolbar">
+              <input type="text" id="libSearch" class="lib-search" placeholder="Buscar por nombre...">
+              <div class="lib-folders" id="libFolders"></div>
+            </div>
+
             <div class="lib-grid" id="libGrid"></div>
           </div>
         </div>
@@ -503,14 +522,17 @@
                 </div>
 
                 <div class="field">
-                  <label for="cfg_welcomeImage">Fotos del saludo inicial (opcional)</label>
+                  <label>Fotos del saludo inicial (opcional)</label>
                   <div class="help">
-                    Se eligen de la biblioteca de imágenes (pestaña "Imágenes"). Podés elegir
-                    más de una (mantené Ctrl o Cmd apretado). Si cargás alguna, el saludo de
-                    arriba sale junto con esas fotos en vez de solo texto.
+                    Se eligen de la biblioteca de imágenes. Tocá las que quieras. Si
+                    cargás alguna, el saludo de arriba sale junto con esas fotos en
+                    vez de solo texto.
                   </div>
-                  <select id="cfg_welcomeImage" multiple size="5">
-                  </select>
+                  <div class="img-picker" data-picker="welcomeImage">
+                    <input type="text" class="img-picker-search" placeholder="Buscar imagen por nombre...">
+                    <div class="img-picker-grid"></div>
+                    <div class="img-picker-empty help" hidden>No hay imágenes con ese nombre. Subilas desde la pestaña Imágenes.</div>
+                  </div>
                 </div>
               </div>
             </details>
@@ -681,6 +703,7 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                 </div>
                 <div class="settings-actions">
                   <button class="btn btn-primary" id="backup_download">Descargar copia de seguridad</button>
+                  <button class="btn" id="csv_download">Descargar ventas en Excel/CSV</button>
                   <span class="save-msg" id="backup_msg"></span>
                 </div>
               </div>

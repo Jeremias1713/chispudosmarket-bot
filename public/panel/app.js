@@ -14,6 +14,8 @@ const state = {
   pipelineFrom: '',
   pipelineTo: '',
   chatPhone: null,
+  libFolder: '',
+  libSearch: '',
 }
 
 /* ---------- utilidades ---------- */
@@ -322,6 +324,7 @@ async function loadChat() {
   renderStagePicker(conversation)
   renderFollowUp(conversation)
   renderAmount(conversation)
+  renderNote(conversation)
   renderMemory(conversation)
   renderMessages(messages)
 }
@@ -376,6 +379,31 @@ async function saveAmount(phone) {
     return
   }
   if (state.activeView === 'view-metrics') pollMetrics()
+}
+
+/* ---------- nota interna del cliente ---------- */
+
+function renderNote(convo) {
+  $('noteBar').hidden = false
+  // Mismo cuidado que con el monto: no pisar lo que la persona esta
+  // escribiendo si el polling llega mientras el campo esta enfocado.
+  if (document.activeElement !== $('noteInput')) {
+    $('noteInput').value = convo.note || ''
+  }
+  $('noteSaveBtn').onclick = () => saveNote(convo.phone)
+}
+
+async function saveNote(phone) {
+  const note = $('noteInput').value
+  $('noteInput').blur()
+  try {
+    await api('/conversations/' + encodeURIComponent(phone) + '/note', {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    })
+  } catch (err) {
+    showError(err)
+  }
 }
 
 async function sendManual() {
@@ -645,6 +673,13 @@ function locationRow(loc) {
   </div>`
 }
 
+function productRow(p) {
+  return `<div class="location-row">
+    <span class="location-name">${esc(p.producto)}</span>
+    <span class="location-count">${esc(p.count)} vendido${p.count === 1 ? '' : 's'}${p.revenue ? ' · ' + fmtMoney(p.revenue) : ''}</span>
+  </div>`
+}
+
 async function pollMetrics() {
   if (state.activeView !== 'view-metrics') return
   let m
@@ -669,6 +704,10 @@ async function pollMetrics() {
   $('metricsLocations').innerHTML = m.topLocations.length
     ? m.topLocations.map(locationRow).join('')
     : emptyState('📍', 'Todavía no hay ciudades cargadas', 'Aparecen apenas el bot anote la ciudad de algún cliente.')
+
+  $('metricsProducts').innerHTML = (m.topProducts || []).length
+    ? m.topProducts.map(productRow).join('')
+    : emptyState('🏆', 'Todavía no hay ventas cargadas', 'Aparece apenas marques una conversación como "Vendido" con su producto.')
 }
 
 /* ---------- catálogo de productos ---------- */
@@ -721,21 +760,62 @@ async function pollProducts() {
   })
 }
 
-function fillMultiImageSelect(sel, selectedIds) {
-  const ids = new Set(selectedIds || [])
-  sel.innerHTML = libraryCache.length
-    ? libraryCache.map((img) => `<option value="${esc(img.id)}">${esc(img.name)}</option>`).join('')
-    : '<option value="" disabled>Todavía no subiste ninguna imagen (pestaña Imágenes)</option>'
-  Array.from(sel.options).forEach((opt) => { opt.selected = ids.has(opt.value) })
+/* ---------- selector visual de imágenes (con miniaturas y buscador) ---------- */
+/* Reemplaza a los <select multiple> de toda la vida: elegir una foto de la
+   biblioteca sin tener que acordarse de nombres largos en una lista de texto. */
+
+const imagePickers = {}
+
+function renderImagePickerGrid(key) {
+  const root = document.querySelector(`.img-picker[data-picker="${key}"]`)
+  if (!root || !imagePickers[key]) return
+  const search = root.querySelector('.img-picker-search').value.trim().toLowerCase()
+  const grid = root.querySelector('.img-picker-grid')
+  const empty = root.querySelector('.img-picker-empty')
+  const selected = new Set(imagePickers[key].selectedIds)
+  const items = libraryCache.filter((img) => !search || img.name.toLowerCase().includes(search))
+
+  empty.hidden = items.length > 0 || libraryCache.length === 0
+  if (!libraryCache.length) {
+    grid.innerHTML = ''
+    empty.hidden = false
+    empty.textContent = 'Todavía no subiste ninguna imagen (pestaña Imágenes).'
+    return
+  }
+  empty.textContent = 'No hay imágenes con ese nombre.'
+
+  grid.innerHTML = items.map((img) => `
+    <label class="img-picker-item${selected.has(img.id) ? ' is-selected' : ''}" data-id="${esc(img.id)}">
+      <img src="/media/${esc(img.filename)}" alt="${esc(img.name)}" loading="lazy">
+      <span class="img-picker-name">${esc(img.name)}</span>
+      ${selected.has(img.id) ? '<span class="img-picker-check">✓</span>' : ''}
+    </label>`).join('')
+
+  grid.querySelectorAll('.img-picker-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.id
+      const st = imagePickers[key]
+      const i = st.selectedIds.indexOf(id)
+      if (i === -1) st.selectedIds.push(id)
+      else st.selectedIds.splice(i, 1)
+      renderImagePickerGrid(key)
+    })
+  })
 }
 
-function fillIntroImageSelect(selectedIds) {
-  fillMultiImageSelect($('p_introImage'), selectedIds)
+function initImagePicker(key, selectedIds) {
+  imagePickers[key] = { selectedIds: [...(selectedIds || [])] }
+  renderImagePickerGrid(key)
 }
 
-function fillWelcomeImageSelect(selectedIds) {
-  fillMultiImageSelect($('cfg_welcomeImage'), selectedIds)
+function getImagePickerSelection(key) {
+  return imagePickers[key]?.selectedIds || []
 }
+
+document.querySelectorAll('.img-picker').forEach((root) => {
+  const key = root.dataset.picker
+  root.querySelector('.img-picker-search').addEventListener('input', () => renderImagePickerGrid(key))
+})
 
 function openProduct(p) {
   editingProductId = p ? p.id : null
@@ -752,7 +832,7 @@ function openProduct(p) {
   $('p_triggers').value = (p?.triggers || []).join(', ')
   $('p_intro').value = p?.intro || ''
   $('p_upsell').value = p?.upsell || ''
-  fillIntroImageSelect(p?.introImageIds)
+  initImagePicker('introImage', p?.introImageIds)
   $('productMsg').textContent = ''
   $('deleteProduct').hidden = !p
   $('productDrawer').hidden = false
@@ -778,7 +858,7 @@ $('saveProduct').addEventListener('click', async () => {
     prompt: $('p_prompt').value,
     triggers: $('p_triggers').value,
     intro: $('p_intro').value,
-    introImageIds: Array.from($('p_introImage').selectedOptions).map((o) => o.value),
+    introImageIds: getImagePickerSelection('introImage'),
     upsell: $('p_upsell').value,
   }
   if (!body.name) {
@@ -810,16 +890,47 @@ $('deleteProduct').addEventListener('click', async () => {
 
 /* ---------- biblioteca de imágenes ---------- */
 
-function libCard(img) {
+const NO_FOLDER = '__sin_carpeta__'
+
+function folderOptionsHtml(current, folders) {
+  const opts = [`<option value="" ${!current ? 'selected' : ''}>Sin carpeta</option>`]
+    .concat(folders.map((f) => `<option value="${esc(f)}" ${f === current ? 'selected' : ''}>${esc(f)}</option>`))
+    .concat(['<option value="__nueva__">+ Nueva carpeta…</option>'])
+  return opts.join('')
+}
+
+function libCard(img, folders) {
   return `<article class="lib-card card" data-id="${esc(img.id)}">
     <div class="lib-thumb"><img src="/media/${esc(img.filename)}" alt="${esc(img.name)}" loading="lazy"></div>
     <div class="lib-body">
-      <div class="lib-name">${esc(img.name)}</div>
+      <div class="lib-name lib-rename" title="Tocá para renombrar">${esc(img.name)}</div>
+      <select class="lib-folder-select">${folderOptionsHtml(img.folder || '', folders)}</select>
       <div class="lib-foot">
         <button class="btn lib-del" aria-label="Borrar imagen">Borrar</button>
       </div>
     </div>
   </article>`
+}
+
+function currentLibraryFolders() {
+  const set = new Set()
+  libraryCache.forEach((img) => { if (img.folder) set.add(img.folder) })
+  return [...set].sort((a, b) => a.localeCompare(b, 'es'))
+}
+
+function renderLibFolderChips(folders) {
+  const chips = [
+    `<button class="filter-chip${state.libFolder === '' ? ' is-on' : ''}" type="button" data-folder="">Todas</button>`,
+    `<button class="filter-chip${state.libFolder === NO_FOLDER ? ' is-on' : ''}" type="button" data-folder="${NO_FOLDER}">Sin carpeta</button>`,
+    ...folders.map((f) => `<button class="filter-chip${state.libFolder === f ? ' is-on' : ''}" type="button" data-folder="${esc(f)}">${esc(f)}</button>`),
+  ]
+  $('libFolders').innerHTML = chips.join('')
+  $('libFolders').querySelectorAll('.filter-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.libFolder = btn.dataset.folder
+      pollLibrary()
+    })
+  })
 }
 
 async function pollLibrary() {
@@ -828,9 +939,18 @@ async function pollLibrary() {
   try { list = await api('/library') } catch { return }
   libraryCache = list
 
-  $('libGrid').innerHTML = list.length
-    ? list.map(libCard).join('')
-    : emptyState('🖼️', 'Todavía no subiste ninguna imagen', 'Subila y ponele un nombre claro para reconocerla al elegir la foto de un producto.')
+  const folders = currentLibraryFolders()
+  renderLibFolderChips(folders)
+
+  const search = state.libSearch.trim().toLowerCase()
+  let filtered = list
+  if (state.libFolder === NO_FOLDER) filtered = filtered.filter((img) => !img.folder)
+  else if (state.libFolder) filtered = filtered.filter((img) => img.folder === state.libFolder)
+  if (search) filtered = filtered.filter((img) => img.name.toLowerCase().includes(search))
+
+  $('libGrid').innerHTML = filtered.length
+    ? filtered.map((img) => libCard(img, folders)).join('')
+    : emptyState('🖼️', list.length ? 'Nada con ese filtro' : 'Todavía no subiste ninguna imagen', list.length ? 'Probá con otra carpeta o borrá la búsqueda.' : 'Subila y ponele un nombre claro para reconocerla al elegir la foto de un producto.')
 
   $('libGrid').querySelectorAll('.lib-card').forEach((card) => {
     const id = card.dataset.id
@@ -841,30 +961,73 @@ async function pollLibrary() {
         pollLibrary()
       } catch (err) { showError(err) }
     })
+    card.querySelector('.lib-rename').addEventListener('click', async () => {
+      const img = libraryCache.find((i) => i.id === id)
+      const nombre = prompt('¿Cómo se llama esta imagen?', img?.name || '')
+      if (nombre === null || !nombre.trim()) return
+      try {
+        await api('/library/' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ name: nombre.trim() }) })
+        pollLibrary()
+      } catch (err) { showError(err) }
+    })
+    card.querySelector('.lib-folder-select').addEventListener('change', async (e) => {
+      let folder = e.target.value
+      if (folder === '__nueva__') {
+        const nueva = prompt('Nombre de la carpeta nueva:')
+        if (!nueva || !nueva.trim()) { pollLibrary(); return }
+        folder = nueva.trim()
+      }
+      try {
+        await api('/library/' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ folder }) })
+        pollLibrary()
+      } catch (err) { showError(err) }
+    })
   })
 }
 
+let libSearchTimer = null
+$('libSearch').addEventListener('input', () => {
+  state.libSearch = $('libSearch').value
+  clearTimeout(libSearchTimer)
+  libSearchTimer = setTimeout(pollLibrary, 200)
+})
+
+// Sube uno o varios archivos de una. El nombre sale del nombre del archivo
+// (se puede corregir después tocando el nombre en la grilla), y si estás
+// mirando una carpeta puntual las nuevas fotos caen ahí directo.
 $('libFile').addEventListener('change', async (e) => {
-  const file = e.target.files?.[0]
-  if (!file) return
+  const files = Array.from(e.target.files || [])
+  if (!files.length) return
   e.target.value = ''
 
-  const sugerido = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim()
-  const nombre = prompt('¿Cómo se llama esta imagen?', sugerido)
-  if (nombre === null) return
+  const folder = state.libFolder && state.libFolder !== NO_FOLDER ? state.libFolder : ''
+  const label = $('libUploadLabel')
+  const errors = []
 
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('name', nombre)
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    if (label) label.textContent = files.length > 1 ? `Subiendo ${i + 1}/${files.length}…` : 'Subiendo…'
+    const nombre = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || file.name
 
-  try {
-    const res = await fetch('/panel/api/library', { method: 'POST', body: formData })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error || res.statusText)
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', nombre)
+    if (folder) formData.append('folder', folder)
+
+    try {
+      const res = await fetch('/panel/api/library', { method: 'POST', body: formData })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || res.statusText)
+      }
+    } catch (err) {
+      errors.push(`${file.name}: ${err.message}`)
     }
-    pollLibrary()
-  } catch (err) { showError(err) }
+  }
+
+  if (label) label.textContent = 'Subir imágenes'
+  pollLibrary()
+  if (errors.length) alert('Algunas imágenes no se pudieron subir:\n' + errors.join('\n'))
 })
 
 /* ---------- envíos masivos ---------- */
@@ -1046,8 +1209,8 @@ async function loadSettings() {
   $('cfg_splitGapMin').value = (s.splitGapMinMs ?? 6000) / 1000
   $('cfg_splitGapMax').value = (s.splitGapMaxMs ?? 9500) / 1000
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
-  try { libraryCache = await api('/library') } catch { /* si falla, el select queda solo con "Sin foto" */ }
-  fillWelcomeImageSelect(s.welcomeImageIds)
+  try { libraryCache = await api('/library') } catch { /* si falla, el selector queda vacío */ }
+  initImagePicker('welcomeImage', s.welcomeImageIds)
   updateTempDisplay()
   updateHistoryDisplay()
   updateReplyDelayDisplay()
@@ -1066,7 +1229,7 @@ $('cfg_save').addEventListener('click', async () => {
     botEnabled: $('cfg_botToggle').checked,
     businessName: $('cfg_businessName').value.trim(),
     welcomeMessage: $('cfg_welcome').value,
-    welcomeImageIds: Array.from($('cfg_welcomeImage').selectedOptions).map((o) => o.value),
+    welcomeImageIds: getImagePickerSelection('welcomeImage'),
     knowledgeBase: $('cfg_knowledge').value,
     openaiModel: $('cfg_model').value.trim(),
     openaiTemperature: Number($('cfg_temperature').value),
@@ -1114,6 +1277,30 @@ $('backup_download').addEventListener('click', async () => {
     $('backup_msg').textContent = err.message
   } finally {
     $('backup_download').disabled = false
+  }
+})
+
+$('csv_download').addEventListener('click', async () => {
+  $('csv_download').disabled = true
+  $('backup_msg').textContent = 'Generando...'
+  try {
+    const res = await fetch('/panel/api/export.csv')
+    if (!res.ok) throw new Error('No se pudo generar el archivo')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chispudos-ventas-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    $('backup_msg').textContent = 'Listo, revisá tus descargas'
+    setTimeout(() => { $('backup_msg').textContent = '' }, 2500)
+  } catch (err) {
+    $('backup_msg').textContent = err.message
+  } finally {
+    $('csv_download').disabled = false
   }
 })
 

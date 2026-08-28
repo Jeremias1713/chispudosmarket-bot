@@ -1092,6 +1092,49 @@ body.is-touch-dragging .kcard { -webkit-touch-callout: none; }
 .lib-del { margin-left: auto; padding: var(--s1) var(--s2); font-size: 12px; }
 .lib-del:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger-strong); }
 .lib-empty { grid-column: 1 / -1; }
+.lib-rename { cursor: pointer; }
+.lib-rename:hover { color: var(--view); }
+.lib-folder-select {
+  width: 100%; font-size: 12px; padding: var(--s1) var(--s2);
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface);
+}
+
+.lib-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+.lib-search {
+  flex: 0 1 240px; padding: var(--s2) var(--s3); border: 1px solid var(--border);
+  border-radius: var(--radius-control); background: var(--surface); font-size: 13px;
+}
+.lib-folders { display: flex; flex-wrap: wrap; gap: var(--s2); flex: 1; }
+
+/* ---------- selector visual de imágenes ---------- */
+.img-picker {
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  padding: var(--s3); display: flex; flex-direction: column; gap: var(--s3);
+}
+.img-picker-search {
+  padding: var(--s2) var(--s3); border: 1px solid var(--border);
+  border-radius: var(--radius-control); background: var(--surface); font-size: 13px;
+}
+.img-picker-grid {
+  display: grid; gap: var(--s3); max-height: 260px; overflow-y: auto;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+.img-picker-item {
+  position: relative; cursor: pointer; border: 2px solid transparent; border-radius: var(--radius-control);
+  overflow: hidden; display: flex; flex-direction: column; background: var(--surface-soft);
+}
+.img-picker-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+.img-picker-name {
+  font-size: 11px; padding: var(--s1) var(--s2); text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.img-picker-item.is-selected { border-color: var(--view); }
+.img-picker-check {
+  position: absolute; top: var(--s1); right: var(--s1); background: var(--view); color: #fff;
+  border-radius: 999px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1;
+}
+.img-picker-empty { margin: 0; }
 
 /* ============================================================
    Catálogo de productos
