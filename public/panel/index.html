@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panel de ventas — ChispudosMarket</title>
 <link rel="stylesheet" href="/panel/styles.css">
+<link rel="manifest" href="/panel/manifest.json">
+<meta name="theme-color" content="#5D5FEF">
+<link rel="icon" href="/panel/icon-192.png">
+<link rel="apple-touch-icon" href="/panel/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ChispudosMarket">
 </head>
 <body>
 
@@ -682,6 +690,37 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                 <div class="settings-actions">
                   <button class="btn btn-primary" id="agencies_upload">Importar Excel</button>
                   <span class="save-msg" id="agencies_msg"></span>
+                </div>
+              </div>
+            </details>
+
+            <details class="card cfg" id="cfg_notifCard">
+              <summary class="cfg-head">
+                <span class="cfg-title">Notificaciones y app en el celular</span>
+                <span class="cfg-sub">Aviso al instante cuando hay una venta nueva</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="field">
+                  <div class="help">
+                    Activá esto para que te llegue una notificación al celular (o la PC) apenas
+                    una conversación pasa a la etapa "Vendido", como las notificaciones de venta
+                    de Shopify. Funciona aunque tengas el panel cerrado, siempre que lo hayas
+                    abierto al menos una vez en ese dispositivo y lo hayas dejado instalado o
+                    con el navegador con permiso.
+                  </div>
+                </div>
+                <div class="settings-actions">
+                  <button class="btn btn-primary" id="notif_enable">Activar notificaciones en este dispositivo</button>
+                  <button class="btn" id="notif_test" hidden>Mandar notificación de prueba</button>
+                  <span class="save-msg" id="notif_msg"></span>
+                </div>
+                <div class="field" style="margin-top:var(--s3)">
+                  <div class="help">
+                    <strong>Tip:</strong> para tenerlo como una app en tu celular (sin escribir la
+                    URL cada vez), abrí este panel desde el navegador del celular y elegí
+                    "Agregar a pantalla de inicio" (Chrome/Android) o "Compartir → Agregar a
+                    inicio" (Safari/iPhone). Queda con ícono propio y se abre a pantalla completa.
+                  </div>
                 </div>
               </div>
             </details>

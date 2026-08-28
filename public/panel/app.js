@@ -1304,6 +1304,102 @@ $('csv_download').addEventListener('click', async () => {
   }
 })
 
+/* ---------- notificaciones push (venta nueva, tipo Shopify) ---------- */
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(base64)
+  const arr = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i)
+  return arr
+}
+
+let swRegistration = null
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return null
+  try {
+    swRegistration = await navigator.serviceWorker.register('/panel/sw.js')
+    return swRegistration
+  } catch (err) {
+    console.error('No se pudo registrar el service worker', err)
+    return null
+  }
+}
+
+async function refreshNotifBtn() {
+  const btn = $('notif_enable')
+  const testBtn = $('notif_test')
+  if (!btn) return
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    btn.textContent = 'No disponible en este navegador'
+    btn.disabled = true
+    return
+  }
+  if (Notification.permission === 'denied') {
+    btn.textContent = 'Bloqueado — habilitalo en los permisos del sitio'
+    btn.disabled = true
+    return
+  }
+  const reg = swRegistration || (await navigator.serviceWorker.getRegistration('/panel/'))
+  const sub = reg ? await reg.pushManager.getSubscription() : null
+  if (sub) {
+    btn.textContent = 'Notificaciones activadas en este dispositivo ✓'
+    btn.disabled = true
+    testBtn.hidden = false
+  } else {
+    btn.textContent = 'Activar notificaciones en este dispositivo'
+    btn.disabled = false
+    testBtn.hidden = true
+  }
+}
+
+$('notif_enable')?.addEventListener('click', async () => {
+  const btn = $('notif_enable')
+  const msg = $('notif_msg')
+  btn.disabled = true
+  msg.textContent = 'Activando...'
+  try {
+    const reg = swRegistration || (await registerServiceWorker())
+    if (!reg) throw new Error('El navegador no soporta esto')
+
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') throw new Error('No diste el permiso de notificaciones')
+
+    const { publicKey } = await fetch('/panel/api/push/public-key').then((r) => r.json())
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    })
+    await fetch('/panel/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription }),
+    })
+    msg.textContent = 'Listo, ya te van a llegar avisos de venta acá.'
+    setTimeout(() => { msg.textContent = '' }, 3000)
+  } catch (err) {
+    msg.textContent = err.message
+  } finally {
+    await refreshNotifBtn()
+  }
+})
+
+$('notif_test')?.addEventListener('click', async () => {
+  const msg = $('notif_msg')
+  msg.textContent = 'Mandando...'
+  try {
+    const r = await fetch('/panel/api/push/test', { method: 'POST' }).then((r) => r.json())
+    msg.textContent = r.sent > 0 ? 'Mandada, revisá tu celular/PC.' : 'No hay dispositivos activados todavía.'
+  } catch (err) {
+    msg.textContent = 'No se pudo mandar.'
+  }
+  setTimeout(() => { msg.textContent = '' }, 3000)
+})
+
+registerServiceWorker().then(() => refreshNotifBtn())
+
 /* ---------- cobertura de agencias ---------- */
 
 async function loadAgenciesMeta() {

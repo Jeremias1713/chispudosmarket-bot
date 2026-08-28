@@ -1517,6 +1517,13 @@ input[type="range"]:focus { box-shadow: 0 0 0 3px var(--primary-soft); }
   .res-template-row .btn { flex: 1; }
   .res-phrase-row { flex-wrap: wrap; }
   .res-phrase-text { flex: 1 1 100%; }
+
+  /* En celular, un input con letra menor a 16px hace que Safari/iOS le haga
+     zoom automático a toda la página apenas lo tocás. Acá adentro son
+     "de touch" sí o sí, así que force 16px sin tocar el tamaño en PC. */
+  input[type="text"], input[type="number"], input[type="search"], textarea, select {
+    font-size: 16px;
+  }
 }
 
 /* ============================================================
