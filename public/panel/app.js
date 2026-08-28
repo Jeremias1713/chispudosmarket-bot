@@ -801,6 +801,9 @@ function bindRangeDisplay(rangeId, valId, suffix) {
 
 const updateTempDisplay = bindRangeDisplay('cfg_temperature', 'cfg_temperature_val')
 const updateHistoryDisplay = bindRangeDisplay('cfg_historyN', 'cfg_historyN_val')
+const updateReplyDelayDisplay = bindRangeDisplay('cfg_replyDelay', 'cfg_replyDelay_val', ' s')
+const updateMaxWordsDisplay = bindRangeDisplay('cfg_maxWords', 'cfg_maxWords_val', ' palabras')
+const updateMaxPartsDisplay = bindRangeDisplay('cfg_maxParts', 'cfg_maxParts_val', ' mensajes')
 
 async function loadSettings() {
   let s
@@ -812,8 +815,15 @@ async function loadSettings() {
   $('cfg_model').value = s.openaiModel || ''
   $('cfg_temperature').value = s.openaiTemperature ?? 0.7
   $('cfg_historyN').value = s.openaiHistoryN ?? 12
+  $('cfg_replyDelay').value = Math.round((s.replyDelayMs ?? 8000) / 1000)
+  $('cfg_maxWords').value = s.maxWordsPerMessage ?? 30
+  $('cfg_maxParts').value = s.maxMessageParts ?? 5
+  $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
   updateTempDisplay()
   updateHistoryDisplay()
+  updateReplyDelayDisplay()
+  updateMaxWordsDisplay()
+  updateMaxPartsDisplay()
   $('cfg_msg').textContent = ''
 }
 
@@ -826,6 +836,10 @@ $('cfg_save').addEventListener('click', async () => {
     openaiModel: $('cfg_model').value.trim(),
     openaiTemperature: Number($('cfg_temperature').value),
     openaiHistoryN: Number($('cfg_historyN').value),
+    replyDelayMs: Number($('cfg_replyDelay').value) * 1000,
+    maxWordsPerMessage: Number($('cfg_maxWords').value),
+    maxMessageParts: Number($('cfg_maxParts').value),
+    audioReplyEnabled: $('cfg_audioEnabled').checked,
   }
   $('cfg_save').disabled = true
   try {

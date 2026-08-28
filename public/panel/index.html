@@ -450,6 +450,48 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
               </div>
             </details>
 
+            <details class="card cfg">
+              <summary class="cfg-head">
+                <span class="cfg-title">Respuestas en varios mensajes</span>
+                <span class="cfg-sub">Espera antes de contestar, largo y nota de voz</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="field">
+                  <label for="cfg_replyDelay">Esperar antes de responder <span class="range-value" id="cfg_replyDelay_val"></span></label>
+                  <div class="help">
+                    El cliente manda «hola» / «cuánto» / «el aceite» en varios mensajes seguidos.
+                    El bot espera este rato de silencio y contesta <strong>una sola vez a todo junto</strong>.
+                    Cada mensaje nuevo reinicia la espera.
+                  </div>
+                  <input type="range" id="cfg_replyDelay" min="0" max="30" step="1">
+                </div>
+
+                <div class="field-row">
+                  <div class="field">
+                    <label for="cfg_maxWords">Máximo de palabras por mensaje <span class="range-value" id="cfg_maxWords_val"></span></label>
+                    <div class="help">Si el modelo se pasa, se corta y se reparte en el siguiente mensaje.</div>
+                    <input type="range" id="cfg_maxWords" min="10" max="80" step="5">
+                  </div>
+                  <div class="field">
+                    <label for="cfg_maxParts">Máximo de mensajes por respuesta <span class="range-value" id="cfg_maxParts_val"></span></label>
+                    <div class="help">Lo que sobre se pega al último: nunca se descarta texto.</div>
+                    <input type="range" id="cfg_maxParts" min="1" max="8" step="1">
+                  </div>
+                </div>
+
+                <div class="field field-master">
+                  <label class="switch">
+                    <input type="checkbox" id="cfg_audioEnabled">
+                    <span>Responder también con una nota de voz</span>
+                  </label>
+                  <div class="help">
+                    Además del texto, el bot manda un audio leyendo la misma respuesta.
+                    Necesita que el servidor tenga una URL pública (ya la tiene en Render).
+                  </div>
+                </div>
+              </div>
+            </details>
+
             <div class="settings-actions">
               <button class="btn btn-primary" id="cfg_save">Guardar configuración</button>
               <span class="save-msg" id="cfg_msg"></span>
