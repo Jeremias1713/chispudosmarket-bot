@@ -192,7 +192,11 @@ function sanitizeProductInput(body) {
   if (body.prompt != null) patch.prompt = String(body.prompt);
   if (body.intro != null) patch.intro = String(body.intro);
   if (body.upsell != null) patch.upsell = String(body.upsell);
-  if (body.introImageId !== undefined) patch.introImageId = body.introImageId || null;
+  if (body.introImageIds !== undefined) {
+    patch.introImageIds = Array.isArray(body.introImageIds)
+      ? body.introImageIds
+      : String(body.introImageIds || '').split(',').map((t) => t.trim()).filter(Boolean);
+  }
   if (body.triggers != null) {
     patch.triggers = Array.isArray(body.triggers)
       ? body.triggers
@@ -254,7 +258,11 @@ router.post('/api/settings', (req, res) => {
   const patch = {};
   const fields = ['businessName', 'welcomeMessage', 'knowledgeBase', 'openaiModel'];
   for (const f of fields) if (body[f] != null) patch[f] = String(body[f]);
-  if (body.welcomeImageId !== undefined) patch.welcomeImageId = body.welcomeImageId || null;
+  if (body.welcomeImageIds !== undefined) {
+    patch.welcomeImageIds = Array.isArray(body.welcomeImageIds)
+      ? body.welcomeImageIds
+      : String(body.welcomeImageIds || '').split(',').map((t) => t.trim()).filter(Boolean);
+  }
   if (body.openaiTemperature != null) patch.openaiTemperature = Number(body.openaiTemperature);
   if (body.openaiHistoryN != null) patch.openaiHistoryN = Number(body.openaiHistoryN);
   if (body.botEnabled != null) patch.botEnabled = Boolean(body.botEnabled);
