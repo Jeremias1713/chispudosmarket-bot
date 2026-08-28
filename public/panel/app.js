@@ -119,6 +119,11 @@ function showView(viewId) {
   const tab = document.querySelector(`.tab[data-view="${viewId}"]`)
   $('viewTitle').textContent = tab?.dataset.label ?? ''
   if (viewId === 'view-pipeline') pollPipeline()
+  if (viewId === 'view-products') pollProducts()
+  if (viewId === 'view-library') pollLibrary()
+  if (viewId === 'view-broadcast') loadBroadcastView()
+  if (viewId === 'view-sim') pollSimulator()
+  if (viewId === 'view-config') loadSettings()
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -459,6 +464,381 @@ async function pollPipeline() {
   renderBoard(filtrarPorTiempo(list, state.pipelineWindow))
 }
 
+/* ---------- catálogo de productos ---------- */
+
+let libraryCache = []
+let productDrawerOpen = false
+let editingProductId = null
+
+function productCard(p) {
+  const badges = [
+    p.active === false ? '<span class="badge badge-warning">Pausado</span>' : '',
+    p.prompt ? '<span class="badge">Prompt propio</span>' : '',
+    (p.triggers && p.triggers.length) ? '<span class="badge">Palabras gatillo</span>' : '',
+  ].filter(Boolean).join('')
+
+  const img = libraryCache.find((i) => i.id === p.introImageId)
+  const thumb = img
+    ? `<img src="/media/${esc(img.filename)}" alt="${esc(p.name)}">`
+    : '<span class="product-noimg">Sin foto</span>'
+
+  return `<article class="product-card card" data-id="${esc(p.id)}">
+    <div class="product-thumb">${thumb}</div>
+    <div class="product-body">
+      <div class="product-name">${esc(p.name || 'Sin nombre')}</div>
+      <div class="product-price">${p.price ? esc(Number(p.price).toFixed(2) + ' ' + p.currency) : 'Sin precio'}</div>
+      ${badges}
+    </div>
+  </article>`
+}
+
+let productCache = []
+
+async function pollProducts() {
+  if (state.activeView !== 'view-products') return
+  let list
+  try { list = await api('/products') } catch { return }
+  productCache = list
+  try { libraryCache = await api('/library') } catch { /* ya la tenemos de antes, no importa */ }
+
+  if (productDrawerOpen) return
+
+  $('productGrid').innerHTML = list.length
+    ? list.map(productCard).join('')
+    : emptyState('📦', 'Todavía no hay productos', 'Cargá tu primer producto para que el bot sepa qué vende y a qué precio.')
+
+  $('productGrid').querySelectorAll('.product-card').forEach((el) => {
+    el.addEventListener('click', () => openProduct(list.find((p) => p.id === el.dataset.id)))
+  })
+}
+
+function fillIntroImageSelect(selectedId) {
+  const sel = $('p_introImage')
+  sel.innerHTML = '<option value="">Sin foto</option>' +
+    libraryCache.map((img) => `<option value="${esc(img.id)}">${esc(img.name)}</option>`).join('')
+  sel.value = selectedId || ''
+}
+
+function openProduct(p) {
+  editingProductId = p ? p.id : null
+  productDrawerOpen = true
+
+  $('productFormTitle').textContent = p ? 'Editar producto' : 'Nuevo producto'
+  $('p_name').value = p?.name || ''
+  $('p_price').value = p?.price ?? ''
+  $('p_currency').value = p?.currency || 'USD'
+  $('p_active').value = p && p.active === false ? '0' : '1'
+  $('p_sku').value = p?.sku || ''
+  $('p_description').value = p?.description || ''
+  $('p_prompt').value = p?.prompt || ''
+  $('p_triggers').value = (p?.triggers || []).join(', ')
+  $('p_intro').value = p?.intro || ''
+  $('p_upsell').value = p?.upsell || ''
+  fillIntroImageSelect(p?.introImageId)
+  $('productMsg').textContent = ''
+  $('deleteProduct').hidden = !p
+  $('productDrawer').hidden = false
+}
+
+function closeProductDrawer() {
+  productDrawerOpen = false
+  $('productDrawer').hidden = true
+  pollProducts()
+}
+
+$('newProduct').addEventListener('click', () => openProduct(null))
+$('closeProduct').addEventListener('click', closeProductDrawer)
+
+$('saveProduct').addEventListener('click', async () => {
+  const body = {
+    name: $('p_name').value.trim(),
+    price: Number($('p_price').value) || 0,
+    currency: $('p_currency').value.trim() || 'USD',
+    active: $('p_active').value === '1',
+    sku: $('p_sku').value.trim(),
+    description: $('p_description').value,
+    prompt: $('p_prompt').value,
+    triggers: $('p_triggers').value,
+    intro: $('p_intro').value,
+    introImageId: $('p_introImage').value || null,
+    upsell: $('p_upsell').value,
+  }
+  if (!body.name) {
+    $('productMsg').textContent = 'Falta el nombre'
+    return
+  }
+  try {
+    if (editingProductId) {
+      await api('/products/' + encodeURIComponent(editingProductId), { method: 'POST', body: JSON.stringify(body) })
+    } else {
+      await api('/products', { method: 'POST', body: JSON.stringify(body) })
+    }
+    closeProductDrawer()
+  } catch (err) {
+    $('productMsg').textContent = err.message
+  }
+})
+
+$('deleteProduct').addEventListener('click', async () => {
+  if (!editingProductId) return
+  if (!confirm('¿Borrar este producto?')) return
+  try {
+    await api('/products/' + encodeURIComponent(editingProductId), { method: 'DELETE' })
+    closeProductDrawer()
+  } catch (err) {
+    $('productMsg').textContent = err.message
+  }
+})
+
+/* ---------- biblioteca de imágenes ---------- */
+
+function libCard(img) {
+  return `<article class="lib-card card" data-id="${esc(img.id)}">
+    <div class="lib-thumb"><img src="/media/${esc(img.filename)}" alt="${esc(img.name)}" loading="lazy"></div>
+    <div class="lib-body">
+      <div class="lib-name">${esc(img.name)}</div>
+      <div class="lib-foot">
+        <button class="btn lib-del" aria-label="Borrar imagen">Borrar</button>
+      </div>
+    </div>
+  </article>`
+}
+
+async function pollLibrary() {
+  if (state.activeView !== 'view-library') return
+  let list
+  try { list = await api('/library') } catch { return }
+  libraryCache = list
+
+  $('libGrid').innerHTML = list.length
+    ? list.map(libCard).join('')
+    : emptyState('🖼️', 'Todavía no subiste ninguna imagen', 'Subila y ponele un nombre claro para reconocerla al elegir la foto de un producto.')
+
+  $('libGrid').querySelectorAll('.lib-card').forEach((card) => {
+    const id = card.dataset.id
+    card.querySelector('.lib-del').addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta imagen? Los productos que la usen se quedan sin foto.')) return
+      try {
+        await api('/library/' + encodeURIComponent(id), { method: 'DELETE' })
+        pollLibrary()
+      } catch (err) { showError(err) }
+    })
+  })
+}
+
+$('libFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  e.target.value = ''
+
+  const sugerido = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim()
+  const nombre = prompt('¿Cómo se llama esta imagen?', sugerido)
+  if (nombre === null) return
+
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('name', nombre)
+
+  try {
+    const res = await fetch('/panel/api/library', { method: 'POST', body: formData })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    pollLibrary()
+  } catch (err) { showError(err) }
+})
+
+/* ---------- envíos masivos ---------- */
+
+$('bc_scope').addEventListener('change', () => {
+  $('bc_stageWrap').hidden = $('bc_scope').value !== 'stage'
+})
+
+function bcHistoryRow(run) {
+  const statusLabel = run.status === 'running' ? 'Enviando…' : 'Terminado'
+  return `<div class="run-row">
+    <div class="run-row-main">
+      <strong>${esc(run.templateName)}</strong>
+      <span class="badge">${esc(statusLabel)}</span>
+    </div>
+    <div class="run-row-sub">
+      ${esc(run.sent)} enviados, ${esc(run.failed)} fallidos de ${esc(run.total)} · ${fmtTime(run.startedAt)}
+    </div>
+  </div>`
+}
+
+async function loadBroadcastView() {
+  if (!$('bc_stage').options.length) {
+    $('bc_stage').innerHTML = state.stages.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join('')
+  }
+  try {
+    const { templates } = await api('/templates')
+    $('bc_templateList').innerHTML = (templates || []).map((t) => `<option value="${esc(t.name)}"></option>`).join('')
+  } catch { /* sigue andando con el campo libre */ }
+  pollBroadcasts()
+}
+
+async function pollBroadcasts() {
+  if (state.activeView !== 'view-broadcast') return
+  let runs
+  try { runs = await api('/broadcasts') } catch { return }
+  $('bc_history').innerHTML = runs.length
+    ? runs.map(bcHistoryRow).join('')
+    : emptyState('📨', 'Todavía no mandaste ningún envío masivo', 'Elegí una plantilla aprobada y a quién mandársela arriba.')
+}
+
+$('bc_send').addEventListener('click', async () => {
+  const templateName = $('bc_template').value.trim()
+  if (!templateName) {
+    $('bc_msg').textContent = 'Falta el nombre de la plantilla'
+    return
+  }
+  const params = $('bc_params').value.split(',').map((s) => s.trim()).filter(Boolean)
+  const target = $('bc_scope').value === 'stage'
+    ? { scope: 'stage', stage: $('bc_stage').value }
+    : { scope: 'all' }
+
+  $('bc_send').disabled = true
+  $('bc_msg').textContent = ''
+  try {
+    await api('/broadcasts', {
+      method: 'POST',
+      body: JSON.stringify({ templateName, languageCode: $('bc_lang').value.trim() || 'es', params, target }),
+    })
+    $('bc_msg').textContent = 'Envío arrancado'
+    pollBroadcasts()
+  } catch (err) {
+    $('bc_msg').textContent = err.message
+  } finally {
+    $('bc_send').disabled = false
+  }
+})
+
+/* ---------- simulador ---------- */
+
+function simBubbleInner(m) {
+  return `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
+    `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
+}
+
+function renderSimState(simState) {
+  $('simStageLabel').textContent = 'Etapa: ' + stageLabel(simState.stage)
+
+  const box = $('simMessages')
+  box.innerHTML = simState.history.length
+    ? simState.history.map((m) => `<div class="bubble bubble-${m.role}">${simBubbleInner(m)}</div>`).join('')
+    : `<div class="empty-state">
+        <div class="icon">🧪</div>
+        <div class="title">Probá el bot acá</div>
+        <div class="desc">Nada de esto sale por WhatsApp de verdad: es la misma IA y el mismo catálogo, en un chat de prueba.</div>
+      </div>`
+  box.scrollTop = box.scrollHeight
+
+  const card = simState.card || {}
+  const cargados = MEMORY_FIELDS.filter(([col]) => card[col])
+  const memoryBox = $('simMemoryCard')
+  memoryBox.innerHTML = cargados.length
+    ? '<span class="memory-title">El bot recuerda</span>' +
+      cargados.map(([col, label]) => `<span class="memory-chip"><b>${esc(label)}:</b> ${esc(card[col])}</span>`).join('')
+    : '<span class="memory-title">El bot todavía no anotó nada</span>'
+}
+
+async function pollSimulator() {
+  if (state.activeView !== 'view-sim') return
+  try {
+    renderSimState(await api('/simulator'))
+  } catch { /* nada que mostrar todavía */ }
+}
+
+async function simSendMessage() {
+  const input = $('simInput')
+  const text = input.value.trim()
+  if (!text) return
+  input.value = ''
+  $('simSend').disabled = true
+  try {
+    const result = await api('/simulator/message', { method: 'POST', body: JSON.stringify({ text }) })
+    renderSimState(result.state)
+  } catch (err) {
+    showError(err)
+  } finally {
+    $('simSend').disabled = false
+  }
+}
+
+$('simSend').addEventListener('click', simSendMessage)
+$('simInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') simSendMessage() })
+
+$('sim_sendLoc').addEventListener('click', async () => {
+  const lat = Number($('sim_lat').value)
+  const lng = Number($('sim_lng').value)
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
+    alert('Poné una latitud y longitud válidas')
+    return
+  }
+  try {
+    const result = await api('/simulator/location', { method: 'POST', body: JSON.stringify({ lat, lng }) })
+    renderSimState(result.state)
+  } catch (err) { showError(err) }
+})
+
+$('sim_reset').addEventListener('click', async () => {
+  try {
+    renderSimState(await api('/simulator/reset', { method: 'POST' }))
+  } catch (err) { showError(err) }
+})
+
+/* ---------- configuración ---------- */
+
+function bindRangeDisplay(rangeId, valId, suffix) {
+  const range = $(rangeId)
+  const val = $(valId)
+  const update = () => { val.textContent = range.value + (suffix || '') }
+  range.addEventListener('input', update)
+  return update
+}
+
+const updateTempDisplay = bindRangeDisplay('cfg_temperature', 'cfg_temperature_val')
+const updateHistoryDisplay = bindRangeDisplay('cfg_historyN', 'cfg_historyN_val')
+
+async function loadSettings() {
+  let s
+  try { s = await api('/settings') } catch { return }
+  $('cfg_botToggle').checked = s.botEnabled !== false
+  $('cfg_businessName').value = s.businessName || ''
+  $('cfg_welcome').value = s.welcomeMessage || ''
+  $('cfg_knowledge').value = s.knowledgeBase || ''
+  $('cfg_model').value = s.openaiModel || ''
+  $('cfg_temperature').value = s.openaiTemperature ?? 0.7
+  $('cfg_historyN').value = s.openaiHistoryN ?? 12
+  updateTempDisplay()
+  updateHistoryDisplay()
+  $('cfg_msg').textContent = ''
+}
+
+$('cfg_save').addEventListener('click', async () => {
+  const body = {
+    botEnabled: $('cfg_botToggle').checked,
+    businessName: $('cfg_businessName').value.trim(),
+    welcomeMessage: $('cfg_welcome').value,
+    knowledgeBase: $('cfg_knowledge').value,
+    openaiModel: $('cfg_model').value.trim(),
+    openaiTemperature: Number($('cfg_temperature').value),
+    openaiHistoryN: Number($('cfg_historyN').value),
+  }
+  $('cfg_save').disabled = true
+  try {
+    await api('/settings', { method: 'POST', body: JSON.stringify(body) })
+    $('cfg_msg').textContent = 'Guardado'
+    setTimeout(() => { $('cfg_msg').textContent = '' }, 1600)
+  } catch (err) {
+    $('cfg_msg').textContent = err.message
+  } finally {
+    $('cfg_save').disabled = false
+  }
+})
+
 /* ---------- arranque ---------- */
 
 async function boot() {
@@ -468,6 +848,10 @@ async function boot() {
     pollConversations()
     if (state.selectedPhone) loadChat()
     if (state.activeView === 'view-pipeline') pollPipeline()
+    if (state.activeView === 'view-products') pollProducts()
+    if (state.activeView === 'view-library') pollLibrary()
+    if (state.activeView === 'view-broadcast') pollBroadcasts()
+    if (state.activeView === 'view-sim') pollSimulator()
   }, POLL_MS)
 }
 
