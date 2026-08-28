@@ -170,7 +170,7 @@
                 </div>
                 <div>
                   <label for="p_currency">Moneda</label>
-                  <input type="text" id="p_currency" placeholder="USD">
+                  <input type="text" id="p_currency" placeholder="Bs">
                 </div>
                 <div>
                   <label for="p_active">Estado</label>
@@ -400,6 +400,17 @@
                     vacío, usa el saludo genérico por defecto.
                   </div>
                   <textarea id="cfg_welcome" rows="4" placeholder="¡Hola! 👋 Bienvenido a ChispudosMarket, ¿en qué te puedo ayudar hoy?"></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="cfg_welcomeImage">Foto del saludo inicial (opcional)</label>
+                  <div class="help">
+                    Se elige de la biblioteca de imágenes (pestaña "Imágenes"). Si la cargás,
+                    el saludo de arriba sale junto con esta foto en vez de solo texto.
+                  </div>
+                  <select id="cfg_welcomeImage">
+                    <option value="">Sin foto</option>
+                  </select>
                 </div>
               </div>
             </details>

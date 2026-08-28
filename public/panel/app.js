@@ -519,6 +519,13 @@ function fillIntroImageSelect(selectedId) {
   sel.value = selectedId || ''
 }
 
+function fillWelcomeImageSelect(selectedId) {
+  const sel = $('cfg_welcomeImage')
+  sel.innerHTML = '<option value="">Sin foto</option>' +
+    libraryCache.map((img) => `<option value="${esc(img.id)}">${esc(img.name)}</option>`).join('')
+  sel.value = selectedId || ''
+}
+
 function openProduct(p) {
   editingProductId = p ? p.id : null
   productDrawerOpen = true
@@ -526,7 +533,7 @@ function openProduct(p) {
   $('productFormTitle').textContent = p ? 'Editar producto' : 'Nuevo producto'
   $('p_name').value = p?.name || ''
   $('p_price').value = p?.price ?? ''
-  $('p_currency').value = p?.currency || 'USD'
+  $('p_currency').value = p?.currency || 'Bs'
   $('p_active').value = p && p.active === false ? '0' : '1'
   $('p_sku').value = p?.sku || ''
   $('p_description').value = p?.description || ''
@@ -553,7 +560,7 @@ $('saveProduct').addEventListener('click', async () => {
   const body = {
     name: $('p_name').value.trim(),
     price: Number($('p_price').value) || 0,
-    currency: $('p_currency').value.trim() || 'USD',
+    currency: $('p_currency').value.trim() || 'Bs',
     active: $('p_active').value === '1',
     sku: $('p_sku').value.trim(),
     description: $('p_description').value,
@@ -821,6 +828,8 @@ async function loadSettings() {
   $('cfg_maxWordsHardCap').value = s.maxWordsHardCap ?? 90
   $('cfg_maxParts').value = s.maxMessageParts ?? 5
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
+  try { libraryCache = await api('/library') } catch { /* si falla, el select queda solo con "Sin foto" */ }
+  fillWelcomeImageSelect(s.welcomeImageId)
   updateTempDisplay()
   updateHistoryDisplay()
   updateReplyDelayDisplay()
@@ -836,6 +845,7 @@ $('cfg_save').addEventListener('click', async () => {
     botEnabled: $('cfg_botToggle').checked,
     businessName: $('cfg_businessName').value.trim(),
     welcomeMessage: $('cfg_welcome').value,
+    welcomeImageId: $('cfg_welcomeImage').value || null,
     knowledgeBase: $('cfg_knowledge').value,
     openaiModel: $('cfg_model').value.trim(),
     openaiTemperature: Number($('cfg_temperature').value),
