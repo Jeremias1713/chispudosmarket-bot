@@ -19,6 +19,7 @@ const { sendText } = require('../whatsapp');
 const { STAGES } = require('../classifier');
 const catalog = require('../catalog');
 const library = require('../library');
+const agencies = require('../agencies');
 const settingsStore = require('../settings');
 const broadcasts = require('../broadcasts');
 const simulator = require('../simulator');
@@ -226,6 +227,22 @@ router.delete('/api/library/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------- cobertura de agencias (Excel) ---------- */
+
+router.get('/api/agencies/meta', (_req, res) => {
+  res.json(agencies.getMeta());
+});
+
+router.post('/api/agencies/import', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
+  try {
+    const meta = agencies.importFromWorkbookBuffer(req.file.buffer);
+    res.json({ ok: true, ...meta });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 /* ---------- configuracion ---------- */
 
 router.get('/api/settings', (_req, res) => {
@@ -242,6 +259,7 @@ router.post('/api/settings', (req, res) => {
   if (body.botEnabled != null) patch.botEnabled = Boolean(body.botEnabled);
   if (body.replyDelayMs != null) patch.replyDelayMs = Number(body.replyDelayMs);
   if (body.maxWordsPerMessage != null) patch.maxWordsPerMessage = Number(body.maxWordsPerMessage);
+  if (body.maxWordsHardCap != null) patch.maxWordsHardCap = Number(body.maxWordsHardCap);
   if (body.maxMessageParts != null) patch.maxMessageParts = Number(body.maxMessageParts);
   if (body.audioReplyEnabled != null) patch.audioReplyEnabled = Boolean(body.audioReplyEnabled);
   res.json(settingsStore.updateSettings(patch));
