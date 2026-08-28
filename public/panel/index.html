@@ -123,6 +123,12 @@
               <button class="btn" id="followupBtn" type="button">Marcar guía enviada</button>
             </div>
 
+            <div class="followup-bar" id="amountBar" hidden>
+              <span class="followup-info">Monto vendido</span>
+              <input type="number" id="amountInput" min="0" step="0.01" placeholder="0.00" style="width:110px">
+              <button class="btn" id="amountSaveBtn" type="button">Guardar</button>
+            </div>
+
             <div class="memory-card" id="memoryCard" hidden></div>
 
             <div class="chat-messages" id="chatMessages">
@@ -654,6 +660,28 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                 <div class="settings-actions">
                   <button class="btn btn-primary" id="agencies_upload">Importar Excel</button>
                   <span class="save-msg" id="agencies_msg"></span>
+                </div>
+              </div>
+            </details>
+
+            <details class="card cfg">
+              <summary class="cfg-head">
+                <span class="cfg-title">Copia de seguridad</span>
+                <span class="cfg-sub">Descargar un respaldo de conversaciones, catálogo y cupones</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="field">
+                  <div class="help">
+                    Bajá un archivo con todas las conversaciones, el catálogo, los cupones y la
+                    configuración actual. Sirve como respaldo por si el servicio se reinicia y se
+                    pierden los datos que no están guardados en el código (esto puede pasar en
+                    planes sin disco persistente). Conviene descargarlo de vez en cuando, sobre
+                    todo antes de hacer cambios grandes.
+                  </div>
+                </div>
+                <div class="settings-actions">
+                  <button class="btn btn-primary" id="backup_download">Descargar copia de seguridad</button>
+                  <span class="save-msg" id="backup_msg"></span>
                 </div>
               </div>
             </details>

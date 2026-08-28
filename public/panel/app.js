@@ -321,6 +321,7 @@ async function loadChat() {
 
   renderStagePicker(conversation)
   renderFollowUp(conversation)
+  renderAmount(conversation)
   renderMemory(conversation)
   renderMessages(messages)
 }
@@ -347,6 +348,28 @@ function renderFollowUp(convo) {
   bar.hidden = false
   $('followupInfo').textContent = followUpLabel(convo.lastFollowUpAt)
   $('followupBtn').onclick = () => markFollowUpSent(convo.phone)
+}
+
+/* ---------- monto vendido (ingresos) ---------- */
+
+function renderAmount(convo) {
+  $('amountBar').hidden = false
+  $('amountInput').value = convo.card?.monto ?? ''
+  $('amountSaveBtn').onclick = () => saveAmount(convo.phone)
+}
+
+async function saveAmount(phone) {
+  const monto = $('amountInput').value
+  try {
+    await api('/conversations/' + encodeURIComponent(phone) + '/amount', {
+      method: 'POST',
+      body: JSON.stringify({ monto }),
+    })
+  } catch (err) {
+    showError(err)
+    return
+  }
+  if (state.activeView === 'view-metrics') pollMetrics()
 }
 
 async function sendManual() {
@@ -558,12 +581,17 @@ function fmtPercent(value) {
   return value == null ? '—' : `${value.toFixed(1)}%`
 }
 
+function fmtMoney(value) {
+  return (value || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 function metricsTiles(m) {
   const tiles = [
     ['Conversaciones', m.total],
     ['Mensajes hoy', m.messagesToday],
     ['Conversión (nuevo→vendido)', fmtPercent(m.conversionRate)],
     ['Necesitan seguimiento', m.staleAttention.length],
+    ['Ingresos (vendido)', fmtMoney(m.revenue)],
   ]
   return tiles.map(([label, value]) => `
     <div class="metric-tile">
@@ -1056,6 +1084,30 @@ $('cfg_save').addEventListener('click', async () => {
     $('cfg_msg').textContent = err.message
   } finally {
     $('cfg_save').disabled = false
+  }
+})
+
+$('backup_download').addEventListener('click', async () => {
+  $('backup_download').disabled = true
+  $('backup_msg').textContent = 'Generando...'
+  try {
+    const res = await fetch('/panel/api/backup')
+    if (!res.ok) throw new Error('No se pudo generar la copia')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chispudos-backup-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    $('backup_msg').textContent = 'Listo, revisá tus descargas'
+    setTimeout(() => { $('backup_msg').textContent = '' }, 2500)
+  } catch (err) {
+    $('backup_msg').textContent = err.message
+  } finally {
+    $('backup_download').disabled = false
   }
 })
 
