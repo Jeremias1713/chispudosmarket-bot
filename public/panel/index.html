@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de ventas — ChispudosMarket</title>
+<link rel="stylesheet" href="/panel/styles.css">
+</head>
+<body>
+
+<div class="app-shell" data-view="view-convos">
+
+  <aside class="rail">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zm5.8 14.16c-.24.68-1.42 1.3-1.96 1.34-.5.04-.97.22-3.27-.68-2.76-1.09-4.5-3.9-4.64-4.08-.13-.18-1.1-1.47-1.1-2.8s.7-1.99.94-2.26c.25-.27.54-.34.72-.34h.52c.17 0 .39-.06.61.47.23.55.78 1.9.85 2.04.07.14.11.3.02.48-.09.18-.13.29-.26.45l-.39.45c-.13.13-.26.27-.11.53.14.26.64 1.06 1.38 1.72.95.85 1.75 1.11 2 1.24.25.14.4.11.54-.07.14-.18.62-.72.79-.97.16-.25.33-.21.55-.13.22.08 1.4.66 1.64.78.24.12.4.18.46.28.06.1.06.59-.18 1.27z"/></svg>
+    </span>
+
+    <nav class="rail-nav" role="tablist">
+      <button class="tab" role="tab" data-view="view-convos" data-label="Conversaciones"
+              aria-selected="true" aria-label="Conversaciones">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3v3.2c0 .68.79 1.05 1.31.61L13.5 19H20a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>
+        <span class="rail-tip">Conversaciones</span>
+      </button>
+
+      <button class="tab" role="tab" data-view="view-pipeline" data-label="Pipeline"
+              aria-selected="false" aria-label="Pipeline">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="12" rx="1.6"/><rect x="9.5" y="4" width="5" height="16" rx="1.6"/><rect x="16" y="4" width="5" height="8" rx="1.6"/></svg>
+        <span class="rail-tip">Pipeline</span>
+      </button>
+    </nav>
+  </aside>
+
+  <div class="app-body">
+
+    <header class="app-header">
+      <h1 class="view-title" id="viewTitle">Conversaciones</h1>
+      <span class="header-spacer"></span>
+      <span class="clock" id="clock"></span>
+      <span class="conn">
+        <span class="conn-dot is-connected"></span>
+        <span>Bot activo</span>
+      </span>
+      <span class="avatar avatar-me" id="meAvatar" title="ChispudosMarket">CM</span>
+    </header>
+
+    <main class="app-main">
+
+      <section class="view is-active" id="view-convos">
+        <div class="convo-layout" id="convoLayout">
+          <aside class="convo-sidebar">
+            <div class="convo-search">
+              <input type="search" id="convoSearch" placeholder="Buscar contacto o mensaje…">
+            </div>
+            <div class="convo-list" id="convoList"></div>
+          </aside>
+
+          <div class="chat">
+            <div class="chat-header" id="chatHeader" hidden>
+              <button class="btn back" id="chatBack" aria-label="Volver">←</button>
+              <span class="avatar avatar-sm" id="chatAvatar"></span>
+              <div class="chat-ident">
+                <div class="chat-title" id="chatTitle"></div>
+                <div class="chat-sub" id="chatSub"></div>
+              </div>
+              <span class="header-spacer"></span>
+              <div class="stage-picker">
+                <select id="chatStage" aria-label="Etapa del pipeline"></select>
+                <button class="btn stage-lock" id="chatStageAuto" hidden
+                        title="La etapa está fijada a mano y la IA no la toca. Tocá para devolverle el control.">
+                  📌 <span>Fijada</span>
+                </button>
+              </div>
+              <label class="switch" title="Cuando está apagado, el bot no responde en esta conversación">
+                <input type="checkbox" id="chatBotToggle">
+                <span>Bot activo</span>
+              </label>
+            </div>
+
+            <div class="memory-card" id="memoryCard" hidden></div>
+
+            <div class="chat-messages" id="chatMessages">
+              <div class="empty-state">
+                <div class="icon">💬</div>
+                <div class="title">Ninguna conversación abierta</div>
+                <div class="desc">Elegí una de la lista para ver el historial y responder a mano.</div>
+              </div>
+            </div>
+
+            <div class="chat-composer" id="chatComposer" hidden>
+              <input type="text" id="chatInput" placeholder="Escribir mensaje manual…">
+              <button class="btn btn-primary" id="chatSend">Enviar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-pipeline">
+        <div class="run-filters" id="pipelineFilters">
+          <button class="filter-chip is-on" type="button" data-window="">Todas</button>
+          <button class="filter-chip" type="button" data-window="24h">Últimas 24h</button>
+          <button class="filter-chip" type="button" data-window="3d">Últimos 3 días</button>
+          <button class="filter-chip" type="button" data-window="7d">Última semana</button>
+          <button class="filter-chip" type="button" data-window="stale">Sin novedad hace +7 días</button>
+        </div>
+        <div class="board" id="board"></div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script src="/panel/app.js"></script>
+</body>
+</html>
