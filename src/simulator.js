@@ -1,7 +1,7 @@
 // Simulador: mismo prompt, mismo catalogo y misma logica que el bot real,
 // pero nada sale por WhatsApp. Estado en memoria (no se persiste a disco):
 // se resetea solo si el proceso se reinicia, o con el boton "Reiniciar".
-const { nearestByCoords, searchByText, formatAgency } = require('./agencies');
+const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, splitReply, enforceMessageLimits } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger } = require('./catalog');
@@ -50,14 +50,6 @@ async function sendMessage(rawText) {
     state.linkedProductId = product.id;
     push('assistant', product.intro.trim());
     return { parts: splitForPreview(product.intro.trim()), state };
-  }
-
-  const wordCount = rawText.split(/\s+/).filter(Boolean).length;
-  const cityMatches = wordCount <= 4 ? searchByText(rawText, 3) : [];
-  if (cityMatches.length > 0) {
-    const reply = 'Estas son las agencias que encontre:\n\n' + cityMatches.map((a) => formatAgency(a)).join('\n\n');
-    push('assistant', reply);
-    return { parts: [reply], state };
   }
 
   const history = state.history.map((m) => ({ role: m.role, content: m.content }));

@@ -14,7 +14,7 @@
 // guardado en el historial).
 const { sendText, sendImageByLink, sendAudioByLink } = require('./whatsapp');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
-const { nearestByCoords, searchByText, formatAgency } = require('./agencies');
+const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, splitReply, enforceMessageLimits } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger } = require('./catalog');
@@ -242,17 +242,6 @@ async function processReply(from) {
       await sendReply(from, intro);
       return;
     }
-  }
-
-  const wordCount = rawText.split(/\s+/).filter(Boolean).length;
-  const cityMatches = wordCount <= 4 ? searchByText(rawText, 3) : [];
-  if (cityMatches.length > 0) {
-    const reply =
-      'Estas son las agencias que encontre:\n\n' +
-      cityMatches.map((a) => formatAgency(a)).join('\n\n');
-    await sendReply(from, reply);
-    updateSession(from, { lastAssistantText: reply });
-    return;
   }
 
   try {

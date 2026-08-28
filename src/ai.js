@@ -3,6 +3,7 @@
 const OpenAI = require('openai');
 const { loadProducts } = require('./catalog');
 const { getSettings } = require('./settings');
+const agencies = require('./agencies');
 
 let _client = null;
 function client() {
@@ -88,7 +89,12 @@ function buildSystemPrompt() {
   CATALOGO ACTUAL (unica fuente de precios y productos, no inventes otros):
   ${catalogText()}
 ${knowledge ? `\n  DATOS DEL NEGOCIO QUE DAS POR CIERTOS (envio, pago, promos vigentes):\n  ${knowledge}\n` : ''}
-  Si el cliente comparte su ubicacion o pregunta por la agencia mas cercana, el sistema ya se encarga de mostrarle las agencias automaticamente: vos no necesitas calcular distancias ni inventar direcciones de agencias.`;
+  AGENCIAS Y COBERTURA:
+  - Si el cliente comparte su ubicacion GPS, el sistema ya se encarga de mostrarle las agencias mas cercanas automaticamente: vos no necesitas hacer nada en ese caso.
+  - Cuando el cliente nombra una ciudad, estado o zona porque quiere saber si hay cobertura ahi o quiere que le muestres las agencias disponibles (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira"), usa la herramienta buscar_agencias_por_zona con esa zona. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
+  - NUNCA uses esa herramienta para numeros sueltos que sean cantidad de producto, telefono, respuestas de si/no, ni ningun otro dato del pedido que no sea explicitamente el nombre de un lugar. Un mensaje como "4" respondiendo cuantas unidades quiere NO es una zona.
+  - Cuando la herramienta te devuelva agencias, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion. Esa lista queda en la conversacion.
+  - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.`;
 }
 
 function splitReply(reply) {
@@ -127,6 +133,49 @@ function enforceMessageLimits(parts, maxWords, maxParts) {
   return chunks;
 }
 
+// Herramienta que el modelo puede invocar cuando decide, por el contexto de
+// la charla, que el cliente esta nombrando un lugar porque quiere saber de
+// cobertura o de agencias ahi (no para cantidades, telefonos ni otros datos
+// del pedido: eso lo deja claro el system prompt). El modelo elige CUANDO
+// llamarla; la busqueda real la hace este codigo, no el modelo.
+const AGENCY_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'buscar_agencias_por_zona',
+      description:
+        'Busca agencias de envio disponibles en una ciudad, estado o zona que el cliente menciono porque quiere saber si hay cobertura ahi o quiere ver las agencias disponibles. No usar para cantidades, telefonos, confirmaciones ni otros datos del pedido.',
+      parameters: {
+        type: 'object',
+        properties: {
+          zona: {
+            type: 'string',
+            description: 'Ciudad, estado o zona que menciono el cliente, ej. "Bolivar", "Maracaibo", "Tachira".',
+          },
+        },
+        required: ['zona'],
+      },
+    },
+  },
+];
+
+// Arma el texto de resultado de la herramienta: lista numerada para que el
+// modelo (y el propio historial de la charla) pueda despues resolver
+// referencias tipo "la cuatro" sin volver a buscar.
+function formatAgencyToolResult(zona, results) {
+  if (!results.length) {
+    return `No se encontraron agencias para "${zona}". Decile al cliente que por ahora no hay cobertura confirmada ahi, sin inventar una direccion.`;
+  }
+  const list = results
+    .map((a, i) => {
+      const region = a.region ? ` — ${a.region}` : '';
+      const phone = a.phone ? ` (Tel: ${a.phone})` : '';
+      return `${i + 1}. ${a.name}${region}\n${a.address}${phone}`;
+    })
+    .join('\n\n');
+  return `Agencias encontradas para "${zona}":\n\n${list}`;
+}
+
 async function getAssistantReply(history, userText) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
@@ -143,9 +192,43 @@ async function getAssistantReply(history, userText) {
     model,
     temperature,
     messages,
+    tools: AGENCY_TOOLS,
   });
 
-  return completion.choices[0].message.content.trim();
+  const responseMessage = completion.choices[0].message;
+  const toolCalls = responseMessage.tool_calls;
+
+  if (!toolCalls || !toolCalls.length) {
+    return responseMessage.content.trim();
+  }
+
+  // El modelo decidio buscar agencias: ejecutamos la busqueda real (deterministica,
+  // contra el CSV) por cada llamada y le devolvemos el resultado como mensajes 'tool'.
+  messages.push(responseMessage);
+  for (const call of toolCalls) {
+    let zona = '';
+    try {
+      const args = JSON.parse(call.function.arguments || '{}');
+      zona = String(args.zona || '').trim();
+    } catch (err) {
+      zona = '';
+    }
+    const results = zona ? agencies.searchByText(zona, 3) : [];
+    messages.push({
+      role: 'tool',
+      tool_call_id: call.id,
+      content: formatAgencyToolResult(zona, results),
+    });
+  }
+
+  const followUp = await client().chat.completions.create({
+    model,
+    temperature,
+    messages,
+    tools: AGENCY_TOOLS,
+  });
+
+  return followUp.choices[0].message.content.trim();
 }
 
 module.exports = { getAssistantReply, splitReply, enforceMessageLimits, buildSystemPrompt, catalogText };
