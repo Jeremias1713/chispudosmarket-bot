@@ -15,18 +15,16 @@
 const { sendText, sendImageByLink, sendAudioByLink } = require('./whatsapp');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency } = require('./agencies');
-const { getAssistantReply, splitReply, enforceMessageLimits } = require('./ai');
+const { getAssistantReply, applySplitPolicy } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger } = require('./catalog');
 const { getImage } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 
-const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '1500', 10);
-const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '3500', 10);
+const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
+const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
 const DEFAULT_REPLY_DELAY_MS = 8000;
-const DEFAULT_MAX_WORDS_HARD_CAP = 90;
-const DEFAULT_MAX_MESSAGE_PARTS = 5;
 // Render define RENDER_EXTERNAL_URL solo automaticamente; PUBLIC_URL es el
 // override manual por si se corre en otro lado.
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
@@ -35,8 +33,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function randomGap() {
-  return SPLIT_GAP_MIN_MS + Math.random() * (SPLIT_GAP_MAX_MS - SPLIT_GAP_MIN_MS);
+function randomGap(minMs, maxMs) {
+  const min = minMs != null ? minMs : SPLIT_GAP_MIN_MS;
+  const max = maxMs != null ? maxMs : SPLIT_GAP_MAX_MS;
+  if (max <= min) return min;
+  return min + Math.random() * (max - min);
 }
 
 function mediaUrl(filename) {
@@ -56,12 +57,12 @@ function mediaUrl(filename) {
 // panel, Configuracion). Devuelve las partes mandadas.
 async function sendSplit(to, text) {
   const settings = getSettings();
-  const maxWordsHardCap = settings.maxWordsHardCap || DEFAULT_MAX_WORDS_HARD_CAP;
-  const maxParts = settings.maxMessageParts || DEFAULT_MAX_MESSAGE_PARTS;
-  const parts = enforceMessageLimits(splitReply(text), maxWordsHardCap, maxParts);
+  const parts = applySplitPolicy(text, settings);
+  const gapMin = settings.splitGapMinMs ?? SPLIT_GAP_MIN_MS;
+  const gapMax = settings.splitGapMaxMs ?? SPLIT_GAP_MAX_MS;
 
   for (let i = 0; i < parts.length; i++) {
-    if (i > 0) await sleep(randomGap());
+    if (i > 0) await sleep(randomGap(gapMin, gapMax));
     await sendText(to, parts[i]);
   }
   return parts;

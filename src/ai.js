@@ -52,6 +52,33 @@ function libraryImagesText() {
   return images.map((img) => `- ${img.name}`).join('\n');
 }
 
+// Instrucciones de partido de mensajes que van al prompt cuando esta
+// prendido (settings.splitRepliesEnabled). Calcadas del bot anterior: reglas
+// concretas de cuando SI conviene partir y que NUNCA se parte, con ejemplos,
+// en vez de una guia abstracta (a los modelos les cuesta seguir "separa
+// ideas" sin casos puntuales).
+function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
+  return `- Objetivo: ${maxWords} palabras por mensaje para algo simple (saludar, confirmar un dato, un si o un no, agradecer).
+  - Cuando haga falta explicar bien algo (el producto y sus detalles, que datos necesitas para el pedido/formulario, la direccion o info de una agencia), podes escribir mas largo, hasta ${maxWordsHardCap} palabras en ese mensaje puntual. No lo repartas en varios mensajes cortos solo para respetar el objetivo, eso queda peor.
+  - Tu respuesta completa no puede tener mas de ${maxParts} mensajes en total.
+  - Cuando tu respuesta tenga varias ideas separadas, separalas usando el simbolo ||| entre cada mensaje (cada parte entre ||| sale como un mensaje de WhatsApp aparte). Pero no cualquier corte vale, segui estas reglas:
+
+  CUANDO SI CONVIENE PARTIR:
+  - La pregunta con la que cerras tu respuesta (ver REGLA DE ORO) va SIEMPRE en su propio mensaje, al final, sola. Nunca comparte mensaje con la respuesta a algo o con otro dato.
+  - Saludas y ademas preguntas algo: el saludo va en un mensaje y la pregunta en otro.
+  - Das una noticia (precio, disponibilidad, confirmacion) y despues lo que se puede hacer con eso.
+  - Confirmas un dato que te dieron y despues pedis el que falta.
+  - Reaccionas a algo que conto el cliente antes de ir al grano (agradecele o reconocelo en un mensaje, segui en el siguiente).
+  - El cliente te pidio una cantidad puntual de mensajes o de lineas: haces lo que pidio.
+  Mandas UN SOLO mensaje cuando la respuesta es una sola idea corta: un precio, un si, un no, un dato suelto.
+
+  QUE NUNCA SE PARTE (va siempre en un solo mensaje, aunque pase el objetivo de palabras):
+  - Confirmar, aclarar o repetir una direccion de entrega.
+  - El pedido de datos completo, cuando se los pedis todos juntos.
+  - Listas de precios, tallas, colores, o pasos numerados.
+  - Cualquier dato que se rompe si se parte: telefono, numero de guia, links.`;
+}
+
 function buildSystemPrompt() {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
@@ -59,6 +86,7 @@ function buildSystemPrompt() {
   const maxWords = settings.maxWordsPerMessage || 30;
   const maxWordsHardCap = settings.maxWordsHardCap || 90;
   const maxParts = settings.maxMessageParts || 5;
+  const splitEnabled = settings.splitRepliesEnabled !== false;
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
@@ -72,13 +100,13 @@ function buildSystemPrompt() {
   - Nunca contestes cortante ni con una sola palabra.
 
   FORMATO DE CADA MENSAJE:
-  - Objetivo: ${maxWords} palabras por mensaje para algo simple (saludar, confirmar un dato, un si o un no, agradecer).
-  - Cuando haga falta explicar bien algo (el producto y sus detalles, que datos necesitas para el pedido/formulario, la direccion o info de una agencia), podes escribir mas largo, hasta ${maxWordsHardCap} palabras en ese mensaje puntual. No lo repartas en varios mensajes cortos solo para respetar el objetivo, eso queda peor.
-  - Tu respuesta completa no puede tener mas de ${maxParts} mensajes en total.
+${splitEnabled
+    ? splitInstructions(maxWords, maxWordsHardCap, maxParts)
+    : `- Objetivo: ${maxWords} palabras para algo simple, hasta ${maxWordsHardCap} palabras cuando haga falta explicar bien algo.
+  - IMPORTANTE: contesta SIEMPRE en un unico mensaje. NUNCA uses el simbolo ||| ni ninguna otra forma de partir tu respuesta en varios mensajes, aunque tengas varias ideas: juntalas todas, con naturalidad, en un solo mensaje.`}
   - Emojis: uno por mensaje, dos como mucho, y no en todos.
   - NUNCA uses guiones largos ni doble guion para separar ideas. Usa una coma, un punto, o empeza otra oracion.
-  - Como mucho una pregunta por mensaje, y esa pregunta va SIEMPRE sola al final: nunca comparte mensaje con la respuesta a algo o un dato.
-  - Cuando tu respuesta tenga varias ideas separadas (saludo + pregunta, dato + pregunta, confirmacion + lo que sigue), separalas usando el simbolo ||| entre cada mensaje. No abuses: una idea corta (un precio, un si, un no) va en un solo mensaje.
+  - Como mucho una pregunta en tu respuesta.
 
   REGLA DE ORO: termina siempre tu respuesta con una pregunta que haga avanzar la venta (el siguiente dato que falta, o confirmar algo), EXCEPTO cuando el pedido ya quedo cerrado con todos los datos: ahi no inventes una pregunta nueva solo por cumplir esta regla.
 
@@ -125,6 +153,57 @@ function splitReply(reply) {
     .split('|||')
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function wordCount(text) {
+  return String(text || '').split(/\s+/).filter(Boolean).length;
+}
+
+// Si un fragmento partido por ||| queda mas corto que minWords, no vale la
+// pena mandarlo como mensaje aparte (se ve raro un WhatsApp de una sola
+// palabra): se pega al fragmento de al lado. Se pega hacia el siguiente
+// fragmento (para no romper un mensaje anterior ya "completo"); si es el
+// ultimo fragmento, se pega hacia atras, al que ya se armo antes.
+function mergeShortParts(parts, minWords) {
+  if (!minWords || minWords <= 1 || parts.length <= 1) return parts;
+  const merged = [];
+  let carry = '';
+  for (let i = 0; i < parts.length; i++) {
+    const part = carry ? `${carry} ${parts[i]}`.trim() : parts[i];
+    carry = '';
+    const isLast = i === parts.length - 1;
+    if (wordCount(part) < minWords && !isLast) {
+      carry = part;
+      continue;
+    }
+    if (wordCount(part) < minWords && isLast && merged.length) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${part}`.trim();
+      continue;
+    }
+    merged.push(part);
+  }
+  if (carry) merged.push(carry);
+  return merged;
+}
+
+// Aplica toda la politica de partido de mensajes (switch on/off, minimo de
+// palabras, tope duro, maximo de partes) sobre el texto crudo que devolvio
+// el modelo. Uso compartido por flow.js (WhatsApp real) y simulator.js (para
+// que el simulador previsualice exactamente lo mismo que va a pasar de
+// verdad).
+function applySplitPolicy(text, settings) {
+  const maxWordsHardCap = settings.maxWordsHardCap || 90;
+  const maxParts = settings.maxMessageParts || 5;
+  const splitEnabled = settings.splitRepliesEnabled !== false;
+  const minWords = settings.splitMinWords ?? 3;
+
+  let parts = splitReply(text);
+  if (!splitEnabled) {
+    parts = [parts.join(' ')];
+  } else {
+    parts = mergeShortParts(parts, minWords);
+  }
+  return enforceMessageLimits(parts, maxWordsHardCap, maxParts);
 }
 
 // Corta un texto en pedazos de como mucho maxWords palabras cada uno. Si ya
@@ -360,4 +439,4 @@ async function getAssistantReply(history, userText) {
   return { text: followUp.choices[0].message.content.trim(), images };
 }
 
-module.exports = { getAssistantReply, splitReply, enforceMessageLimits, buildSystemPrompt, catalogText };
+module.exports = { getAssistantReply, splitReply, enforceMessageLimits, applySplitPolicy, buildSystemPrompt, catalogText };

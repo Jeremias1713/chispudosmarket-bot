@@ -35,6 +35,19 @@ const DEFAULTS = {
   // direccion de una agencia sin que le corten la explicacion a la mitad.
   maxWordsHardCap: 90,
   maxMessageParts: 5,
+  // Si esta apagado, el bot siempre contesta en un solo mensaje de WhatsApp
+  // (se ignoran los ||| que el modelo hubiera puesto, y no se aplica ningun
+  // corte salvo el tope duro de palabras como red de seguridad).
+  splitRepliesEnabled: true,
+  // Si un fragmento separado por ||| queda mas corto que esto (en palabras),
+  // se pega al fragmento de al lado en vez de mandarse como mensaje aparte:
+  // evita mensajes sueltos ridiculamente cortos tipo "Hola" solo.
+  splitMinWords: 3,
+  // Espera minima/maxima (ms) entre un fragmento y el siguiente cuando la
+  // respuesta se manda partida en varios mensajes, para simular que una
+  // persona esta escribiendo cada uno por separado.
+  splitGapMinMs: 6000,
+  splitGapMaxMs: 9500,
   // Ademas del texto, manda una nota de voz con la misma respuesta.
   audioReplyEnabled: true,
 };

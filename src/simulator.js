@@ -2,20 +2,15 @@
 // pero nada sale por WhatsApp. Estado en memoria (no se persiste a disco):
 // se resetea solo si el proceso se reinicia, o con el boton "Reiniciar".
 const { nearestByCoords, formatAgency } = require('./agencies');
-const { getAssistantReply, splitReply, enforceMessageLimits } = require('./ai');
+const { getAssistantReply, applySplitPolicy } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger } = require('./catalog');
 const { getSettings } = require('./settings');
 
-// Mismos topes que usa el bot real (Configuracion) para que el simulador
+// Misma politica que usa el bot real (Configuracion) para que el simulador
 // previsualice exactamente como se va a partir la respuesta.
 function splitForPreview(text) {
-  const settings = getSettings();
-  return enforceMessageLimits(
-    splitReply(text),
-    settings.maxWordsHardCap || 90,
-    settings.maxMessageParts || 5
-  );
+  return applySplitPolicy(text, getSettings());
 }
 
 function blankState() {
