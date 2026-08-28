@@ -2,9 +2,21 @@
 // pero nada sale por WhatsApp. Estado en memoria (no se persiste a disco):
 // se resetea solo si el proceso se reinicia, o con el boton "Reiniciar".
 const { nearestByCoords, searchByText, formatAgency } = require('./agencies');
-const { getAssistantReply, splitReply } = require('./ai');
+const { getAssistantReply, splitReply, enforceMessageLimits } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger } = require('./catalog');
+const { getSettings } = require('./settings');
+
+// Mismos topes que usa el bot real (Configuracion) para que el simulador
+// previsualice exactamente como se va a partir la respuesta.
+function splitForPreview(text) {
+  const settings = getSettings();
+  return enforceMessageLimits(
+    splitReply(text),
+    settings.maxWordsPerMessage || 30,
+    settings.maxMessageParts || 5
+  );
+}
 
 function blankState() {
   return {
@@ -37,7 +49,7 @@ async function sendMessage(rawText) {
   if (product && product.intro && product.intro.trim()) {
     state.linkedProductId = product.id;
     push('assistant', product.intro.trim());
-    return { parts: splitReply(product.intro.trim()), state };
+    return { parts: splitForPreview(product.intro.trim()), state };
   }
 
   const wordCount = rawText.split(/\s+/).filter(Boolean).length;
@@ -58,7 +70,7 @@ async function sendMessage(rawText) {
     state.card = classification.card;
   }
 
-  return { parts: splitReply(reply), state };
+  return { parts: splitForPreview(reply), state };
 }
 
 async function sendLocation(latitude, longitude) {
