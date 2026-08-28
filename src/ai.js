@@ -78,10 +78,12 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   - Listas de precios, tallas, colores, o pasos numerados.
   - Cualquier dato que se rompe si se parte: telefono, numero de guia, links.
 
-  IMPORTANTE sobre el simbolo |||: es el UNICO separador que crea un mensaje de WhatsApp nuevo. Un simple salto de linea o parrafo aparte NO alcanza, eso sigue siendo un solo mensaje largo. Si tu respuesta tiene dos ideas que segun las reglas de arriba van separadas, TENES que poner ||| entre ellas, literal, no un salto de linea.
-  Ejemplo (reaccionar a un dato + pedir el que sigue, caso muy comun):
-  Mal (un solo mensaje, no vale): "Genial, te va a encantar.\n\nAhora decime tu nombre y apellido, porfa."
-  Bien (dos mensajes con |||): "Genial, te va a encantar.|||Ahora decime tu nombre y apellido, porfa?"`;
+  IMPORTANTE sobre donde arranca un mensaje nuevo: se corta en el simbolo ||| Y TAMBIEN en cualquier parrafo en blanco (un renglon vacio entre dos bloques de texto). O sea, apenas dejas una linea en blanco, eso ya es dos mensajes de WhatsApp separados, sea que hayas puesto ||| o no.
+  Ejemplo (reaccionar a un dato + pedir el que sigue, caso muy comun, esto ya sale como DOS mensajes):
+  "Genial, te va a encantar.
+
+  Ahora decime tu nombre y apellido, porfa?"
+  Al reves: si algo tiene que ir en un SOLO mensaje (ver "QUE NUNCA SE PARTE" arriba: una direccion, el pedido de datos completo, una lista de precios/tallas, un dato que se rompe como un telefono), NO dejes ningun renglon en blanco adentro. Usa un solo salto de linea entre cada item de la lista, nunca dos seguidos, para que todo eso siga siendo un unico mensaje.`;
 }
 
 function buildSystemPrompt() {
@@ -153,9 +155,16 @@ ${libraryImagesText()}
   Podes mandar una de estas fotos en medio de la charla usando la herramienta mostrar_foto con el nombre EXACTO tal cual aparece arriba, pero SOLO cuando las instrucciones de un producto (arriba, en el catalogo) o la base de conocimiento del negocio te digan explicitamente que mandes esa foto en ese momento. Nunca la uses por iniciativa propia sin que te lo hayan indicado asi.` : ''}`;
 }
 
+// El modelo deberia usar ||| para marcar donde arranca un mensaje nuevo,
+// pero en la practica (sobre todo con modelos "mini") a veces en vez de eso
+// separa las ideas con un parrafo en blanco, como escribiria un humano en un
+// editor de texto. Para no depender de que el modelo use el simbolo al pie
+// de la letra, tratamos AMBAS cosas como limite de mensaje: ||| explicito, o
+// dos o mas saltos de linea seguidos (un parrafo en blanco).
 function splitReply(reply) {
-  return reply
+  return String(reply || '')
     .split('|||')
+    .flatMap((part) => part.split(/\n\s*\n+/))
     .map((s) => s.trim())
     .filter(Boolean);
 }
