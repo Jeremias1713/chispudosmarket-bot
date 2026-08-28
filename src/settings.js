@@ -14,6 +14,7 @@ const DEFAULTS = {
   botEnabled: true,
   businessName: null, // null = usa BUSINESS_NAME del .env
   welcomeMessage: null, // null = usa el saludo por defecto de flow.js
+  welcomeImageId: null, // id de una imagen de la biblioteca para mandar junto al saludo inicial
   knowledgeBase: '', // datos de envio/pago/promos que el bot da por ciertos
   openaiModel: null,
   openaiTemperature: null,

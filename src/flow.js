@@ -103,12 +103,34 @@ async function sendReply(to, text) {
   return parts;
 }
 
+// Manda un mensaje con foto si hay una imagen de biblioteca valida y URL
+// publica disponible; si no, cae a texto solo. Uso compartido por el saludo
+// inicial y por el mensaje inicial de un producto (ambos con la misma logica
+// de "intentar mandar la foto, si falla seguir solo con texto").
+async function sendTextOrImage(to, text, imageId) {
+  if (imageId) {
+    const img = getImage(imageId);
+    const url = img && mediaUrl(img.filename);
+    if (url) {
+      try {
+        await sendImageByLink(to, url, text);
+        appendMessage(to, 'assistant', `[imagen] ${text}`);
+        await maybeSendAudio(to, text);
+        return;
+      } catch (err) {
+        console.error('No se pudo mandar la foto, sigo solo con texto:', err.message);
+      }
+    }
+  }
+  await sendReply(to, text);
+}
+
 async function sendGreeting(to) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const text = (settings.welcomeMessage && settings.welcomeMessage.trim())
     || `Hola! Bienvenido a ${businessName}. Contame, en que te puedo ayudar hoy?`;
-  await sendReply(to, text);
+  await sendTextOrImage(to, text, settings.welcomeImageId);
 }
 
 // Contexto del ultimo mensaje de cada conversacion en lo que va de la espera
@@ -223,23 +245,7 @@ async function processReply(from) {
     if (product && product.intro && product.intro.trim()) {
       updateSession(from, { linkedProductId: product.id });
       const intro = product.intro.trim();
-
-      if (product.introImageId) {
-        const img = getImage(product.introImageId);
-        const url = img && mediaUrl(img.filename);
-        if (url) {
-          try {
-            await sendImageByLink(from, url, intro);
-            appendMessage(from, 'assistant', `[imagen] ${intro}`);
-            await maybeSendAudio(from, intro);
-            return;
-          } catch (err) {
-            console.error('No se pudo mandar la foto del producto, sigo solo con texto:', err.message);
-          }
-        }
-      }
-
-      await sendReply(from, intro);
+      await sendTextOrImage(from, intro, product.introImageId);
       return;
     }
   }

@@ -27,7 +27,7 @@ function blankProduct() {
     name: '',
     sku: '',
     price: 0,
-    currency: 'USD',
+    currency: 'Bs',
     description: '',
     active: true,
     // Instrucciones extra para la IA, solo cuando este producto esta activo.
@@ -45,6 +45,24 @@ function blankProduct() {
     // ya dijo que si a este producto.
     upsell: '',
   };
+}
+
+// Siempre devuelve un array de palabras limpias, venga como venga (array ya
+// armado, o el string crudo separado por comas que manda el formulario). Se
+// aplica tanto al guardar como al leer: si algun dato viejo o algun llamado
+// futuro guarda un string en vez de un array, ACA se corrige, para que
+// matchTrigger nunca termine iterando caracter por caracter de un string
+// (eso hacia match con cualquier mensaje, un bug real que ya paso una vez
+// con la busqueda de agencias por el mismo motivo: comparar texto crudo sin
+// primero convertirlo en una lista de palabras).
+function normalizeTriggers(value) {
+  if (Array.isArray(value)) {
+    return value.map((t) => String(t || '').trim()).filter(Boolean);
+  }
+  return String(value || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 function findProduct(idOrName) {
@@ -92,7 +110,9 @@ function matchTrigger(text) {
   const t = norm(text);
   if (!t) return null;
 
-  const products = loadProducts().filter((p) => p.active !== false && (p.triggers || []).length);
+  const products = loadProducts()
+    .map((p) => ({ ...p, triggers: normalizeTriggers(p.triggers) }))
+    .filter((p) => p.active !== false && p.triggers.length);
   for (const p of products) {
     for (const trig of p.triggers) {
       const tt = norm(trig).trim();
@@ -109,6 +129,7 @@ function listProducts() {
 function createProduct(data) {
   const products = loadProducts();
   const product = { ...blankProduct(), ...data, id: blankProduct().id };
+  product.triggers = normalizeTriggers(product.triggers);
   products.push(product);
   saveProducts(products);
   return product;
@@ -118,7 +139,9 @@ function updateProduct(id, patch) {
   const products = loadProducts();
   const i = products.findIndex((p) => p.id === id);
   if (i === -1) return null;
-  products[i] = { ...products[i], ...patch, id };
+  const merged = { ...products[i], ...patch, id };
+  if (patch.triggers !== undefined) merged.triggers = normalizeTriggers(patch.triggers);
+  products[i] = merged;
   saveProducts(products);
   return products[i];
 }
