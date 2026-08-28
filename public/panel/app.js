@@ -471,13 +471,15 @@ let productDrawerOpen = false
 let editingProductId = null
 
 function productCard(p) {
+  const imgIds = p.introImageIds || []
   const badges = [
     p.active === false ? '<span class="badge badge-warning">Pausado</span>' : '',
     p.prompt ? '<span class="badge">Prompt propio</span>' : '',
     (p.triggers && p.triggers.length) ? '<span class="badge">Palabras gatillo</span>' : '',
+    imgIds.length > 1 ? `<span class="badge">${imgIds.length} fotos</span>` : '',
   ].filter(Boolean).join('')
 
-  const img = libraryCache.find((i) => i.id === p.introImageId)
+  const img = imgIds.length ? libraryCache.find((i) => i.id === imgIds[0]) : null
   const thumb = img
     ? `<img src="/media/${esc(img.filename)}" alt="${esc(p.name)}">`
     : '<span class="product-noimg">Sin foto</span>'
@@ -512,18 +514,20 @@ async function pollProducts() {
   })
 }
 
-function fillIntroImageSelect(selectedId) {
-  const sel = $('p_introImage')
-  sel.innerHTML = '<option value="">Sin foto</option>' +
-    libraryCache.map((img) => `<option value="${esc(img.id)}">${esc(img.name)}</option>`).join('')
-  sel.value = selectedId || ''
+function fillMultiImageSelect(sel, selectedIds) {
+  const ids = new Set(selectedIds || [])
+  sel.innerHTML = libraryCache.length
+    ? libraryCache.map((img) => `<option value="${esc(img.id)}">${esc(img.name)}</option>`).join('')
+    : '<option value="" disabled>Todavía no subiste ninguna imagen (pestaña Imágenes)</option>'
+  Array.from(sel.options).forEach((opt) => { opt.selected = ids.has(opt.value) })
 }
 
-function fillWelcomeImageSelect(selectedId) {
-  const sel = $('cfg_welcomeImage')
-  sel.innerHTML = '<option value="">Sin foto</option>' +
-    libraryCache.map((img) => `<option value="${esc(img.id)}">${esc(img.name)}</option>`).join('')
-  sel.value = selectedId || ''
+function fillIntroImageSelect(selectedIds) {
+  fillMultiImageSelect($('p_introImage'), selectedIds)
+}
+
+function fillWelcomeImageSelect(selectedIds) {
+  fillMultiImageSelect($('cfg_welcomeImage'), selectedIds)
 }
 
 function openProduct(p) {
@@ -541,7 +545,7 @@ function openProduct(p) {
   $('p_triggers').value = (p?.triggers || []).join(', ')
   $('p_intro').value = p?.intro || ''
   $('p_upsell').value = p?.upsell || ''
-  fillIntroImageSelect(p?.introImageId)
+  fillIntroImageSelect(p?.introImageIds)
   $('productMsg').textContent = ''
   $('deleteProduct').hidden = !p
   $('productDrawer').hidden = false
@@ -567,7 +571,7 @@ $('saveProduct').addEventListener('click', async () => {
     prompt: $('p_prompt').value,
     triggers: $('p_triggers').value,
     intro: $('p_intro').value,
-    introImageId: $('p_introImage').value || null,
+    introImageIds: Array.from($('p_introImage').selectedOptions).map((o) => o.value),
     upsell: $('p_upsell').value,
   }
   if (!body.name) {
@@ -829,7 +833,7 @@ async function loadSettings() {
   $('cfg_maxParts').value = s.maxMessageParts ?? 5
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
   try { libraryCache = await api('/library') } catch { /* si falla, el select queda solo con "Sin foto" */ }
-  fillWelcomeImageSelect(s.welcomeImageId)
+  fillWelcomeImageSelect(s.welcomeImageIds)
   updateTempDisplay()
   updateHistoryDisplay()
   updateReplyDelayDisplay()
@@ -845,7 +849,7 @@ $('cfg_save').addEventListener('click', async () => {
     botEnabled: $('cfg_botToggle').checked,
     businessName: $('cfg_businessName').value.trim(),
     welcomeMessage: $('cfg_welcome').value,
-    welcomeImageId: $('cfg_welcomeImage').value || null,
+    welcomeImageIds: Array.from($('cfg_welcomeImage').selectedOptions).map((o) => o.value),
     knowledgeBase: $('cfg_knowledge').value,
     openaiModel: $('cfg_model').value.trim(),
     openaiTemperature: Number($('cfg_temperature').value),

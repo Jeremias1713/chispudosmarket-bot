@@ -224,10 +224,13 @@
               </div>
 
               <div class="field">
-                <label for="p_introImage">Foto del mensaje inicial (opcional)</label>
-                <div class="help">Se elige de la biblioteca de imágenes.</div>
-                <select id="p_introImage">
-                  <option value="">Sin foto</option>
+                <label for="p_introImage">Fotos del mensaje inicial (opcional)</label>
+                <div class="help">
+                  Se eligen de la biblioteca de imágenes. Podés elegir más de una
+                  (mantené Ctrl o Cmd apretado para seleccionar varias): se mandan
+                  una detrás de otra, y el texto de arriba va con la última.
+                </div>
+                <select id="p_introImage" multiple size="5">
                 </select>
               </div>
 
@@ -403,13 +406,13 @@
                 </div>
 
                 <div class="field">
-                  <label for="cfg_welcomeImage">Foto del saludo inicial (opcional)</label>
+                  <label for="cfg_welcomeImage">Fotos del saludo inicial (opcional)</label>
                   <div class="help">
-                    Se elige de la biblioteca de imágenes (pestaña "Imágenes"). Si la cargás,
-                    el saludo de arriba sale junto con esta foto en vez de solo texto.
+                    Se eligen de la biblioteca de imágenes (pestaña "Imágenes"). Podés elegir
+                    más de una (mantené Ctrl o Cmd apretado). Si cargás alguna, el saludo de
+                    arriba sale junto con esas fotos en vez de solo texto.
                   </div>
-                  <select id="cfg_welcomeImage">
-                    <option value="">Sin foto</option>
+                  <select id="cfg_welcomeImage" multiple size="5">
                   </select>
                 </div>
               </div>
