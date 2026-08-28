@@ -354,12 +354,18 @@ function renderFollowUp(convo) {
 
 function renderAmount(convo) {
   $('amountBar').hidden = false
-  $('amountInput').value = convo.card?.monto ?? ''
+  // El polling cada 4s vuelve a llamar a esto: si el campo esta enfocado
+  // (la persona esta escribiendo un monto todavia sin guardar), no le
+  // pisamos lo que esta tipeando.
+  if (document.activeElement !== $('amountInput')) {
+    $('amountInput').value = convo.card?.monto ?? ''
+  }
   $('amountSaveBtn').onclick = () => saveAmount(convo.phone)
 }
 
 async function saveAmount(phone) {
   const monto = $('amountInput').value
+  $('amountInput').blur()
   try {
     await api('/conversations/' + encodeURIComponent(phone) + '/amount', {
       method: 'POST',
