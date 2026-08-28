@@ -25,7 +25,7 @@ const { generateSpeech, deleteSpeech } = require('./tts');
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '1500', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '3500', 10);
 const DEFAULT_REPLY_DELAY_MS = 8000;
-const DEFAULT_MAX_WORDS_PER_MESSAGE = 30;
+const DEFAULT_MAX_WORDS_HARD_CAP = 90;
 const DEFAULT_MAX_MESSAGE_PARTS = 5;
 // Render define RENDER_EXTERNAL_URL solo automaticamente; PUBLIC_URL es el
 // override manual por si se corre en otro lado.
@@ -47,14 +47,18 @@ function mediaUrl(filename) {
   return `${PUBLIC_URL}/media/${filename}`;
 }
 
-// Manda el texto ya partido en mensajes cortos, respetando el tope de
-// palabras por mensaje y de mensajes por respuesta (configurables desde el
+// Manda el texto ya partido en mensajes cortos. El objetivo de palabras
+// (maxWordsPerMessage) es solo una guia que se le da al modelo en el prompt;
+// aca abajo solo se aplica el TOPE DURO (maxWordsHardCap) como red de
+// seguridad, para no cortar a la mitad una explicacion de producto, del
+// formulario o de una agencia que el modelo decidio extender a proposito.
+// Igual respeta el maximo de mensajes por respuesta (configurables desde el
 // panel, Configuracion). Devuelve las partes mandadas.
 async function sendSplit(to, text) {
   const settings = getSettings();
-  const maxWords = settings.maxWordsPerMessage || DEFAULT_MAX_WORDS_PER_MESSAGE;
+  const maxWordsHardCap = settings.maxWordsHardCap || DEFAULT_MAX_WORDS_HARD_CAP;
   const maxParts = settings.maxMessageParts || DEFAULT_MAX_MESSAGE_PARTS;
-  const parts = enforceMessageLimits(splitReply(text), maxWords, maxParts);
+  const parts = enforceMessageLimits(splitReply(text), maxWordsHardCap, maxParts);
 
   for (let i = 0; i < parts.length; i++) {
     if (i > 0) await sleep(randomGap());

@@ -40,6 +40,7 @@ function buildSystemPrompt() {
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
   const maxWords = settings.maxWordsPerMessage || 30;
+  const maxWordsHardCap = settings.maxWordsHardCap || 90;
   const maxParts = settings.maxMessageParts || 5;
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
@@ -54,7 +55,8 @@ function buildSystemPrompt() {
   - Nunca contestes cortante ni con una sola palabra.
 
   FORMATO DE CADA MENSAJE:
-  - Maximo ${maxWords} palabras por mensaje. Si no te alcanza, seguis en el siguiente.
+  - Objetivo: ${maxWords} palabras por mensaje para algo simple (saludar, confirmar un dato, un si o un no, agradecer).
+  - Cuando haga falta explicar bien algo (el producto y sus detalles, que datos necesitas para el pedido/formulario, la direccion o info de una agencia), podes escribir mas largo, hasta ${maxWordsHardCap} palabras en ese mensaje puntual. No lo repartas en varios mensajes cortos solo para respetar el objetivo, eso queda peor.
   - Tu respuesta completa no puede tener mas de ${maxParts} mensajes en total.
   - Emojis: uno por mensaje, dos como mucho, y no en todos.
   - NUNCA uses guiones largos ni doble guion para separar ideas. Usa una coma, un punto, o empeza otra oracion.

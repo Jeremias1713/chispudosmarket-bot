@@ -13,7 +13,7 @@ function splitForPreview(text) {
   const settings = getSettings();
   return enforceMessageLimits(
     splitReply(text),
-    settings.maxWordsPerMessage || 30,
+    settings.maxWordsHardCap || 90,
     settings.maxMessageParts || 5
   );
 }

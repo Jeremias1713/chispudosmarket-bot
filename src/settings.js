@@ -23,10 +23,16 @@ const DEFAULTS = {
   // seguidos, cada uno reinicia la espera: el bot recien contesta cuando
   // el cliente se queda callado ese rato.
   replyDelayMs: 8000,
-  // Tope de palabras por mensaje y de mensajes por respuesta. Si el modelo
-  // se pasa, se corta y se reparte en varios mensajes; nunca se descarta
-  // texto (lo que sobra se pega al ultimo mensaje permitido).
+  // Objetivo de palabras por mensaje para una respuesta comun (saludo,
+  // confirmar un dato, etc). No es un tope duro: el modelo puede pasarse de
+  // esto sin que se le corte el mensaje.
   maxWordsPerMessage: 30,
+  // Tope duro de palabras por mensaje: recien si se pasa de ESTO se corta y
+  // se reparte en el siguiente mensaje (nunca se descarta texto, lo que
+  // sobra se pega al ultimo). Mas alto que el objetivo a proposito, para que
+  // el bot pueda explicar un producto, los datos del formulario o la
+  // direccion de una agencia sin que le corten la explicacion a la mitad.
+  maxWordsHardCap: 90,
   maxMessageParts: 5,
   // Ademas del texto, manda una nota de voz con la misma respuesta.
   audioReplyEnabled: true,

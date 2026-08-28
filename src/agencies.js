@@ -1,9 +1,12 @@
 // Carga agencies.csv y encuentra la agencia mas cercana a una ubicacion dada,
-// o busca por texto (ciudad/pais) cuando no hay coordenadas.
+// o busca por texto (estado/region/nombre/direccion) cuando no hay coordenadas.
+// El listado se puede reemplazar en caliente subiendo un Excel desde el panel
+// (Configuracion > Cobertura de agencias): ver importFromWorkbookBuffer.
 const fs = require('fs');
 const path = require('path');
 
 const CSV_PATH = path.join(__dirname, '..', 'data', 'agencies.csv');
+const CSV_HEADERS = ['name', 'country', 'region', 'address', 'phone', 'lat', 'lon'];
 
 function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -38,22 +41,59 @@ function splitCsvLine(line) {
   return result;
 }
 
+// Arma una linea de CSV, entre comillas solo los campos que lo necesitan
+// (tienen coma, comilla o salto de linea), como hace cualquier Excel.
+function csvField(value) {
+  const s = String(value == null ? '' : value);
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function writeCsv(rows) {
+  const lines = [CSV_HEADERS.join(',')];
+  for (const r of rows) {
+    lines.push(CSV_HEADERS.map((h) => csvField(r[h])).join(','));
+  }
+  fs.writeFileSync(CSV_PATH, lines.join('\n') + '\n');
+}
+
 function loadAgencies() {
   const text = fs.readFileSync(CSV_PATH, 'utf8');
   return parseCsv(text)
-  .map((row) => ({
-    ...row,
-    lat: parseFloat(row.lat),
-    lon: parseFloat(row.lon),
-  }))
-  .filter((row) => row.name);
+    .map((row) => ({
+      ...row,
+      lat: parseFloat(row.lat),
+      lon: parseFloat(row.lon),
+    }))
+    .filter((row) => row.name);
+}
+
+// Info corta para mostrar en el panel: cuantas agencias hay cargadas y en
+// cuantas regiones/estados, sin mandar el listado completo.
+function getMeta() {
+  let agencies = [];
+  try {
+    agencies = loadAgencies();
+  } catch (err) {
+    agencies = [];
+  }
+  const regions = new Set(agencies.map((a) => a.region).filter(Boolean));
+  let updatedAt = null;
+  try {
+    updatedAt = fs.statSync(CSV_PATH).mtime.toISOString();
+  } catch (err) {
+    updatedAt = null;
+  }
+  return { count: agencies.length, regions: regions.size, updatedAt };
 }
 
 // Formula haversine: distancia en km entre dos puntos lat/lon.
 function haversineKm(lat1, lon1, lat2, lon2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const R = 6371; // radio de la Tierra en km
-const dLat = toRad(lat2 - lat1);
+  const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
@@ -62,36 +102,123 @@ const dLat = toRad(lat2 - lat1);
   return R * c;
 }
 
-// Devuelve las N agencias mas cercanas a una coordenada dada.
+// Devuelve las N agencias mas cercanas a una coordenada dada. Si el listado
+// actual no tiene coordenadas cargadas (ej. import desde Excel sin lat/lon),
+// devuelve vacio: flow.js ya sabe pedirle la ciudad como alternativa.
 function nearestByCoords(lat, lon, limit = 3) {
   const agencies = loadAgencies().filter(
     (a) => !Number.isNaN(a.lat) && !Number.isNaN(a.lon)
-    );
+  );
   return agencies
-  .map((a) => ({ ...a, distanceKm: haversineKm(lat, lon, a.lat, a.lon) }))
-  .sort((a, b) => a.distanceKm - b.distanceKm)
-  .slice(0, limit);
+    .map((a) => ({ ...a, distanceKm: haversineKm(lat, lon, a.lat, a.lon) }))
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, limit);
 }
 
-// Busqueda por texto libre (ciudad o pais) cuando el usuario escribe en vez de compartir ubicacion.
+// Busqueda por texto libre (ciudad, estado, sector o pais) cuando el usuario
+// escribe en vez de compartir ubicacion. Tambien mira dentro de la direccion
+// completa porque ahi suelen aparecer el municipio/parroquia/ciudad exacta
+// (ej. "Maracaibo", "Baruta", "Chacao") aunque no sean el nombre de la agencia.
+// Saca tildes/acentos para que "tachira" matchee "TÁCHIRA" y "san cristobal"
+// matchee "SAN CRISTÓBAL": la gente en Venezuela escribe sin tildes seguido.
+function foldAccents(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+}
+
 function searchByText(query, limit = 5) {
-  const q = query.trim().toLowerCase();
+  const q = foldAccents(query.trim());
   if (!q) return [];
   const agencies = loadAgencies();
-  return agencies
-  .filter(
+  const nameMatches = agencies.filter(
     (a) =>
-      a.city.toLowerCase().includes(q) ||
-      a.country.toLowerCase().includes(q) ||
-      a.name.toLowerCase().includes(q)
-    )
-  .slice(0, limit);
+      foldAccents(a.name).includes(q) ||
+      foldAccents(a.region).includes(q) ||
+      foldAccents(a.city).includes(q) ||
+      foldAccents(a.country).includes(q)
+  );
+  if (nameMatches.length) return nameMatches.slice(0, limit);
+
+  // Si no matcheo por nombre/region, probamos dentro de la direccion.
+  return agencies.filter((a) => foldAccents(a.address).includes(q)).slice(0, limit);
 }
 
 function formatAgency(a) {
-  const distance =
-    a.distanceKm !== undefined ? ` (~${a.distanceKm.toFixed(1)} km)` : '';
-  return `*${a.name}*${distance}\n${a.address}\nTel: ${a.phone}`;
+  const distance = a.distanceKm !== undefined ? ` (~${a.distanceKm.toFixed(1)} km)` : '';
+  const region = a.region ? ` — ${a.region}` : '';
+  const phone = a.phone ? `\nTel: ${a.phone}` : '';
+  return `*${a.name}*${region}${distance}\n${a.address}${phone}`;
 }
 
-module.exports = { loadAgencies, nearestByCoords, searchByText, formatAgency, haversineKm };
+// Detecta a que columna del CSV corresponde cada header del Excel, sin
+// importar mayusculas/acentos/orden (para que sirva tanto la planilla de
+// Tealca como cualquier otra parecida). Si no reconoce los headers, usa el
+// orden de columnas tal cual viene (estado, agencia, direccion).
+function normalizeHeader(h) {
+  return String(h || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function importFromWorkbookBuffer(buffer) {
+  // Se pide aca adentro (no arriba del archivo) para que el resto del bot
+  // siga funcionando aunque la dependencia 'xlsx' no este instalada.
+  const XLSX = require('xlsx');
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error('El Excel no tiene hojas.');
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  if (!rows.length) throw new Error('La hoja esta vacia.');
+
+  const header = rows[0].map(normalizeHeader);
+  let idxRegion = header.findIndex((h) => h.includes('estado') || h.includes('region'));
+  let idxName = header.findIndex((h) => h.includes('agencia') || h === 'nombre' || h.includes('sucursal'));
+  let idxAddress = header.findIndex((h) => h.includes('direccion'));
+  let idxPhone = header.findIndex((h) => h.includes('telefono') || h.includes('tel'));
+  let idxCountry = header.findIndex((h) => h.includes('pais'));
+
+  // No reconocio los nombres de columna: asume el orden de Tealca
+  // (estado, agencia, direccion) que es el formato mas comun.
+  if (idxRegion === -1 && idxName === -1 && idxAddress === -1) {
+    idxRegion = 0;
+    idxName = 1;
+    idxAddress = 2;
+  }
+  if (idxName === -1) throw new Error('No encontre una columna de nombre de agencia (ESTADO / AGENCIA / DIRECCION).');
+
+  const dataRows = rows.slice(1);
+  const parsed = [];
+  for (const row of dataRows) {
+    const name = String(row[idxName] ?? '').trim();
+    if (!name) continue;
+    parsed.push({
+      name,
+      country: idxCountry !== -1 ? String(row[idxCountry] ?? '').trim() || 'Venezuela' : 'Venezuela',
+      region: idxRegion !== -1 ? String(row[idxRegion] ?? '').trim() : '',
+      address: idxAddress !== -1 ? String(row[idxAddress] ?? '').trim() : '',
+      phone: idxPhone !== -1 ? String(row[idxPhone] ?? '').trim() : '',
+      lat: '',
+      lon: '',
+    });
+  }
+
+  if (!parsed.length) throw new Error('No encontre filas con agencias validas en el Excel.');
+
+  writeCsv(parsed);
+  return getMeta();
+}
+
+module.exports = {
+  loadAgencies,
+  nearestByCoords,
+  searchByText,
+  formatAgency,
+  haversineKm,
+  getMeta,
+  importFromWorkbookBuffer,
+};
