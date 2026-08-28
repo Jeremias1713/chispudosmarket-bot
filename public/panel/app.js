@@ -767,11 +767,11 @@ async function pollProducts() {
 const imagePickers = {}
 
 function renderImagePickerGrid(key) {
-  const root = document.querySelector(`.img-picker[data-picker="${key}"]`)
+  const root = document.querySelector(`.field-imgpicker[data-picker="${key}"]`)
   if (!root || !imagePickers[key]) return
-  const search = root.querySelector('.img-picker-search').value.trim().toLowerCase()
-  const grid = root.querySelector('.img-picker-grid')
-  const empty = root.querySelector('.img-picker-empty')
+  const search = root.querySelector('.field-imgpicker-search').value.trim().toLowerCase()
+  const grid = root.querySelector('.field-imgpicker-grid')
+  const empty = root.querySelector('.field-imgpicker-empty')
   const selected = new Set(imagePickers[key].selectedIds)
   const items = libraryCache.filter((img) => !search || img.name.toLowerCase().includes(search))
 
@@ -785,13 +785,13 @@ function renderImagePickerGrid(key) {
   empty.textContent = 'No hay imágenes con ese nombre.'
 
   grid.innerHTML = items.map((img) => `
-    <label class="img-picker-item${selected.has(img.id) ? ' is-selected' : ''}" data-id="${esc(img.id)}">
+    <label class="field-imgpicker-item${selected.has(img.id) ? ' is-selected' : ''}" data-id="${esc(img.id)}">
       <img src="/media/${esc(img.filename)}" alt="${esc(img.name)}" loading="lazy">
-      <span class="img-picker-name">${esc(img.name)}</span>
-      ${selected.has(img.id) ? '<span class="img-picker-check">✓</span>' : ''}
+      <span class="field-imgpicker-name">${esc(img.name)}</span>
+      ${selected.has(img.id) ? '<span class="field-imgpicker-check">✓</span>' : ''}
     </label>`).join('')
 
-  grid.querySelectorAll('.img-picker-item').forEach((el) => {
+  grid.querySelectorAll('.field-imgpicker-item').forEach((el) => {
     el.addEventListener('click', () => {
       const id = el.dataset.id
       const st = imagePickers[key]
@@ -812,9 +812,9 @@ function getImagePickerSelection(key) {
   return imagePickers[key]?.selectedIds || []
 }
 
-document.querySelectorAll('.img-picker').forEach((root) => {
+document.querySelectorAll('.field-imgpicker').forEach((root) => {
   const key = root.dataset.picker
-  root.querySelector('.img-picker-search').addEventListener('input', () => renderImagePickerGrid(key))
+  root.querySelector('.field-imgpicker-search').addEventListener('input', () => renderImagePickerGrid(key))
 })
 
 function openProduct(p) {
