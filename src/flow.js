@@ -177,6 +177,14 @@ async function sendGreeting(to) {
 // anteriores ya quedaron guardados en el historial por appendMessage).
 const pendingContext = new Map(); // phone -> { type, rawText, lower, location }
 const pendingTimers = new Map(); // phone -> timeout handle
+// Todos los textos que el cliente mando mientras se esperaba (ver
+// scheduleReply), en orden. A diferencia de pendingContext (que se pisa y
+// solo guarda el ultimo mensaje), esto se va acumulando: hace falta para el
+// gatillo de producto mas abajo, que si no revisaria SOLO el ultimo mensaje
+// de la tanda y se perderia el gatillo cuando el cliente manda el nombre del
+// producto en un mensaje y algo mas (ej. "Precio") en otro casi seguido,
+// antes de que el bot llegue a contestar.
+const pendingRawTexts = new Map(); // phone -> string[]
 
 function scheduleReply(from) {
   const settings = getSettings();
@@ -255,6 +263,12 @@ async function handleIncomingMessage(from, message, profileName) {
     location: type === 'location' ? message.location : null,
   });
 
+  if (rawText) {
+    const list = pendingRawTexts.get(from) || [];
+    list.push(rawText);
+    pendingRawTexts.set(from, list);
+  }
+
   scheduleReply(from);
 }
 
@@ -264,6 +278,9 @@ async function processReply(from) {
   const ctx = pendingContext.get(from);
   pendingContext.delete(from);
   if (!ctx) return;
+
+  const batchTexts = pendingRawTexts.get(from) || [];
+  pendingRawTexts.delete(from);
 
   // Se revisa de nuevo por si algo cambio mientras se esperaba (un humano
   // tomo la conversacion desde el panel, o se apago el bot).
@@ -300,7 +317,11 @@ async function processReply(from) {
   // el producto tiene mensaje inicial cargado. Sale tal cual, sin pasar por
   // la IA: es la presentacion que el negocio escribio a mano.
   if (!session.linkedProductId) {
-    const product = matchTrigger(rawText);
+    // OJO: se chequea contra TODOS los mensajes de esta tanda (batchTexts),
+    // no solo el ultimo (rawText). Si el cliente manda "quiero info del
+    // shilajit" y enseguida, antes de que el bot conteste, otro mensaje como
+    // "precio", el gatillo tiene que seguir disparando con el primero.
+    const product = matchTrigger(batchTexts.length ? batchTexts.join(' ') : rawText);
     if (product && product.intro && product.intro.trim()) {
       updateSession(from, { linkedProductId: product.id });
       const intro = product.intro.trim();

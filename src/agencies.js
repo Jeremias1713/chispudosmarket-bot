@@ -132,12 +132,20 @@ function searchByText(query, limit = 5) {
   const q = foldAccents(query.trim());
   if (!q) return [];
   const agencies = loadAgencies();
+  // OJO: antes esto tambien comparaba contra a.country. Pero "country" es
+  // siempre "Venezuela" en TODAS las filas (no es un dato que distinga nada
+  // entre agencias), asi que si alguna vez la IA le pasaba a esta busqueda
+  // el texto "Venezuela" en vez de un estado puntual (una confusion real que
+  // paso: le pidieron la agencia de Maturin, Monagas, y la IA busco con
+  // estado="Venezuela"), matcheaba TODAS las agencias del pais de una y
+  // mandaba un listado gigante de agencias de cualquier lado menos de donde
+  // preguntaba el cliente. Sacamos country de la comparacion: nunca aporta
+  // precision, solo puede causar este falso positivo masivo.
   const nameMatches = agencies.filter(
     (a) =>
       foldAccents(a.name).includes(q) ||
       foldAccents(a.region).includes(q) ||
-      foldAccents(a.city).includes(q) ||
-      foldAccents(a.country).includes(q)
+      foldAccents(a.city).includes(q)
   );
   if (nameMatches.length) return nameMatches.slice(0, limit);
 
