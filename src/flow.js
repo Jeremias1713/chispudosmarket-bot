@@ -306,6 +306,18 @@ async function processReply(from) {
     return;
   }
 
+  // Un "reaction" es solo el emoji que el cliente le pone a un mensaje
+  // anterior (like, corazon, etc.), no un mensaje en si. Antes esto caia en
+  // el fallback de abajo y el bot contestaba "solo puedo leer mensajes de
+  // texto o ubicacion", una respuesta sin sentido para una reaccion que
+  // encima confundia al cliente y quedaba la charla dando vueltas en
+  // redondo (el cliente respondia algo tipo "si" a eso, y el bot volvia a
+  // preguntar lo mismo de antes). Una reaccion no necesita respuesta: se
+  // ignora sin contestar nada.
+  if (type === 'reaction') {
+    return;
+  }
+
   if (!rawText) {
     const reply = 'Por ahora solo puedo leer mensajes de texto o ubicacion. Me lo escribis, porfa?';
     await sendReply(from, reply);
