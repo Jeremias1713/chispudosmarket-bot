@@ -14,6 +14,7 @@
 // guardado en el historial).
 const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
 const { transcribeAudio } = require('./stt');
+const push = require('./push');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, applySplitPolicy } = require('./ai');
@@ -330,7 +331,8 @@ async function processReply(from) {
     if (!current.stageLocked) {
       const classification = await classifyConversation(current.history.map((m) => ({ role: m.role, content: m.content })));
       if (classification) {
-        updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
+        const updated = updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
+        if (classification.stage === 'vendido' && current.stage !== 'vendido') push.notifySale(from, updated);
       }
     }
   } catch (err) {
