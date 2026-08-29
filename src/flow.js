@@ -18,7 +18,7 @@ const { getSession, updateSession, resetSession, appendMessage } = require('./st
 const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, applySplitPolicy } = require('./ai');
 const { classifyConversation } = require('./classifier');
-const { matchTrigger } = require('./catalog');
+const { matchTrigger, findProduct } = require('./catalog');
 const { getImage } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
@@ -318,7 +318,8 @@ async function processReply(from) {
     const history = fullHistory.slice(0, -1);
     const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
     const knownCity = session.card?.ciudad || null;
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity);
+    const knownProduct = session.linkedProductId ? findProduct(session.linkedProductId)?.name || null : null;
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct);
 
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, reply);

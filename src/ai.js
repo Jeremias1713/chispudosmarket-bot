@@ -102,7 +102,7 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   Al reves: si algo tiene que ir en un SOLO mensaje (ver "QUE NUNCA SE PARTE" arriba: una direccion, el pedido de datos completo, una lista de precios/tallas, un dato que se rompe como un telefono), NO dejes ningun renglon en blanco adentro. Usa un solo salto de linea entre cada item de la lista, nunca dos seguidos, para que todo eso siga siendo un unico mensaje.`;
 }
 
-function buildSystemPrompt(knownCity) {
+function buildSystemPrompt(knownCity, knownProduct) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
@@ -111,6 +111,7 @@ function buildSystemPrompt(knownCity) {
   const maxParts = settings.maxMessageParts || 5;
   const splitEnabled = settings.splitRepliesEnabled !== false;
   const knownCityClean = String(knownCity || '').trim();
+  const knownProductClean = String(knownProduct || '').trim();
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
@@ -139,7 +140,7 @@ ${splitEnabled
   1. Contesta lo que te acaban de decir. Si pregunto algo, contestalo. Si conto algo, reconocelo. Esto le gana a cualquier guion de producto o a seguir pidiendo datos.
   2. No le preguntes algo que ya te contesto. Mira la conversacion antes de preguntar.
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
-${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}
+${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, preguntale solo la cantidad. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}
 
   ENTREGA: depende de la ciudad.
   - CARACAS (Distrito Capital, incluye todos sus municipios/parroquias): hay dos formas de recibirlo, domicilio (te lo llevan hasta la puerta) o retiro en agencia. Ofrecele PRIMERO la opcion de domicilio, es la mas comoda para el cliente, y si prefiere retirar en agencia esa tambien esta disponible.
@@ -169,7 +170,11 @@ Amigo necesito estos datos para hacerte el envio a traves de Tealca|||📦 Para 
   Si el cliente pide hablar con una persona, se queja o reclama algo serio, decile que ya lo pasas con un asesor humano y no sigas insistiendo con el guion de venta.
 
   CIERRE DEL PEDIDO:
-  Cuando ya tenes todos los datos (producto y cantidad, como lo va a recibir -agencia elegida, o direccion con punto de referencia si es domicilio en Caracas-, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir: un resumen de lo que pidio (incluyendo la agencia donde va a retirar, o la direccion si es domicilio), y que un asesor se va a poner en contacto para coordinar el pago y la entrega/retiro. No prometas que "ya esta listo para retirar/entregar": todavia falta que un asesor lo confirme.
+  Cuando ya tenes todos los datos (producto y cantidad, como lo va a recibir -agencia elegida, o direccion con punto de referencia si es domicilio en Caracas-, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir, en este orden:
+  1. Un resumen de lo que pidio (incluyendo la agencia donde va a retirar, o la direccion si es domicilio).
+  2. Que el pago se hace contra entrega: en la agencia, al momento de retirar (o en la puerta, si es domicilio en Caracas). NUNCA digas que "un asesor se va a poner en contacto para coordinar el pago": eso no es asi, el pago no se coordina antes, se paga ahi mismo al recibirlo.
+  3. Que en cuanto tengan la guia de envio de Tealca se la van a pasar, y que le avisan apenas el pedido llegue a la agencia (o este en camino, si es domicilio).
+  No prometas una fecha ni un tiempo de entrega exacto: eso lo confirma la guia de Tealca cuando la tengan.
   Termina ese mensaje de cierre ahi. NO le agregues una pregunta como "¿algo mas en lo que te pueda ayudar?" ni ninguna otra: eso contradice la REGLA DE ORO (ya esta todo cerrado, no hace falta inventar una pregunta de relleno).
 
   CATALOGO ACTUAL (unica fuente de precios y productos, no inventes otros):
@@ -522,14 +527,14 @@ function scrubGenial(text) {
   });
 }
 
-async function getAssistantReply(history, userText, knownCity) {
+async function getAssistantReply(history, userText, knownCity, knownProduct) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
   const historyN = settings.openaiHistoryN != null ? Number(settings.openaiHistoryN) : parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(knownCity) },
+    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct) },
     ...history.slice(-historyN),
     { role: 'user', content: userText },
   ];
