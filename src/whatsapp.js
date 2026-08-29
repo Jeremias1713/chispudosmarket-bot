@@ -104,6 +104,29 @@ await api.post('/messages', {
 });
 }
 
+// Descarga un archivo multimedia que mando el cliente (audio, imagen, etc).
+// WhatsApp no da una URL publica directa: primero hay que pedir la URL real
+// con el ID del archivo, y despues descargarla, las dos veces con el mismo
+// token (si no, la URL de Meta devuelve error de permisos).
+async function downloadMedia(mediaId) {
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!token) throw new Error('Falta WHATSAPP_TOKEN en las variables de entorno.');
+
+  const metaRes = await axios.get(`https://graph.facebook.com/${API_VERSION}/${mediaId}`, {
+    headers: { Authorization: 'Bearer ' + token },
+    timeout: 15000,
+  });
+  const { url, mime_type } = metaRes.data;
+  if (!url) throw new Error('Meta no devolvio una URL para este archivo.');
+
+  const fileRes = await axios.get(url, {
+    headers: { Authorization: 'Bearer ' + token },
+    responseType: 'arraybuffer',
+    timeout: 30000,
+  });
+  return { buffer: Buffer.from(fileRes.data), mimeType: mime_type || '' };
+}
+
 async function markAsRead(messageId) {
   const api = client();
   try {
@@ -117,4 +140,4 @@ async function markAsRead(messageId) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead };
+module.exports = { sendText, sendButtons, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead, downloadMedia };

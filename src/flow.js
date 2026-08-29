@@ -12,7 +12,8 @@
 // espera: el bot recien contesta una vez, cuando el cliente se queda
 // callado ese rato, usando todo lo que dijo mientras tanto (ya quedo
 // guardado en el historial).
-const { sendText, sendImageByLink, sendAudioByLink } = require('./whatsapp');
+const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
+const { transcribeAudio } = require('./stt');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, applySplitPolicy } = require('./ai');
@@ -21,7 +22,6 @@ const { matchTrigger } = require('./catalog');
 const { getImage } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
-const push = require('./push');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -203,7 +203,7 @@ async function handleIncomingMessage(from, message, profileName) {
     updateSession(from, { name: profileName });
   }
 
-  const rawText =
+  let rawText =
     type === 'text'
       ? message.text.body.trim()
       : type === 'interactive' && message.interactive?.button_reply
@@ -211,14 +211,35 @@ async function handleIncomingMessage(from, message, profileName) {
         : type === 'interactive' && message.interactive?.list_reply
           ? message.interactive.list_reply.title
           : '';
+
+  // Nota de voz: se baja el audio de WhatsApp y se transcribe con Whisper.
+  // Si algo falla (sin credito, audio raro, sin red) se sigue como si no se
+  // hubiera podido escuchar, nunca se rompe la conversacion.
+  let audioTranscript = '';
+  if (type === 'audio' && message.audio?.id) {
+    try {
+      const { buffer, mimeType } = await downloadMedia(message.audio.id);
+      audioTranscript = await transcribeAudio(buffer, mimeType);
+    } catch (err) {
+      console.warn('No se pudo transcribir la nota de voz:', err.message);
+    }
+    if (audioTranscript) rawText = audioTranscript;
+  }
+
   const lower = rawText.toLowerCase();
 
   // El mensaje entrante se guarda SIEMPRE, aunque el bot este apagado o
   // pausado en esta conversacion: el panel tiene que ver la conversacion
   // completa para que alguien pueda tomarla a mano.
-  if (rawText) appendMessage(from, 'user', rawText);
-  else if (type === 'location') appendMessage(from, 'user', '[Comparti su ubicacion GPS]');
-  else appendMessage(from, 'user', `[${type || 'mensaje'}]`);
+  if (type === 'audio') {
+    appendMessage(from, 'user', audioTranscript ? `🎤 ${audioTranscript}` : '[Nota de voz, no se pudo transcribir]');
+  } else if (rawText) {
+    appendMessage(from, 'user', rawText);
+  } else if (type === 'location') {
+    appendMessage(from, 'user', '[Comparti su ubicacion GPS]');
+  } else {
+    appendMessage(from, 'user', `[${type || 'mensaje'}]`);
+  }
 
   // Switch maestro (Configuracion, apaga TODO el bot) o pausa de esta
   // conversacion puntual (panel, boton "Bot activo" del chat): en cualquiera
@@ -309,8 +330,7 @@ async function processReply(from) {
     if (!current.stageLocked) {
       const classification = await classifyConversation(current.history.map((m) => ({ role: m.role, content: m.content })));
       if (classification) {
-        const updated = updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
-        if (classification.stage === 'vendido' && current.stage !== 'vendido') push.notifySale(from, updated);
+        updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
       }
     }
   } catch (err) {
