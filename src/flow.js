@@ -219,7 +219,16 @@ async function handleIncomingMessage(from, message, profileName) {
         ? message.interactive.button_reply.title
         : type === 'interactive' && message.interactive?.list_reply
           ? message.interactive.list_reply.title
-          : '';
+          // Un sticker (la mayoria de los "gifs" que manda la gente por
+          // WhatsApp en realidad viajan como sticker animado) no se puede
+          // leer, pero en la practica casi siempre es la forma que tiene el
+          // cliente de decir "dale/ok/si" sin escribirlo. Se le pasa a la IA
+          // como un marcador fijo en vez de dejarlo vacio (eso lo mandaria al
+          // "no te entiendo, escribimelo" de mas abajo): el system prompt de
+          // ai.js sabe interpretar este marcador puntual.
+          : type === 'sticker'
+            ? '[sticker]'
+            : '';
 
   // Nota de voz: se baja el audio de WhatsApp y se transcribe con Whisper.
   // Si algo falla (sin credito, audio raro, sin red) se sigue como si no se
