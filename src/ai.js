@@ -514,6 +514,24 @@ function runTool(call) {
 // (es una regla probabilistica, no un filtro), y el cliente pidio
 // explicitamente que la palabra "genial" quede prohibida siempre. Esto
 // la reemplaza de forma determinista por si se cuela igual.
+// Deteccion deterministica de si un texto ES el mensaje de cierre del
+// pedido (ver CIERRE DEL PEDIDO en el prompt). No dependemos de que el
+// clasificador por IA (aparte, async, y no siempre acierta) marque la etapa
+// como "vendido": eso demostro ser poco confiable en la practica (el cliente
+// seguia recibiendo la pregunta de venta despues del cierre porque la etapa
+// nunca se marcaba). En cambio, miramos el propio texto que el bot ya
+// generó: el mensaje de cierre siempre tiene que mencionar el pago contra
+// entrega y la guia de Tealca (instrucciones de arriba), asi que buscamos
+// esas señales directamente, sin acentos y en minuscula para no fallar por
+// mayusculas/tildes.
+function isClosingMessage(text) {
+  const norm = String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return norm.includes('tealca') && norm.includes('pago') && norm.includes('guia');
+}
+
 const GENIAL_REPLACEMENTS = ['que bueno', 'perfecto', 'buenisimo', 'dale', 'listo'];
 let _genialCounter = 0;
 function scrubGenial(text) {
@@ -581,4 +599,4 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   return { text: scrubGenial(followUp.choices[0].message.content.trim()), images };
 }
 
-module.exports = { getAssistantReply, splitReply, enforceMessageLimits, applySplitPolicy, buildSystemPrompt, catalogText };
+module.exports = { getAssistantReply, splitReply, enforceMessageLimits, applySplitPolicy, buildSystemPrompt, catalogText, isClosingMessage };

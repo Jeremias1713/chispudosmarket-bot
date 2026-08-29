@@ -16,7 +16,7 @@ const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('.
 const { transcribeAudio } = require('./stt');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency } = require('./agencies');
-const { getAssistantReply, applySplitPolicy } = require('./ai');
+const { getAssistantReply, applySplitPolicy, isClosingMessage } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
 const { getImage } = require('./library');
@@ -319,12 +319,23 @@ async function processReply(from) {
     const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
     const knownCity = session.card?.ciudad || null;
     const knownProduct = session.linkedProductId ? findProduct(session.linkedProductId)?.name || null : null;
-    const orderClosed = ['vendido', 'esperando_retiro', 'en_camino', 'entregado'].includes(session.stage);
+    // OJO: antes esto se sacaba de session.stage (puesto por el clasificador
+    // por IA, que corre aparte y despues de mandar la respuesta). En la
+    // practica eso resulto poco confiable: hubo conversaciones donde el
+    // pedido ya estaba cerrado (se mando el mensaje de cierre) pero el
+    // clasificador nunca marco la etapa como "vendido", asi que el bot
+    // seguia agregando la pregunta de venta de siempre. Ahora usamos un flag
+    // propio (session.orderClosed) que se prende mas abajo, en el momento
+    // exacto en que el BOT genera el mensaje de cierre (deteccion directa
+    // del texto, sin depender de otra IA aparte).
+    const orderClosed = session.orderClosed === true;
     const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed);
 
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, reply);
-    updateSession(from, { lastAssistantText: reply });
+    const patch = { lastAssistantText: reply };
+    if (!orderClosed && isClosingMessage(reply)) patch.orderClosed = true;
+    updateSession(from, patch);
 
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
