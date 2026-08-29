@@ -501,8 +501,14 @@ function runTool(call) {
   }
 
   // buscar_agencias_por_zona (default: es la unica otra herramienta disponible)
-  const estado = String(args.estado || '').trim();
+  const estadoDelModelo = String(args.estado || '').trim();
   const ciudad = String(args.ciudad || '').trim();
+  // Si la ciudad esta en nuestro diccionario chico de ciudades conocidas
+  // (agencies.resolveStateForCity), ese estado manda por encima del que haya
+  // deducido el modelo: evita repetir el error real que ya paso dos veces
+  // (Maturin a Monagas y Guasdalito a Merida), donde el modelo "confundio" el
+  // estado de una ciudad real en vez de pedir que se la confirmen.
+  const estado = agencies.resolveStateForCity(ciudad) || estadoDelModelo;
   const { scope, results } = searchAgenciesByZone(estado, ciudad);
   return { content: formatAgencyToolResult(estado, ciudad, scope, results), image: null };
 }
@@ -556,9 +562,28 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
   const historyN = settings.openaiHistoryN != null ? Number(settings.openaiHistoryN) : parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
 
+  // El historial que guarda state.js tiene mensajes con role 'user',
+  // 'assistant' o 'human' (un mensaje mandado a mano por alguien del negocio
+  // desde el panel, ej. cuando toman control de la charla), ademas de otros
+  // campos como "at" (hora) o "attachment" (audio original de una nota de
+  // voz). OpenAI solo acepta role "system"/"user"/"assistant"/"tool" en sus
+  // mensajes: mandarle un mensaje con role "human" tal cual (o con esos
+  // campos de mas) hace que la API rechace TODA la llamada con un error. Eso
+  // rompia el bot por completo apenas alguien tomaba control un momento y
+  // despues se lo devolvia: quedaba un mensaje "human" pegado en el
+  // historial reciente, y CADA respuesta de ahi en mas fallaba (se veia como
+  // el "Disculpa, tuve un problema para responderte" de mas abajo, sin
+  // parar). Por eso aca se arma una version limpia del historial, solo con
+  // los dos campos que la API entiende, y "human" se manda como "assistant"
+  // (es el lado del negocio hablando, igual que el bot).
+  const sanitizedHistory = history.slice(-historyN).map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: String(m.content ?? ''),
+  }));
+
   const messages = [
     { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed) },
-    ...history.slice(-historyN),
+    ...sanitizedHistory,
     { role: 'user', content: userText },
   ];
 

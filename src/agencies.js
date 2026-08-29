@@ -153,6 +153,116 @@ function searchByText(query, limit = 5) {
   return agencies.filter((a) => foldAccents(a.address).includes(q)).slice(0, limit);
 }
 
+// Diccionario chico (no exhaustivo, pero cubre las capitales de estado y las
+// ciudades/pueblos mas conocidos que NO comparten nombre con su estado) para
+// no depender de que la IA "deduzca" el estado de una ciudad por su cuenta.
+// Eso fallo en la practica mas de una vez: le pidieron la agencia de
+// Maturin (Monagas) y la IA busco con estado="Venezuela"; despues le
+// pidieron la de Guasdalito (Apure) y la IA busco en el estado Merida. Sin
+// una lista real de memoria, gpt-4o-mini a veces confunde o inventa el
+// estado de un pueblo que no es tan conocido. Cuando la ciudad que menciona
+// el cliente esta aca, se usa este estado, IGNORANDO lo que haya mandado la
+// IA: es un dato duro. Si la ciudad no esta en la lista, se sigue confiando
+// en el estado que dedujo la IA (con la salvedad ya avisada en el prompt de
+// pedirle que confirme si no la reconoce con confianza).
+const CITY_TO_STATE = {
+  'puerto ayacucho': 'Amazonas',
+  barcelona: 'Anzoategui',
+  'puerto la cruz': 'Anzoategui',
+  lecheria: 'Anzoategui',
+  guanta: 'Anzoategui',
+  'el tigre': 'Anzoategui',
+  anaco: 'Anzoategui',
+  'san fernando de apure': 'Apure',
+  guasdalito: 'Apure',
+  achaguas: 'Apure',
+  maracay: 'Aragua',
+  'la victoria': 'Aragua',
+  turmero: 'Aragua',
+  cagua: 'Aragua',
+  'el limon': 'Aragua',
+  'san mateo': 'Aragua',
+  'ciudad bolivar': 'Bolivar',
+  'ciudad guayana': 'Bolivar',
+  'puerto ordaz': 'Bolivar',
+  upata: 'Bolivar',
+  guasipati: 'Bolivar',
+  'el callao': 'Bolivar',
+  'santa elena de uairen': 'Bolivar',
+  valencia: 'Carabobo',
+  'puerto cabello': 'Carabobo',
+  guacara: 'Carabobo',
+  naguanagua: 'Carabobo',
+  'san diego': 'Carabobo',
+  'san carlos': 'Cojedes',
+  tinaquillo: 'Cojedes',
+  tucupita: 'Delta Amacuro',
+  caracas: 'Distrito Capital',
+  coro: 'Falcon',
+  'punto fijo': 'Falcon',
+  judibana: 'Falcon',
+  'santa ana de coro': 'Falcon',
+  'san juan de los morros': 'Guarico',
+  calabozo: 'Guarico',
+  'valle de la pascua': 'Guarico',
+  zaraza: 'Guarico',
+  barquisimeto: 'Lara',
+  carora: 'Lara',
+  quibor: 'Lara',
+  'el tocuyo': 'Lara',
+  cabudare: 'Lara',
+  ejido: 'Merida',
+  'el vigia': 'Merida',
+  tovar: 'Merida',
+  'los teques': 'Miranda',
+  guarenas: 'Miranda',
+  guatire: 'Miranda',
+  charallave: 'Miranda',
+  'ocumare del tuy': 'Miranda',
+  higuerote: 'Miranda',
+  maturin: 'Monagas',
+  'punta de mata': 'Monagas',
+  caripito: 'Monagas',
+  'la asuncion': 'Nueva Esparta',
+  porlamar: 'Nueva Esparta',
+  pampatar: 'Nueva Esparta',
+  juangriego: 'Nueva Esparta',
+  guanare: 'Portuguesa',
+  acarigua: 'Portuguesa',
+  araure: 'Portuguesa',
+  guanarito: 'Portuguesa',
+  cumana: 'Sucre',
+  carupano: 'Sucre',
+  guiria: 'Sucre',
+  'san cristobal': 'Tachira',
+  tariba: 'Tachira',
+  rubio: 'Tachira',
+  'la fria': 'Tachira',
+  'la grita': 'Tachira',
+  valera: 'Trujillo',
+  bocono: 'Trujillo',
+  'la guaira': 'La Guaira',
+  'catia la mar': 'La Guaira',
+  maiquetia: 'La Guaira',
+  'san felipe': 'Yaracuy',
+  chivacoa: 'Yaracuy',
+  yaritagua: 'Yaracuy',
+  maracaibo: 'Zulia',
+  cabimas: 'Zulia',
+  'ciudad ojeda': 'Zulia',
+  'santa barbara': 'Zulia',
+  machiques: 'Zulia',
+};
+
+// Devuelve el estado real de una ciudad conocida (o null si no esta en el
+// diccionario de arriba, en cuyo caso el llamador sigue usando el estado que
+// haya deducido la IA).
+function resolveStateForCity(ciudad) {
+  const key = foldAccents(String(ciudad || '')).trim();
+  if (!key) return null;
+  return CITY_TO_STATE[key] || null;
+}
+
 function formatAgency(a) {
   const distance = a.distanceKm !== undefined ? ` (~${a.distanceKm.toFixed(1)} km)` : '';
   const region = a.region ? ` — ${a.region}` : '';
@@ -229,4 +339,5 @@ module.exports = {
   haversineKm,
   getMeta,
   importFromWorkbookBuffer,
+  resolveStateForCity,
 };

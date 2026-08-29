@@ -46,10 +46,27 @@ con retiro en agencia o entrega a domicilio.
   - interesado: pregunta por precio, producto o disponibilidad.
 - negociando: ya dijo que lo quiere o que lo compra, pero todavia no dio todos sus datos
   (nombre, ciudad, telefono, producto). Ante la duda, va aca.
-  - vendido: ya dio nombre, ciudad, telefono y que producto quiere. La cantidad no hace falta.
-  - esperando_retiro: el pedido esta confirmado y se esta coordinando el retiro/entrega.
-  - en_camino: se le informo que el pedido va en camino o esta listo para retirar.
-- entregado: confirmo que ya recibio el producto.
+  - vendido: ya dio nombre, ciudad, telefono y que producto quiere, y el negocio ya le mando el
+  mensaje de cierre del pedido (resumen + pago contra entrega + que le pasan la guia). Esta es la
+  etapa por defecto de un pedido recien cerrado: quedate aca salvo que la conversacion, DESPUES del
+  cierre, tenga algo mas concreto que justifique avanzar a una de las tres etapas de abajo.
+  - esperando_retiro: lo mismo que "vendido" (pedido cerrado), pero ademas alguien del negocio dijo
+  explicitamente, DESPUES del cierre, que ya le esta coordinando o preparando el envio o el retiro
+  (por ejemplo le paso el numero de guia real, o le confirmo que ya se despacho). No alcanza con la
+  frase generica del mensaje de cierre tipo "en cuanto tengamos la guia te la pasamos" o "te avisamos
+  cuando llegue": eso es una PROMESA a futuro que ya viene siempre en el cierre, no una confirmacion
+  de que ya paso. Si lo unico que hay despues del cierre es silencio, un "gracias" del cliente, o
+  charla suelta sobre el producto, la etapa sigue siendo "vendido", no "esperando_retiro".
+  - en_camino: alguien (negocio o cliente) confirma EXPLICITAMENTE, en un mensaje concreto despues
+  del cierre, que el pedido ya salio/esta en camino o que ya llego a la agencia y esta listo para
+  retirar ahora. De nuevo, la frase generica del mensaje de cierre NO alcanza para esto.
+- entregado: el CLIENTE en persona confirma en sus propias palabras que ya recibio o ya retiro el
+  producto (ej. "ya me llego", "ya lo retire", "llego todo bien"). NUNCA marques "entregado" solo
+  porque el negocio prometio avisar cuando llegue, ni porque paso tiempo desde el cierre: sin un
+  mensaje del cliente confirmando la entrega real, la etapa mas alta posible es "esperando_retiro".
+  Ejemplo de error que no hay que repetir: un pedido se cierra y, en la misma conversacion, unos
+  minutos despues sin que el cliente haya dicho nada de recibir el producto, se marca como
+  "entregado": eso esta mal, en ese caso la etapa sigue siendo "vendido".
   - necesita_atencion: se queja, reclama o pide hablar con una persona.
 - perdido: dijo que no le interesa o abandono claramente la conversacion.
 

@@ -33,6 +33,13 @@ const DEFAULT_REPLY_DELAY_MS = 8000;
 // Render define RENDER_EXTERNAL_URL solo automaticamente; PUBLIC_URL es el
 // override manual por si se corre en otro lado.
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+// Etapas que representan un pedido YA cerrado, en cualquier momento
+// posterior del despacho (recien cerrado, coordinando retiro, en camino, o
+// ya entregado). Se usa para no "retroceder" una conversacion que ya avanzo
+// mas alla de "vendido" cuando se detecta el cierre; panel.js usa la misma
+// lista para que las metricas (conversion, ingresos) cuenten cualquiera de
+// estas etapas como una venta real, no solo "vendido" al pie de la letra.
+const SOLD_STAGES = ['vendido', 'esperando_retiro', 'en_camino', 'entregado'];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -424,8 +431,29 @@ async function processReply(from) {
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, reply);
     const patch = { lastAssistantText: reply };
-    if (!orderClosed && isClosingMessage(reply)) patch.orderClosed = true;
+    const isNewClose = !orderClosed && isClosingMessage(reply);
+    if (isNewClose) {
+      patch.orderClosed = true;
+      // El cierre del pedido ES la venta: la marcamos como "vendido" en el
+      // mismo momento deterministico en que se detecta el cierre (arriba),
+      // en vez de esperar al clasificador por IA de mas abajo. En la
+      // practica el clasificador casi nunca terminaba marcando "vendido"
+      // textual: como el propio mensaje de cierre ya habla de guia/agencia,
+      // saltaba directo a "esperando_retiro" (a veces hasta "entregado" sin
+      // que el cliente hubiera confirmado nada), asi que ni la notificacion
+      // push de venta nueva ni las metricas de conversion se disparaban
+      // nunca con una venta real. No tocamos la etapa si un humano la fijo a
+      // mano desde el panel (stageLocked), ni si ya esta en una etapa
+      // posterior (SOLD_STAGES): no tiene sentido "retroceder" el pedido.
+      if (!session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
+        patch.stage = 'vendido';
+        patch.stageReason = 'Pedido cerrado (deteccion automatica)';
+      }
+    }
     updateSession(from, patch);
+    if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
+      push.notifySale(from, getSession(from));
+    }
 
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
@@ -455,4 +483,4 @@ async function processReply(from) {
   }
 }
 
-module.exports = { handleIncomingMessage, sendSplit, sendGreeting, mediaUrl };
+module.exports = { handleIncomingMessage, sendSplit, sendGreeting, mediaUrl, SOLD_STAGES };
