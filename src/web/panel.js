@@ -123,6 +123,7 @@ router.get('/api/conversations/:phone', (req, res) => {
     role: m.role,
     content: m.content,
     at: m.at || null,
+    attachment: m.attachment || null,
   }));
   res.json({ conversation: toConvo({ phone, ...s }), messages });
 });
