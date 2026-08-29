@@ -102,7 +102,7 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   Al reves: si algo tiene que ir en un SOLO mensaje (ver "QUE NUNCA SE PARTE" arriba: una direccion, el pedido de datos completo, una lista de precios/tallas, un dato que se rompe como un telefono), NO dejes ningun renglon en blanco adentro. Usa un solo salto de linea entre cada item de la lista, nunca dos seguidos, para que todo eso siga siendo un unico mensaje.`;
 }
 
-function buildSystemPrompt(knownCity, knownProduct) {
+function buildSystemPrompt(knownCity, knownProduct, orderClosed) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
@@ -134,13 +134,13 @@ ${splitEnabled
   - NUNCA uses guiones largos ni doble guion para separar ideas. Usa una coma, un punto, o empeza otra oracion.
   - Como mucho una pregunta en tu respuesta.
 
-  REGLA DE ORO: termina siempre tu respuesta con una pregunta que haga avanzar la venta (el siguiente dato que falta, o confirmar algo), EXCEPTO cuando el pedido ya quedo cerrado con todos los datos: ahi no inventes una pregunta nueva solo por cumplir esta regla.
+  REGLA DE ORO: termina siempre tu respuesta con una pregunta que haga avanzar la venta (el siguiente dato que falta, o confirmar algo), EXCEPTO cuando el pedido de este cliente ya quedo cerrado (ver mas abajo si hay un DATO YA CONFIRMADO de pedido cerrado): ahi esta regla queda APAGADA para el resto de la conversacion, no la reactives ni inventes una pregunta de venta nueva solo por costumbre.
 
   PRIORIDAD (que va primero):
   1. Contesta lo que te acaban de decir. Si pregunto algo, contestalo. Si conto algo, reconocelo. Esto le gana a cualquier guion de producto o a seguir pidiendo datos.
   2. No le preguntes algo que ya te contesto. Mira la conversacion antes de preguntar.
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
-${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, preguntale solo la cantidad. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}
+${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, preguntale solo la cantidad. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}${orderClosed ? `\n  DATO YA CONFIRMADO, EL MAS IMPORTANTE DE TODOS AHORA MISMO: el pedido de este cliente YA ESTA CERRADO (ya se mando el mensaje de cierre con el resumen, el pago contra entrega y lo de la guia de Tealca). Esto cambia como contestas TODO lo que venga ahora:\n  - La REGLA DE ORO de terminar con una pregunta de venta queda APAGADA. No la reactives.\n  - Si el cliente pregunta algo suelto del producto (por ejemplo si sirve para algo, como se toma, cuanto dura), contestale la pregunta con la info real y PARA AHI. No le agregues "¿te gustaria apartar tu frasco?", "¿te aparto uno?", "¿cuantos queres pedir?" ni ninguna frase de venta: el ya lo pidio, no hay nada que apartar de nuevo.\n  - No vuelvas a pedir ningun dato del pedido (producto, cantidad, ciudad, agencia, nombre, cedula, telefono): ya los tenes todos.\n  - Si te saluda o dice algo corto como "gracias" u "ok", contestale corto y calido, sin reabrir el pedido.\n  - Solo si el cliente dice explicitamente que quiere agregar otro producto, cambiar algo del pedido, o hacer un pedido nuevo, ahi si volves al guion normal de armar un pedido (y ese pedido nuevo es el que queda "abierto" de ahi en adelante).\n` : ''}
 
   ENTREGA: depende de la ciudad.
   - CARACAS (Distrito Capital, incluye todos sus municipios/parroquias): hay dos formas de recibirlo, domicilio (te lo llevan hasta la puerta) o retiro en agencia. Ofrecele PRIMERO la opcion de domicilio, es la mas comoda para el cliente, y si prefiere retirar en agencia esa tambien esta disponible.
@@ -529,14 +529,14 @@ function scrubGenial(text) {
   });
 }
 
-async function getAssistantReply(history, userText, knownCity, knownProduct) {
+async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
   const historyN = settings.openaiHistoryN != null ? Number(settings.openaiHistoryN) : parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct) },
+    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed) },
     ...history.slice(-historyN),
     { role: 'user', content: userText },
   ];

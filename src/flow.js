@@ -319,7 +319,8 @@ async function processReply(from) {
     const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
     const knownCity = session.card?.ciudad || null;
     const knownProduct = session.linkedProductId ? findProduct(session.linkedProductId)?.name || null : null;
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct);
+    const orderClosed = ['vendido', 'esperando_retiro', 'en_camino', 'entregado'].includes(session.stage);
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed);
 
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, reply);
