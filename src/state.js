@@ -74,11 +74,14 @@ function resetSession(phone) {
 
 // Agrega un mensaje al historial con marca de tiempo. role es 'user'
 // (cliente), 'assistant' (IA) o 'human' (mandado a mano desde el panel).
-function appendMessage(phone, role, content) {
+// extra es opcional: por ahora se usa para { attachment } (ej. el audio
+// original de una nota de voz, para que el panel lo pueda reproducir ademas
+// de mostrar la transcripcion).
+function appendMessage(phone, role, content, extra) {
   const sessions = loadAll();
   const session = sessions[phone] || blankSession();
   const history = [...(session.history || [])];
-  history.push({ role, content, at: new Date().toISOString() });
+  history.push({ role, content, at: new Date().toISOString(), ...(extra || {}) });
   sessions[phone] = { ...session, history, updatedAt: new Date().toISOString() };
   saveAll(sessions);
   return sessions[phone];

@@ -12,6 +12,9 @@
 // espera: el bot recien contesta una vez, cuando el cliente se queda
 // callado ese rato, usando todo lo que dijo mientras tanto (ya quedo
 // guardado en el historial).
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
 const { transcribeAudio } = require('./stt');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
@@ -19,7 +22,7 @@ const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, applySplitPolicy, isClosingMessage } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
-const { getImage } = require('./library');
+const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
@@ -48,6 +51,36 @@ function mediaUrl(filename) {
   // desde afuera).
   if (!PUBLIC_URL) return null;
   return `${PUBLIC_URL}/media/${filename}`;
+}
+
+// Extension de archivo segun el mime type que manda Meta para una nota de
+// voz (ej. "audio/ogg; codecs=opus"). Si no lo reconoce, usa ogg (el formato
+// mas comun en notas de voz de WhatsApp).
+const INCOMING_AUDIO_EXT_BY_MIME = {
+  ogg: 'ogg',
+  opus: 'ogg',
+  mpeg: 'mp3',
+  mp3: 'mp3',
+  mp4: 'm4a',
+  aac: 'aac',
+  amr: 'amr',
+  wav: 'wav',
+};
+
+// Guarda en disco (junto a las fotos de la biblioteca, en data/media/) el
+// audio original de una nota de voz que mando el cliente, y devuelve la URL
+// publica para reproducirlo desde el panel. La transcripcion (Whisper) a
+// veces sale mal por ruido, acento o un audio cortado, y el negocio necesita
+// poder escuchar la nota de voz posta para confirmar que dijo el cliente, no
+// solo confiar en el texto transcripto.
+function saveIncomingAudio(buffer, mimeType) {
+  if (!PUBLIC_URL) return null; // sin URL publica no hay como reproducirlo despues
+  const subtype = String(mimeType || '').split(';')[0].split('/')[1] || '';
+  const ext = INCOMING_AUDIO_EXT_BY_MIME[subtype.trim().toLowerCase()] || 'ogg';
+  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  const filename = `audio-in-${crypto.randomBytes(8).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(MEDIA_DIR, filename), buffer);
+  return mediaUrl(filename);
 }
 
 // Manda el texto ya partido en mensajes cortos. El objetivo de palabras
@@ -234,9 +267,18 @@ async function handleIncomingMessage(from, message, profileName) {
   // Si algo falla (sin credito, audio raro, sin red) se sigue como si no se
   // hubiera podido escuchar, nunca se rompe la conversacion.
   let audioTranscript = '';
+  let audioUrl = null;
   if (type === 'audio' && message.audio?.id) {
     try {
       const { buffer, mimeType } = await downloadMedia(message.audio.id);
+      // El audio original se guarda aparte de la transcripcion (ver mas
+      // abajo, appendMessage con el attachment): si esto falla, no importa,
+      // seguimos igual con la transcripcion sola.
+      try {
+        audioUrl = saveIncomingAudio(buffer, mimeType);
+      } catch (err) {
+        console.warn('No se pudo guardar el audio original de la nota de voz:', err.message);
+      }
       audioTranscript = await transcribeAudio(buffer, mimeType);
     } catch (err) {
       console.warn('No se pudo transcribir la nota de voz:', err.message);
@@ -250,7 +292,13 @@ async function handleIncomingMessage(from, message, profileName) {
   // pausado en esta conversacion: el panel tiene que ver la conversacion
   // completa para que alguien pueda tomarla a mano.
   if (type === 'audio') {
-    appendMessage(from, 'user', audioTranscript ? `🎤 ${audioTranscript}` : '[Nota de voz, no se pudo transcribir]');
+    const attachment = audioUrl ? { kind: 'audio', url: audioUrl } : undefined;
+    appendMessage(
+      from,
+      'user',
+      audioTranscript ? `🎤 ${audioTranscript}` : '[Nota de voz, no se pudo transcribir]',
+      attachment ? { attachment } : undefined
+    );
   } else if (rawText) {
     appendMessage(from, 'user', rawText);
   } else if (type === 'location') {
