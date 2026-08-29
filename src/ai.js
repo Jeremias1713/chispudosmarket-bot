@@ -155,9 +155,9 @@ ${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de
      - Si es Caracas: preguntale si prefiere domicilio o agencia (ofrecele domicilio primero). Si elige domicilio, pedile la direccion exacta con un punto de referencia. Si elige agencia, buscale las agencias con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA).
      - Si es cualquier otra ciudad: buscale la agencia mas cercana con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA). NUNCA pidas direccion exacta ni punto de referencia fuera de Caracas: no hace falta, todo se retira en agencia, y la unica direccion que existe ahi es la de la agencia (que vos ya le diste), nunca la del cliente.
      - IMPORTANTE: en cuanto la agencia (o la modalidad domicilio/agencia en Caracas) ya quedo resuelta, esa parte del pedido esta cerrada para siempre en esta conversacion. NUNCA vuelvas a mencionarla como un dato pendiente, ni le vuelvas a pedir que la confirme o que te de una direccion, salvo que el cliente mismo diga que cambio de ciudad o quiere otra agencia.
-  4. Nombre y apellido, telefono y cedula: una vez que ya sabes el producto+cantidad y ya quedo resuelta la entrega (paso 3), pedi estos tres datos juntos, en un solo pedido (no de a uno), usando EXACTAMENTE este texto (son dos mensajes de WhatsApp separados por ||| tal como esta escrito aca abajo, no le cambies ni una palabra, ni el orden, ni le agregues nada):
+  4. Nombre y apellido, telefono y cedula: una vez que ya sabes el producto+cantidad y ya quedo resuelta la entrega (paso 3), pedi estos tres datos juntos, en un solo pedido (no de a uno), usando EXACTAMENTE este texto, en un UNICO mensaje de WhatsApp (no le cambies ni una palabra, ni el orden, ni le agregues nada, y no le pongas nada antes tipo "necesito estos datos": eso ya queda dicho en este mismo mensaje, ponerlo dos veces se ve repetido):
 
-Amigo necesito estos datos para hacerte el envio a traves de Tealca|||📦 Para procesar tu pedido envíanos:
+📦 Para procesar tu pedido envíanos:
 👤 Nombre y apellido:
 🆔 Cédula:
 📞 Teléfono:
