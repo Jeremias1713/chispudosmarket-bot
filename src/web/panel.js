@@ -26,7 +26,7 @@ const settingsStore = require('../settings');
 const broadcasts = require('../broadcasts');
 const simulator = require('../simulator');
 const coupons = require('../coupons');
-const { mediaUrl } = require('../flow');
+const { mediaUrl, SOLD_STAGES } = require('../flow');
 const push = require('../push');
 
 const STAGE_LABELS = {
@@ -223,15 +223,22 @@ router.get('/api/metrics', (_req, res) => {
   }
 
   const total = sessions.length;
-  const vendidos = byStage.vendido || 0;
+  // Cuenta como venta cualquiera de las etapas de SOLD_STAGES (vendido,
+  // esperando_retiro, en_camino, entregado), no solo "vendido" al pie de la
+  // letra: un pedido cerrado sigue siendo una venta real aunque avance a
+  // "esperando_retiro" o mas alla (de hecho, en la practica esto pasa casi
+  // siempre apenas se cierra: el propio mensaje de cierre ya habla de guia
+  // y agencia). Antes esto solo miraba "vendido" y las ventas reales quedaban
+  // afuera de la conversion y de los ingresos.
+  const vendidos = SOLD_STAGES.reduce((sum, stage) => sum + (byStage[stage] || 0), 0);
   const conversionRate = total > 0 ? (vendidos / total) * 100 : null;
 
   // Ingresos: suma del monto cargado a mano (panel > conversacion > "Monto
-  // vendido") en las conversaciones que estan en la etapa 'vendido'. No
-  // convierte monedas, asume que todos los montos cargados usan la misma.
+  // vendido") en las conversaciones que ya cerraron el pedido (SOLD_STAGES).
+  // No convierte monedas, asume que todos los montos cargados usan la misma.
   let revenue = 0;
   for (const s of sessions) {
-    if (s.stage === 'vendido' && s.card?.monto != null) {
+    if (SOLD_STAGES.includes(s.stage) && s.card?.monto != null) {
       const monto = Number(s.card.monto);
       if (!Number.isNaN(monto)) revenue += monto;
     }
@@ -259,10 +266,11 @@ router.get('/api/metrics', (_req, res) => {
     .slice(0, 8);
 
   // Productos mas vendidos: se agrupan por el texto libre de card.producto
-  // (lo que anoto el bot/vendedor), contando solo conversaciones en 'vendido'.
+  // (lo que anoto el bot/vendedor), contando conversaciones en cualquier
+  // etapa de SOLD_STAGES (pedido ya cerrado).
   const productStats = new Map();
   for (const s of sessions) {
-    if (s.stage !== 'vendido') continue;
+    if (!SOLD_STAGES.includes(s.stage)) continue;
     const producto = String(s.card?.producto || '').trim();
     if (!producto) continue;
     const key = producto.toLowerCase();
