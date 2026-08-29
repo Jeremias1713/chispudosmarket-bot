@@ -102,7 +102,7 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   Al reves: si algo tiene que ir en un SOLO mensaje (ver "QUE NUNCA SE PARTE" arriba: una direccion, el pedido de datos completo, una lista de precios/tallas, un dato que se rompe como un telefono), NO dejes ningun renglon en blanco adentro. Usa un solo salto de linea entre cada item de la lista, nunca dos seguidos, para que todo eso siga siendo un unico mensaje.`;
 }
 
-function buildSystemPrompt() {
+function buildSystemPrompt(knownCity) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
@@ -110,6 +110,7 @@ function buildSystemPrompt() {
   const maxWordsHardCap = settings.maxWordsHardCap || 90;
   const maxParts = settings.maxMessageParts || 5;
   const splitEnabled = settings.splitRepliesEnabled !== false;
+  const knownCityClean = String(knownCity || '').trim();
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
@@ -138,6 +139,7 @@ ${splitEnabled
   1. Contesta lo que te acaban de decir. Si pregunto algo, contestalo. Si conto algo, reconocelo. Esto le gana a cualquier guion de producto o a seguir pidiendo datos.
   2. No le preguntes algo que ya te contesto. Mira la conversacion antes de preguntar.
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
+${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}
 
   ENTREGA: depende de la ciudad.
   - CARACAS (Distrito Capital, incluye todos sus municipios/parroquias): hay dos formas de recibirlo, domicilio (te lo llevan hasta la puerta) o retiro en agencia. Ofrecele PRIMERO la opcion de domicilio, es la mas comoda para el cliente, y si prefiere retirar en agencia esa tambien esta disponible.
@@ -512,14 +514,14 @@ function scrubGenial(text) {
   });
 }
 
-async function getAssistantReply(history, userText) {
+async function getAssistantReply(history, userText, knownCity) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
   const historyN = settings.openaiHistoryN != null ? Number(settings.openaiHistoryN) : parseInt(process.env.OPENAI_HISTORY_N || '12', 10);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt() },
+    { role: 'system', content: buildSystemPrompt(knownCity) },
     ...history.slice(-historyN),
     { role: 'user', content: userText },
   ];

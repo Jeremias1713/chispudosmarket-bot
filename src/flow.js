@@ -14,7 +14,6 @@
 // guardado en el historial).
 const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
 const { transcribeAudio } = require('./stt');
-const push = require('./push');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency } = require('./agencies');
 const { getAssistantReply, applySplitPolicy } = require('./ai');
@@ -23,6 +22,7 @@ const { matchTrigger } = require('./catalog');
 const { getImage } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
+const push = require('./push');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -317,7 +317,8 @@ async function processReply(from) {
     const fullHistory = [...(getSession(from).history || [])].map((m) => ({ role: m.role, content: m.content }));
     const history = fullHistory.slice(0, -1);
     const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
-    const { text: reply, images } = await getAssistantReply(history, userText);
+    const knownCity = session.card?.ciudad || null;
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity);
 
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, reply);
