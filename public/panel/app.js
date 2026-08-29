@@ -244,18 +244,40 @@ function renderMemory(convo) {
 const ROLE_LABEL = { user: 'Cliente', assistant: 'Bot', human: 'Vos' }
 
 function bubbleInner(m) {
-  return `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
+  // Nota de voz: ademas de la transcripcion (bubble-text), si se guardo el
+  // audio original se muestra un reproductor arriba del texto. La
+  // transcripcion puede salir mal (ruido, acento, audio cortado) y el
+  // negocio necesita poder escuchar la nota de voz posta, no solo confiar
+  // en el texto.
+  const audio = m.attachment?.kind === 'audio' && m.attachment.url
+    ? `<audio class="bubble-audio" controls preload="none" src="${esc(m.attachment.url)}"></audio>`
+    : ''
+  return audio +
+    `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
     `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
 }
 
-function renderMessages(messages) {
+// Se guarda el telefono de la ultima charla renderizada para distinguir
+// "se abrio una charla nueva" (ahi si hay que arrancar viendo lo mas
+// reciente) de "el polling volvio a pedir la misma charla que ya estaba
+// abierta" (ahi no hay que moverle el scroll a quien esta leyendo mensajes
+// viejos para arriba).
+let lastRenderedChatPhone = null
+
+function renderMessages(messages, forceScrollBottom) {
   const box = $('chatMessages')
   if (!messages.length) {
     box.innerHTML = emptyState('💬', 'Sin mensajes', 'Esta conversación todavía no tiene historial.')
     return
   }
+  // El polling (cada 4s) vuelve a llamar a esto para la charla abierta, aunque
+  // el negocio este revisando mensajes viejos scrolleado para arriba: antes
+  // esto lo mandaba de nuevo al final cada vez, sin dejarlo leer tranquilo.
+  // Ahora solo se sigue bajando solo si ya estaba pegado abajo del todo, o si
+  // forceScrollBottom pide arrancar abajo (recien se abrio esta charla).
+  const wasNearBottom = forceScrollBottom || box.scrollHeight - box.scrollTop - box.clientHeight < 80
   box.innerHTML = messages.map((m) => `<div class="bubble bubble-${m.role}">${bubbleInner(m)}</div>`).join('')
-  box.scrollTop = box.scrollHeight
+  if (wasNearBottom) box.scrollTop = box.scrollHeight
 }
 
 /* ---------- etapa ---------- */
@@ -326,7 +348,9 @@ async function loadChat() {
   renderAmount(conversation)
   renderNote(conversation)
   renderMemory(conversation)
-  renderMessages(messages)
+  const isNewChat = lastRenderedChatPhone !== conversation.phone
+  lastRenderedChatPhone = conversation.phone
+  renderMessages(messages, isNewChat)
 }
 
 /* ---------- guía enviada (seguimiento) ---------- */
