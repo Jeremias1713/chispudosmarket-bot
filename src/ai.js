@@ -85,6 +85,7 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   - Das una noticia (precio, disponibilidad, confirmacion) y despues lo que se puede hacer con eso.
   - Confirmas un dato que te dieron y despues pedis el que falta.
   - Reaccionas a algo que conto el cliente antes de ir al grano (agradecele o reconocelo en un mensaje, segui en el siguiente).
+  - El cliente pregunta por algo generico o ambiguo (dice "esa medicina", "el producto", "eso que vi", sin decir cual) y le tenes que preguntar a cual se refiere mencionando las opciones: el saludo/reaccion va en un mensaje, la aclaracion con las opciones en otro, y la pregunta de cierre en un tercero. NUNCA metas el saludo, la explicacion de las opciones y la pregunta de cierre los tres juntos en un solo mensaje largo, aunque entre todos no lleguen al tope de palabras: son tres ideas distintas (saludar/reaccionar, informar, preguntar) y cada una va en su propio mensaje.
   - El cliente te pidio una cantidad puntual de mensajes o de lineas: haces lo que pidio.
   Mandas UN SOLO mensaje cuando la respuesta es una sola idea corta: un precio, un si, un no, un dato suelto.
 
@@ -99,6 +100,12 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   "Que bueno, ahi te lo dejo anotado.
 
   Ahora decime tu nombre y apellido, porfa?"
+  Otro ejemplo (pregunta ambigua sobre cual producto, caso muy comun: esto tiene que salir como TRES mensajes, no uno solo):
+  "¡Hola! 😊
+
+  Claro, tenemos Shilajit Viking y tambien Magnesio Triple, los dos te ayudan con la energia y el bienestar.
+
+  ¿Te gustaria saber mas de alguno en particular?"
   Al reves: si algo tiene que ir en un SOLO mensaje (ver "QUE NUNCA SE PARTE" arriba: una direccion, el pedido de datos completo, una lista de precios/tallas, un dato que se rompe como un telefono), NO dejes ningun renglon en blanco adentro. Usa un solo salto de linea entre cada item de la lista, nunca dos seguidos, para que todo eso siga siendo un unico mensaje.`;
 }
 
@@ -223,6 +230,25 @@ function wordCount(text) {
   return String(text || '').split(/\s+/).filter(Boolean).length;
 }
 
+// Red de seguridad de codigo, ademas de las instrucciones del prompt (ver
+// splitInstructions): el prompt le pide al modelo mandar el saludo ("Hola!")
+// en su propio mensaje, separado de lo que sigue, pero en la practica no
+// siempre lo respeta y termina pegando el saludo con la explicacion o la
+// pregunta (ej. "¡Hola! 😊 Claro, ¿a que medicina te refieres?..."), lo que
+// se ve como un solo mensaje largo en vez de varios cortos. Esto detecta ese
+// patron puntual (arranca con "hola", nada mas, para evitar falsos
+// positivos con palabras como "buenas noticias") y fuerza el corte aca, sin
+// depender 100% de que el modelo lo haga bien cada vez.
+function splitLeadingGreeting(text) {
+  const re = /^(\s*[¡]?hola[!¡.,]?\s*(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]\s*)*)([\s\S]+)$/iu;
+  const m = String(text || '').match(re);
+  if (!m) return null;
+  const greeting = m[1].trim();
+  const rest = m[2].trim();
+  if (!greeting || !rest) return null;
+  return [greeting, rest];
+}
+
 // Si un fragmento partido por ||| queda mas corto que minWords, no vale la
 // pena mandarlo como mensaje aparte (se ve raro un WhatsApp de una sola
 // palabra): se pega al fragmento de al lado. Se pega hacia el siguiente
@@ -272,6 +298,15 @@ function applySplitPolicy(text, settings) {
     // blanco", asi que si igual llegan a quedar varias partes que son items
     // de una lista numerada (1., 2., 3., ...), las volvemos a pegar aca.
     parts = mergeAgencyListParts(parts);
+    // Se revisa el primer fragmento DESPUES de mergeShortParts (no antes):
+    // si se hiciera antes, mergeShortParts pegaria el saludo de vuelta con
+    // lo que sigue porque "¡Hola! 😊" por si solo tiene menos palabras que
+    // el minimo (se ve raro un WhatsApp de una sola palabra), justo el
+    // efecto contrario al que se busca aca.
+    if (parts.length) {
+      const split = splitLeadingGreeting(parts[0]);
+      if (split) parts = [split[0], split[1], ...parts.slice(1)];
+    }
   }
   return enforceMessageLimits(parts, maxWordsHardCap, maxParts);
 }
