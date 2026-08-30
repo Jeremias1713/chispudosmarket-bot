@@ -188,35 +188,26 @@ async function sendTextOrImage(to, text, imageIds) {
     return;
   }
 
-  // Antes esto mandaba las fotos una por una, esperando (await) a que cada
-  // una saliera antes de pedir la siguiente: entre la espera de red de cada
-  // llamada a la API de WhatsApp, al cliente le llegaban de a una con uno o
-  // mas segundos de diferencia ("1... 1... 1... 1..."), sintiendose como
-  // varios mensajes sueltos en vez de un solo mensaje con varias fotos.
-  // Ahora se piden todas al mismo tiempo (Promise.allSettled) para que
-  // lleguen practicamente juntas. El texto va como caption de la PRIMERA
-  // foto (antes iba en la ultima): al pedirlas en paralelo ya no hay
-  // garantia de cual "sale ultima".
-  const results = await Promise.allSettled(
-    resolved.map((r, i) => sendImageByLink(to, r.url, i === 0 ? text : undefined))
-  );
-
-  results.forEach((res, i) => {
+  // WhatsApp no tiene forma de mandar varias fotos como un solo mensaje
+  // "album" (eso no existe en su API para negocios, es un truco solo del
+  // celular de una persona mandando a mano): cada foto siempre es un
+  // mensaje aparte. Lo que si se puede controlar es el ORDEN: las fotos van
+  // primero, todas al mismo tiempo (Promise.allSettled) para que lleguen
+  // practicamente juntas, y SIN caption; el texto se manda aparte, DESPUES,
+  // como mensaje de texto normal (sendReply, con su propio partido en varios
+  // mensajes si corresponde). Antes el texto iba pegado como caption de la
+  // primera foto, osea que era lo PRIMERO que veia el cliente; el pedido es
+  // al reves, que las fotos entren primero y el texto sea lo ultimo que lee.
+  const results = await Promise.allSettled(resolved.map((r) => sendImageByLink(to, r.url)));
+  results.forEach((res) => {
     if (res.status === 'fulfilled') {
-      const caption = i === 0 ? text : undefined;
-      appendMessage(to, 'assistant', caption ? `[imagen] ${caption}` : '[imagen]');
+      appendMessage(to, 'assistant', '[imagen]');
     } else {
       console.error('No se pudo mandar una foto, sigo con las demas:', res.reason?.message);
     }
   });
 
-  if (results[0]?.status === 'fulfilled') {
-    await maybeSendAudio(to, text);
-  } else {
-    // La foto que llevaba el texto como caption fallo (o fallaron todas):
-    // igual mandamos el texto solo, para no perder el mensaje.
-    await sendReply(to, text);
-  }
+  await sendReply(to, text);
 }
 
 // Manda, sin caption, las fotos que la IA decidio mostrar durante la charla
