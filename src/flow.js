@@ -90,6 +90,25 @@ function saveIncomingAudio(buffer, mimeType) {
   return mediaUrl(filename);
 }
 
+// Mismo mecanismo que saveIncomingAudio, pero para fotos y videos que manda
+// el cliente. El negocio no tenia forma de verlos: quedaban como "[image]" o
+// "[video]" en el historial, sin poder abrirlos. Se guardan igual que el
+// audio (junto a la biblioteca, en data/media/) y quedan disponibles para el
+// panel via el campo attachment del mensaje.
+const INCOMING_IMAGE_EXT_BY_MIME = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' };
+const INCOMING_VIDEO_EXT_BY_MIME = { mp4: 'mp4', '3gpp': '3gp', '3gp': '3gp' };
+
+function saveIncomingMedia(buffer, mimeType, kind) {
+  if (!PUBLIC_URL) return null; // sin URL publica no hay como mostrarlo despues
+  const subtype = String(mimeType || '').split(';')[0].split('/')[1] || '';
+  const table = kind === 'video' ? INCOMING_VIDEO_EXT_BY_MIME : INCOMING_IMAGE_EXT_BY_MIME;
+  const ext = table[subtype.trim().toLowerCase()] || (kind === 'video' ? 'mp4' : 'jpg');
+  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  const filename = `${kind}-in-${crypto.randomBytes(8).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(MEDIA_DIR, filename), buffer);
+  return mediaUrl(filename);
+}
+
 // Manda el texto ya partido en mensajes cortos. El objetivo de palabras
 // (maxWordsPerMessage) es solo una guia que se le da al modelo en el prompt;
 // aca abajo solo se aplica el TOPE DURO (maxWordsHardCap) como red de
@@ -164,25 +183,33 @@ async function sendTextOrImage(to, text, imageIds) {
     return;
   }
 
-  let captionSent = false;
-  for (let i = 0; i < resolved.length; i++) {
-    const isLast = i === resolved.length - 1;
-    const caption = isLast ? text : undefined;
-    try {
-      await sendImageByLink(to, resolved[i].url, caption);
-      appendMessage(to, 'assistant', caption ? `[imagen] ${caption}` : '[imagen]');
-      if (isLast) captionSent = true;
-    } catch (err) {
-      console.error('No se pudo mandar una foto, sigo con las demas:', err.message);
-    }
-  }
+  // Antes esto mandaba las fotos una por una, esperando (await) a que cada
+  // una saliera antes de pedir la siguiente: entre la espera de red de cada
+  // llamada a la API de WhatsApp, al cliente le llegaban de a una con uno o
+  // mas segundos de diferencia ("1... 1... 1... 1..."), sintiendose como
+  // varios mensajes sueltos en vez de un solo mensaje con varias fotos.
+  // Ahora se piden todas al mismo tiempo (Promise.allSettled) para que
+  // lleguen practicamente juntas. El texto va como caption de la PRIMERA
+  // foto (antes iba en la ultima): al pedirlas en paralelo ya no hay
+  // garantia de cual "sale ultima".
+  const results = await Promise.allSettled(
+    resolved.map((r, i) => sendImageByLink(to, r.url, i === 0 ? text : undefined))
+  );
 
-  if (captionSent) {
+  results.forEach((res, i) => {
+    if (res.status === 'fulfilled') {
+      const caption = i === 0 ? text : undefined;
+      appendMessage(to, 'assistant', caption ? `[imagen] ${caption}` : '[imagen]');
+    } else {
+      console.error('No se pudo mandar una foto, sigo con las demas:', res.reason?.message);
+    }
+  });
+
+  if (results[0]?.status === 'fulfilled') {
     await maybeSendAudio(to, text);
   } else {
-    // Ninguna foto salio con el texto como caption (fallaron todas, o
-    // fallo justo la ultima): igual mandamos el texto solo, para no
-    // perder el mensaje.
+    // La foto que llevaba el texto como caption fallo (o fallaron todas):
+    // igual mandamos el texto solo, para no perder el mensaje.
     await sendReply(to, text);
   }
 }
@@ -191,16 +218,20 @@ async function sendTextOrImage(to, text, imageIds) {
 // (herramienta mostrar_foto en ai.js). Se llama antes de mandar la
 // respuesta de texto normal.
 async function sendConversationImages(to, images) {
-  for (const img of images || []) {
-    const url = mediaUrl(img.filename);
-    if (!url) continue;
-    try {
-      await sendImageByLink(to, url);
-      appendMessage(to, 'assistant', `[imagen] ${img.name}`);
-    } catch (err) {
-      console.error('No se pudo mandar una foto durante la charla:', err.message);
+  // Mismo motivo que en sendTextOrImage: pedirlas todas al mismo tiempo en
+  // vez de una por una hace que le lleguen juntas al cliente, no en fila.
+  const valid = (images || [])
+    .map((img) => ({ img, url: mediaUrl(img.filename) }))
+    .filter((x) => x.url);
+
+  const results = await Promise.allSettled(valid.map((x) => sendImageByLink(to, x.url)));
+  results.forEach((res, i) => {
+    if (res.status === 'fulfilled') {
+      appendMessage(to, 'assistant', `[imagen] ${valid[i].img.name}`);
+    } else {
+      console.error('No se pudo mandar una foto durante la charla:', res.reason?.message);
     }
-  }
+  });
 }
 
 async function sendGreeting(to) {
@@ -293,6 +324,24 @@ async function handleIncomingMessage(from, message, profileName) {
     if (audioTranscript) rawText = audioTranscript;
   }
 
+  // Foto o video: se baja de WhatsApp y se guarda igual que el audio, para
+  // que el negocio lo pueda ver desde el panel (antes quedaba como
+  // "[image]"/"[video]" sin forma de abrirlo). Si el cliente le puso texto
+  // (caption), ese texto pasa a ser el mensaje normal (rawText), como si lo
+  // hubiera escrito aparte: el bot le puede contestar igual.
+  let mediaUrlIn = null;
+  if ((type === 'image' && message.image?.id) || (type === 'video' && message.video?.id)) {
+    try {
+      const mediaId = type === 'image' ? message.image.id : message.video.id;
+      const { buffer, mimeType } = await downloadMedia(mediaId);
+      mediaUrlIn = saveIncomingMedia(buffer, mimeType, type);
+    } catch (err) {
+      console.warn(`No se pudo descargar el ${type} entrante:`, err.message);
+    }
+    const caption = (type === 'image' ? message.image?.caption : message.video?.caption) || '';
+    if (caption.trim()) rawText = caption.trim();
+  }
+
   const lower = rawText.toLowerCase();
 
   // El mensaje entrante se guarda SIEMPRE, aunque el bot este apagado o
@@ -306,6 +355,10 @@ async function handleIncomingMessage(from, message, profileName) {
       audioTranscript ? `🎤 ${audioTranscript}` : '[Nota de voz, no se pudo transcribir]',
       attachment ? { attachment } : undefined
     );
+  } else if (type === 'image' || type === 'video') {
+    const attachment = mediaUrlIn ? { kind: type, url: mediaUrlIn } : undefined;
+    const label = type === 'video' ? '[video]' : '[imagen]';
+    appendMessage(from, 'user', rawText || label, attachment ? { attachment } : undefined);
   } else if (rawText) {
     appendMessage(from, 'user', rawText);
   } else if (type === 'location') {
