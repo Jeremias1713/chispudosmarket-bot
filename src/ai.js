@@ -249,6 +249,27 @@ function splitLeadingGreeting(text) {
   return [greeting, rest];
 }
 
+// Red de seguridad igual que splitLeadingGreeting pero para el otro extremo
+// del mensaje: el prompt le pide al modelo (REGLA DE ORO y las demas reglas
+// de partido) que la pregunta con la que cierra vaya siempre sola, en su
+// propio mensaje, pero en la practica a veces la deja pegada despues de una
+// oracion en el mismo fragmento (ej. "Genial, tenemos envios ahi. ¿Prefieres
+// domicilio o agencia?" como un solo mensaje en vez de dos). Esto detecta una
+// pregunta (arranca con ¿) pegada al final de un fragmento que tiene texto
+// antes, y la separa en su propio mensaje. Nunca toca la lista de agencias
+// (esa siempre va entera, sin excepciones).
+function splitTrailingQuestion(text) {
+  const t = String(text || '').trim();
+  if (!t || isAgencyListBlock(t)) return null;
+  const idx = t.lastIndexOf('¿');
+  if (idx <= 0) return null; // sin "¿", o la pregunta ya es todo el mensaje
+  const before = t.slice(0, idx).trim();
+  const question = t.slice(idx).trim();
+  if (!before || !question || !question.includes('?')) return null;
+  if (before.endsWith('?')) return null; // ya hay otra pregunta antes, mejor no tocarlo
+  return [before, question];
+}
+
 // Si un fragmento partido por ||| queda mas corto que minWords, no vale la
 // pena mandarlo como mensaje aparte (se ve raro un WhatsApp de una sola
 // palabra): se pega al fragmento de al lado. Se pega hacia el siguiente
@@ -306,6 +327,16 @@ function applySplitPolicy(text, settings) {
     if (parts.length) {
       const split = splitLeadingGreeting(parts[0]);
       if (split) parts = [split[0], split[1], ...parts.slice(1)];
+    }
+    // Igual que el saludo, pero al reves: se revisa el ULTIMO fragmento,
+    // tambien despues de mergeShortParts/mergeAgencyListParts, para que la
+    // pregunta de cierre quede sola aunque el modelo la haya pegado a la
+    // oracion anterior (o aunque mergeShortParts la hubiera pegado hacia
+    // atras por ser corta).
+    if (parts.length) {
+      const lastIdx = parts.length - 1;
+      const qsplit = splitTrailingQuestion(parts[lastIdx]);
+      if (qsplit) parts = [...parts.slice(0, lastIdx), qsplit[0], qsplit[1]];
     }
   }
   return enforceMessageLimits(parts, maxWordsHardCap, maxParts);
