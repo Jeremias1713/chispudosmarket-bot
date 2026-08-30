@@ -252,7 +252,13 @@ function bubbleInner(m) {
   const audio = m.attachment?.kind === 'audio' && m.attachment.url
     ? `<audio class="bubble-audio" controls preload="none" src="${esc(m.attachment.url)}"></audio>`
     : ''
-  return audio +
+  // Imagen mandada a mano desde el panel (ver sendManualImage): se muestra
+  // igual que el audio, arriba del texto (que en este caso es el caption,
+  // puede venir vacio si no se puso ninguno).
+  const img = m.attachment?.kind === 'image' && m.attachment.url
+    ? `<div class="bubble-img"><img src="${esc(m.attachment.url)}" alt="imagen"></div>`
+    : ''
+  return audio + img +
     `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
     `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
 }
@@ -453,6 +459,39 @@ async function sendManual() {
 
 $('chatSend').addEventListener('click', sendManual)
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendManual() })
+
+// Enviar una imagen a mano desde el chat (boton 📎 del composer). El texto
+// que haya en chatInput en ese momento se manda como caption de la imagen.
+$('chatImageFile').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0]
+  e.target.value = ''
+  if (!file || !state.selectedPhone) return
+
+  const input = $('chatInput')
+  const caption = input.value.trim()
+  const formData = new FormData()
+  formData.append('file', file)
+  if (caption) formData.append('caption', caption)
+
+  $('chatSend').disabled = true
+  try {
+    const res = await fetch('/panel/api/conversations/' + encodeURIComponent(state.selectedPhone) + '/send-image', {
+      method: 'POST',
+      body: formData,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    input.value = ''
+    await loadChat()
+    await pollConversations()
+  } catch (err) {
+    alert('No se pudo enviar la imagen: ' + err.message)
+  } finally {
+    $('chatSend').disabled = false
+  }
+})
 
 /* ---------- pipeline (kanban) ---------- */
 
