@@ -17,7 +17,7 @@ const {
   unlockStage,
   markFollowUp,
 } = require('../state');
-const { sendText } = require('../whatsapp');
+const { sendText, sendImageByLink } = require('../whatsapp');
 const { STAGES } = require('../classifier');
 const catalog = require('../catalog');
 const library = require('../library');
@@ -140,6 +140,39 @@ router.post('/api/conversations/:phone/send', async (req, res) => {
   }
 
   appendMessage(phone, 'human', text);
+  res.json({ ok: true });
+});
+
+// Mandar una imagen a mano desde el panel (ademas del texto manual de arriba).
+// Se sube el archivo, se guarda en la misma biblioteca de imagenes (carpeta
+// aparte para no mezclar con las fotos de producto) y se manda por WhatsApp
+// igual que las fotos automaticas del bot, para reusar el mismo mecanismo
+// (sendImageByLink) que ya sabe subir el link publico a Meta.
+router.post('/api/conversations/:phone/send-image', upload.single('file'), async (req, res) => {
+  const phone = req.params.phone;
+  if (!req.file) return res.status(400).json({ error: 'Falta la imagen' });
+  const caption = String(req.body?.caption ?? '').trim();
+
+  let item;
+  try {
+    item = library.addImage({
+      buffer: req.file.buffer,
+      mime: req.file.mimetype,
+      name: caption || 'Enviada desde el chat',
+      folder: 'Enviadas desde el chat',
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const url = mediaUrl(item.filename);
+  try {
+    await sendImageByLink(phone, url, caption || undefined);
+  } catch (err) {
+    return res.status(502).json({ error: 'No se pudo mandar la imagen por WhatsApp: ' + err.message });
+  }
+
+  appendMessage(phone, 'human', caption, { attachment: { kind: 'image', url } });
   res.json({ ok: true });
 });
 
