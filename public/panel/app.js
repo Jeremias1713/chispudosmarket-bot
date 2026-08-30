@@ -252,13 +252,18 @@ function bubbleInner(m) {
   const audio = m.attachment?.kind === 'audio' && m.attachment.url
     ? `<audio class="bubble-audio" controls preload="none" src="${esc(m.attachment.url)}"></audio>`
     : ''
-  // Imagen mandada a mano desde el panel (ver sendManualImage): se muestra
-  // igual que el audio, arriba del texto (que en este caso es el caption,
-  // puede venir vacio si no se puso ninguno).
+  // Imagen: la manda a mano el negocio desde el panel, o la manda el
+  // cliente por WhatsApp (ver saveIncomingMedia en flow.js) — en los dos
+  // casos se guarda igual, asi que se muestra igual.
   const img = m.attachment?.kind === 'image' && m.attachment.url
     ? `<div class="bubble-img"><img src="${esc(m.attachment.url)}" alt="imagen"></div>`
     : ''
-  return audio + img +
+  // Video que mando el cliente (WhatsApp no deja mandar videos a mano desde
+  // el panel, solo fotos, asi que este solo sale del lado del cliente).
+  const video = m.attachment?.kind === 'video' && m.attachment.url
+    ? `<video class="bubble-video" controls preload="none" src="${esc(m.attachment.url)}"></video>`
+    : ''
+  return audio + img + video +
     `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
     `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
 }
