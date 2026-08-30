@@ -125,6 +125,12 @@ async function sendSplit(to, text) {
   for (let i = 0; i < parts.length; i++) {
     if (i > 0) await sleep(randomGap(gapMin, gapMax));
     await sendText(to, parts[i]);
+    // Cada parte queda como su propio mensaje en el historial (y por lo
+    // tanto en el panel), igual que le llega al cliente por WhatsApp. Antes
+    // sendReply guardaba el texto completo de un solo saque ANTES de
+    // partirlo: el panel mostraba una sola burbuja gigante aunque el
+    // cliente en realidad haya recibido 2, 3 o 4 mensajes separados.
+    appendMessage(to, 'assistant', parts[i]);
   }
   return parts;
 }
@@ -159,7 +165,6 @@ async function maybeSendAudio(to, text) {
 // respuesta del bot (saludo, ubicacion, gatillo de producto sin foto,
 // respuesta de la IA).
 async function sendReply(to, text) {
-  appendMessage(to, 'assistant', text);
   const parts = await sendSplit(to, text);
   await maybeSendAudio(to, text);
   return parts;
