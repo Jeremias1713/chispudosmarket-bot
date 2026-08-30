@@ -162,19 +162,34 @@ async function maybeSendAudio(to, text) {
 
 // Guarda el mensaje en el historial, lo manda partido en texto y, si
 // corresponde, tambien como nota de voz. Uso general para casi toda
-// respuesta del bot (saludo, ubicacion, gatillo de producto sin foto,
-// respuesta de la IA).
+// respuesta del bot (saludo por defecto sin mensaje propio, ubicacion,
+// respuesta de la IA): texto que el bot arma solo, donde partirlo en varios
+// mensajes cortos ayuda a que no se sienta como un bloque.
 async function sendReply(to, text) {
   const parts = await sendSplit(to, text);
   await maybeSendAudio(to, text);
   return parts;
 }
 
+// Manda el texto TAL CUAL escribio el negocio en el panel, en un UNICO
+// mensaje de WhatsApp, sin pasar por applySplitPolicy (nada de partirlo por
+// los renglones en blanco que el negocio uso para separar visualmente cada
+// seccion del mensaje). Uso para el mensaje inicial de un producto y el
+// saludo de bienvenida cuando estan configurados a mano: son texto ya
+// armado con su propio formato, no una respuesta libre de la IA, asi que no
+// hay que tocarlos ni un poco.
+async function sendRawReply(to, text) {
+  await sendText(to, text);
+  appendMessage(to, 'assistant', text);
+  await maybeSendAudio(to, text);
+}
+
 // Manda un mensaje con una o varias fotos (de la biblioteca) mas el texto
-// como caption de la ultima, si hay imagenes validas con URL publica; si no
-// hay ninguna, o todas fallan, cae a texto solo (nunca se pierde el
-// mensaje). Uso compartido por el saludo inicial y por el mensaje inicial de
-// un producto.
+// configurado a mano, si hay imagenes validas con URL publica; si no hay
+// ninguna, o todas fallan, cae a texto solo (nunca se pierde el mensaje).
+// Uso compartido por el saludo inicial y por el mensaje inicial de un
+// producto: en los dos casos el texto es el que escribio el negocio en el
+// panel, asi que se manda con sendRawReply (ver arriba), nunca partido.
 async function sendTextOrImage(to, text, imageIds) {
   const ids = Array.isArray(imageIds) ? imageIds.filter(Boolean) : imageIds ? [imageIds] : [];
   const resolved = ids
@@ -184,7 +199,7 @@ async function sendTextOrImage(to, text, imageIds) {
     .filter((x) => x.url);
 
   if (!resolved.length) {
-    await sendReply(to, text);
+    await sendRawReply(to, text);
     return;
   }
 
@@ -194,10 +209,10 @@ async function sendTextOrImage(to, text, imageIds) {
   // mensaje aparte. Lo que si se puede controlar es el ORDEN: las fotos van
   // primero, todas al mismo tiempo (Promise.allSettled) para que lleguen
   // practicamente juntas, y SIN caption; el texto se manda aparte, DESPUES,
-  // como mensaje de texto normal (sendReply, con su propio partido en varios
-  // mensajes si corresponde). Antes el texto iba pegado como caption de la
-  // primera foto, osea que era lo PRIMERO que veia el cliente; el pedido es
-  // al reves, que las fotos entren primero y el texto sea lo ultimo que lee.
+  // como un unico mensaje de WhatsApp (sendRawReply, sin partirlo). Antes el
+  // texto iba pegado como caption de la primera foto, osea que era lo
+  // PRIMERO que veia el cliente; el pedido es al reves, que las fotos
+  // entren primero y el texto sea lo ultimo que lee, tal cual esta escrito.
   const results = await Promise.allSettled(resolved.map((r) => sendImageByLink(to, r.url)));
   results.forEach((res) => {
     if (res.status === 'fulfilled') {
@@ -207,7 +222,7 @@ async function sendTextOrImage(to, text, imageIds) {
     }
   });
 
-  await sendReply(to, text);
+  await sendRawReply(to, text);
 }
 
 // Manda, sin caption, las fotos que la IA decidio mostrar durante la charla
