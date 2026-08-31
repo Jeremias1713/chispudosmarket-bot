@@ -109,7 +109,7 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
   Al reves: si algo tiene que ir en un SOLO mensaje (ver "QUE NUNCA SE PARTE" arriba: una direccion, el pedido de datos completo, una lista de precios/tallas, un dato que se rompe como un telefono), NO dejes ningun renglon en blanco adentro. Usa un solo salto de linea entre cada item de la lista, nunca dos seguidos, para que todo eso siga siendo un unico mensaje.`;
 }
 
-function buildSystemPrompt(knownCity, knownProduct, orderClosed) {
+function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
@@ -149,7 +149,7 @@ ${splitEnabled
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
   4. Las preguntas de calificacion o de interes que puedan venir en las instrucciones de un producto (por ejemplo, preguntarle si busca tal beneficio o tal otro) SOLO sirven para abrir la charla, ANTES de que el cliente te de el primer dato del pedido. En cuanto el cliente ya te dio cualquier dato del pedido (te dijo la ciudad, cuantos quiere, o cualquier otro de la lista de "COMO SE ARMA EL PEDIDO" mas abajo), NUNCA vuelvas para atras a una pregunta de calificacion del producto: seguí siempre para adelante con el guion de armar el pedido. Ejemplo tipico de este error, que hay que evitar: el cliente te dice en que ciudad esta y en vez de seguir con el paso que corresponde (domicilio/agencia segun ENTREGA) le repreguntas algo del tipo "¿buscas mas energia o mejorar tu rendimiento?": eso esta mal, ya paso el momento de esa pregunta.
   5. Si un mensaje del cliente es exactamente "[sticker]", es porque mando un sticker de WhatsApp (no se puede leer que dice). En la practica, la gran mayoria de las veces un sticker es solo su forma de decir "si, dale, esta bien, ok", asi que asumilo asi y segui la conversacion para adelante con naturalidad, como si te hubiera dicho que si. La UNICA excepcion es si tu mensaje anterior le pedia un dato puntual en texto que un sticker no puede reemplazar (por ejemplo nombre y apellido, cedula, telefono, cuantos quiere, en que ciudad esta, o el nombre/numero de una agencia de la lista): en ese caso especifico no asumas el dato, decile con onda que te lo escriba porque necesitas ese dato exacto.
-${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, tu UNICA pregunta pendiente sobre el pedido es la cantidad, nunca el producto. Ejemplo de error que NO tenes que cometer (esto ya paso una vez, no lo repitas): despues de resolver la agencia o la ciudad, cerrar la respuesta con algo como "¿que producto te gustaria pedir y cuantos frascos quieres?" esta MAL, porque el producto ya se sabe; lo correcto ahi es preguntar solo "¿cuantos frascos queres pedir?" (o similar, sin mencionar "que producto"). Esto vale tambien justo despues de usar la herramienta buscar_agencias_por_zona: la pregunta que sigue a la lista de agencias tiene que ser sobre la cantidad, nunca sobre el producto. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}${orderClosed ? `\n  DATO YA CONFIRMADO, EL MAS IMPORTANTE DE TODOS AHORA MISMO: el pedido de este cliente YA ESTA CERRADO (ya se mando el mensaje de cierre con el resumen, el pago contra entrega y lo de la guia de Tealca). Esto cambia como contestas TODO lo que venga ahora:\n  - La REGLA DE ORO de terminar con una pregunta de venta queda APAGADA. No la reactives.\n  - Si el cliente pregunta algo suelto del producto (por ejemplo si sirve para algo, como se toma, cuanto dura), contestale la pregunta con la info real y PARA AHI. No le agregues "¿te gustaria apartar tu frasco?", "¿te aparto uno?", "¿cuantos queres pedir?" ni ninguna frase de venta: el ya lo pidio, no hay nada que apartar de nuevo.\n  - No vuelvas a pedir ningun dato del pedido (producto, cantidad, ciudad, agencia, nombre, cedula, telefono): ya los tenes todos.\n  - Si te saluda o dice algo corto como "gracias" u "ok", contestale corto y calido, sin reabrir el pedido.\n  - Solo si el cliente dice explicitamente que quiere agregar otro producto, cambiar algo del pedido, o hacer un pedido nuevo, ahi si volves al guion normal de armar un pedido (y ese pedido nuevo es el que queda "abierto" de ahi en adelante).\n` : ''}
+${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${dataAlreadyRequested ? `\n  DATO YA CONFIRMADO, MUY IMPORTANTE: en esta conversacion YA le mandaste el mensaje pidiendo nombre y apellido, cedula y telefono (el bloque de "Para procesar tu pedido envianos"). NUNCA vuelvas a mandar ese bloque de nuevo, ni completo ni parecido, aunque el cliente todavia no te haya contestado con esos datos, aunque haya pasado tiempo, o aunque te mande un sticker, un "ok" u otro mensaje corto. Si todavia no te paso esos datos y te escribe algo que no son los datos, contestale lo que corresponda a ese mensaje y como mucho agregale un recordatorio CORTO en una sola frase (por ejemplo "cuando puedas pasame esos datos para procesar tu pedido"), nunca repitas el bloque completo con nombre/cedula/telefono de nuevo. En cuanto identifiques los tres datos en lo que te escribio, seguí al mensaje de cierre del pedido normalmente.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, tu UNICA pregunta pendiente sobre el pedido es la cantidad, nunca el producto. Ejemplo de error que NO tenes que cometer (esto ya paso una vez, no lo repitas): despues de resolver la agencia o la ciudad, cerrar la respuesta con algo como "¿que producto te gustaria pedir y cuantos frascos quieres?" esta MAL, porque el producto ya se sabe; lo correcto ahi es preguntar solo "¿cuantos frascos queres pedir?" (o similar, sin mencionar "que producto"). Esto vale tambien justo despues de usar la herramienta buscar_agencias_por_zona: la pregunta que sigue a la lista de agencias tiene que ser sobre la cantidad, nunca sobre el producto. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}${orderClosed ? `\n  DATO YA CONFIRMADO, EL MAS IMPORTANTE DE TODOS AHORA MISMO: el pedido de este cliente YA ESTA CERRADO (ya se mando el mensaje de cierre con el resumen, el pago contra entrega y lo de la guia de Tealca). Esto cambia como contestas TODO lo que venga ahora:\n  - La REGLA DE ORO de terminar con una pregunta de venta queda APAGADA. No la reactives.\n  - Si el cliente pregunta algo suelto del producto (por ejemplo si sirve para algo, como se toma, cuanto dura), contestale la pregunta con la info real y PARA AHI. No le agregues "¿te gustaria apartar tu frasco?", "¿te aparto uno?", "¿cuantos queres pedir?" ni ninguna frase de venta: el ya lo pidio, no hay nada que apartar de nuevo.\n  - No vuelvas a pedir ningun dato del pedido (producto, cantidad, ciudad, agencia, nombre, cedula, telefono): ya los tenes todos.\n  - Si te saluda o dice algo corto como "gracias" u "ok", contestale corto y calido, sin reabrir el pedido.\n  - Solo si el cliente dice explicitamente que quiere agregar otro producto, cambiar algo del pedido, o hacer un pedido nuevo, ahi si volves al guion normal de armar un pedido (y ese pedido nuevo es el que queda "abierto" de ahi en adelante).\n` : ''}
 
   ENTREGA: depende de la ciudad.
   - CARACAS (Distrito Capital, incluye todos sus municipios/parroquias): hay dos formas de recibirlo, domicilio (te lo llevan hasta la puerta) o retiro en agencia. Ofrecele PRIMERO la opcion de domicilio, es la mas comoda para el cliente, y si prefiere retirar en agencia esa tambien esta disponible.
@@ -607,6 +607,43 @@ function isClosingMessage(text) {
   return norm.includes('tealca') && norm.includes('pago') && norm.includes('guia');
 }
 
+// Red de seguridad igual en espiritu a isClosingMessage: el prompt le pide al
+// modelo pedir nombre+cedula+telefono UNA sola vez (ver "COMO SE ARMA EL
+// PEDIDO" punto 4), pero en la practica a veces igual lo repite (por ejemplo
+// si el cliente contesta con un sticker o algo corto en vez de los datos, o
+// si simplemente se confunde). Esto detecta el patron de "pedido de datos
+// vacio": los tres campos (nombre, cedula, telefono) aparecen como etiqueta
+// seguida de dos puntos SIN nada despues en la misma linea, que es como se
+// ve tanto la plantilla fija de Tealca como la version con palabras propias
+// para domicilio. Un mensaje de CIERRE que ya trae los datos rellenos (ej.
+// "Nombre: Juan Perez") no matchea, porque ahi despues de los dos puntos hay
+// texto en la misma linea, no un salto de linea vacio.
+function looksLikeEmptyDataRequest(text) {
+  const t = String(text || '');
+  const emptyFieldRe = /(nombre[^:\n]*|c[e\u00e9]dula|tel[e\u00e9]fono)\s*:[ \t]*(?:\r?\n|$)/gi;
+  const matches = t.match(emptyFieldRe) || [];
+  return matches.length >= 2;
+}
+
+// Mensaje corto de repuesto para cuando ya se pidieron los datos antes y el
+// modelo, a pesar de la instruccion, intento mandar el bloque completo de
+// nuevo: en vez de repetir todo el pedido de datos, se manda solo este
+// recordatorio breve.
+const DATA_REQUEST_REMINDER = 'Cuando puedas, pasame tu nombre completo, cedula y telefono para terminar de procesar tu pedido \ud83d\ude4f';
+
+// Saca del texto (separado en partes igual que splitReply) cualquier
+// fragmento que sea un pedido de datos vacio repetido. Si despues de sacarlo
+// no queda nada, devuelve null (el que llama decide que mandar en su lugar,
+// ver DATA_REQUEST_REMINDER). Si no habia nada que sacar, devuelve el texto
+// tal cual.
+function stripDuplicateDataRequest(text) {
+  const parts = splitReply(text);
+  const filtered = parts.filter((p) => !looksLikeEmptyDataRequest(p));
+  if (!filtered.length) return null;
+  if (filtered.length === parts.length) return text;
+  return filtered.join('\n\n');
+}
+
 const GENIAL_REPLACEMENTS = ['que bueno', 'perfecto', 'buenisimo', 'dale', 'listo'];
 let _genialCounter = 0;
 function scrubGenial(text) {
@@ -622,7 +659,7 @@ function scrubGenial(text) {
   });
 }
 
-async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed) {
+async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
@@ -648,7 +685,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   }));
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed) },
+    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested) },
     ...sanitizedHistory,
     { role: 'user', content: userText },
   ];
@@ -693,4 +730,15 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   return { text: scrubGenial(followUp.choices[0].message.content.trim()), images };
 }
 
-module.exports = { getAssistantReply, splitReply, enforceMessageLimits, applySplitPolicy, buildSystemPrompt, catalogText, isClosingMessage };
+module.exports = {
+  getAssistantReply,
+  splitReply,
+  enforceMessageLimits,
+  applySplitPolicy,
+  buildSystemPrompt,
+  catalogText,
+  isClosingMessage,
+  looksLikeEmptyDataRequest,
+  stripDuplicateDataRequest,
+  DATA_REQUEST_REMINDER,
+};

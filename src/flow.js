@@ -19,7 +19,14 @@ const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('.
 const { transcribeAudio } = require('./stt');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency } = require('./agencies');
-const { getAssistantReply, applySplitPolicy, isClosingMessage } = require('./ai');
+const {
+  getAssistantReply,
+  applySplitPolicy,
+  isClosingMessage,
+  looksLikeEmptyDataRequest,
+  stripDuplicateDataRequest,
+  DATA_REQUEST_REMINDER,
+} = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
 const { getImage, MEDIA_DIR } = require('./library');
@@ -490,11 +497,35 @@ async function processReply(from) {
     // exacto en que el BOT genera el mensaje de cierre (deteccion directa
     // del texto, sin depender de otra IA aparte).
     const orderClosed = session.orderClosed === true;
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed);
+    // Mismo criterio que orderClosed, pero para el bloque de "pedime tu
+    // nombre, cedula y telefono": se detecto que a veces el modelo lo manda
+    // dos veces en la misma conversacion (por ejemplo si el cliente contesta
+    // con un sticker o un mensaje corto en vez de los datos, o simplemente se
+    // confunde), a pesar de que el prompt le pide pedirlo una sola vez. Este
+    // flag se prende mas abajo, en el momento exacto en que el BOT manda ese
+    // bloque por primera vez (deteccion directa del texto), y se usa tanto
+    // para avisarle al modelo (dentro del prompt) como para, si igual lo
+    // repite, sacarle el bloque duplicado antes de mandarlo (ver mas abajo).
+    const dataAlreadyRequested = session.orderDataRequested === true;
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested);
+
+    // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
+    // habia pedido nombre/cedula/telefono antes y el modelo igual intento
+    // mandar ese bloque de nuevo, lo sacamos y mandamos solo un recordatorio
+    // corto en su lugar (o el resto del mensaje, si tenia algo mas aparte del
+    // bloque repetido).
+    let finalReply = reply;
+    if (dataAlreadyRequested && looksLikeEmptyDataRequest(reply)) {
+      const stripped = stripDuplicateDataRequest(reply);
+      finalReply = stripped === null ? DATA_REQUEST_REMINDER : stripped;
+    }
 
     if (images.length) await sendConversationImages(from, images);
-    await sendReply(from, reply);
-    const patch = { lastAssistantText: reply };
+    await sendReply(from, finalReply);
+    const patch = { lastAssistantText: finalReply };
+    if (!dataAlreadyRequested && looksLikeEmptyDataRequest(reply)) {
+      patch.orderDataRequested = true;
+    }
     const isNewClose = !orderClosed && isClosingMessage(reply);
     if (isNewClose) {
       patch.orderClosed = true;
