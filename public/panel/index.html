@@ -148,6 +148,13 @@
               <button class="btn" id="amountSaveBtn" type="button">Guardar</button>
             </div>
 
+            <div class="followup-bar" id="guiaBar" hidden>
+              <span class="followup-info">Número de guía</span>
+              <input type="text" id="guiaInput" placeholder="Ej: 123456789" style="width:160px">
+              <button class="btn" id="guiaSaveBtn" type="button">Guardar y avisar</button>
+              <span class="followup-info" id="guiaStatus"></span>
+            </div>
+
             <div class="followup-bar note-bar" id="noteBar" hidden>
               <span class="followup-info">Nota interna</span>
               <input type="text" id="noteInput" placeholder="Ej: cliente frecuente, pide al mayor..." style="flex:1;min-width:160px">
@@ -783,6 +790,42 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                 <div class="help">
                   Fuera de este rango (hora de Venezuela) los recordatorios se
                   posponen: no se pierden, se mandan apenas vuelve a abrir el horario.
+                </div>
+              </div>
+            </details>
+
+            <details class="card cfg">
+              <summary class="cfg-head">
+                <span class="cfg-title">Guía de envío automática</span>
+                <span class="cfg-sub">Avisale al cliente solo apenas cargás el número de guía</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="cfg-note">
+                  Cuando cargás el número de guía de un pedido (en el chat, arriba de los
+                  mensajes), el bot le avisa al cliente sin que tengas que escribirle vos:
+                  si todavía te puede escribir texto libre (menos de 24h desde su último
+                  mensaje) usa el texto de abajo; si ya pasaron más de 24h, usa la
+                  plantilla aprobada que elijas acá abajo (obligatoria para ese caso, es
+                  la única forma que WhatsApp permite escribirle fuera de esas 24h).
+                </div>
+                <div class="field">
+                  <label for="cfg_shippingTemplateName">Plantilla para cuando la ventana ya está cerrada</label>
+                  <div class="help">Nombre EXACTO tal cual quedó aprobada en Meta (Administrador de WhatsApp → Plantillas de mensajes).</div>
+                  <input type="text" list="cfg_shippingTemplateList" id="cfg_shippingTemplateName" placeholder="Ej: guia_de_envio">
+                  <datalist id="cfg_shippingTemplateList"></datalist>
+                </div>
+                <div class="field">
+                  <label for="cfg_shippingTemplateLanguage">Idioma con el que quedó aprobada</label>
+                  <input type="text" id="cfg_shippingTemplateLanguage" placeholder="es">
+                </div>
+                <div class="field">
+                  <label for="cfg_shippingFreeText">Texto para cuando la ventana todavía está abierta</label>
+                  <div class="help">
+                    Admite <code>{{nombre}}</code>, <code>{{producto}}</code> y
+                    <code>{{guia}}</code>: se reemplazan solos por los datos de cada pedido.
+                    Dejalo vacío para usar el texto por defecto.
+                  </div>
+                  <textarea id="cfg_shippingFreeText" rows="3" placeholder="Hola {{nombre}}! Tu pedido de {{producto}} ya está en camino. Número de guía: {{guia}}."></textarea>
                 </div>
               </div>
             </details>

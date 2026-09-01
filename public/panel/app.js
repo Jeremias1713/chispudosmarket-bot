@@ -374,6 +374,7 @@ async function loadChat() {
   renderStagePicker(conversation)
   renderFollowUp(conversation)
   renderAmount(conversation)
+  renderGuia(conversation)
   renderNote(conversation)
   renderMemory(conversation)
   renderWindowStatus(conversation)
@@ -483,6 +484,50 @@ async function saveAmount(phone) {
     return
   }
   if (state.activeView === 'view-metrics') pollMetrics()
+}
+
+/* ---------- guia de envio (aviso automatico al cliente) ---------- */
+
+function renderGuia(convo) {
+  $('guiaBar').hidden = false
+  // Mismo cuidado que con el monto: no pisar lo que la persona esta
+  // escribiendo si el polling llega mientras el campo esta enfocado.
+  if (document.activeElement !== $('guiaInput')) {
+    $('guiaInput').value = convo.card?.guia || ''
+  }
+  $('guiaStatus').textContent = convo.shippingNotifiedAt
+    ? `Avisado ${timeInStage(convo.shippingNotifiedAt)}`
+    : ''
+  $('guiaSaveBtn').onclick = () => saveGuia(convo.phone)
+}
+
+async function saveGuia(phone) {
+  const guia = $('guiaInput').value.trim()
+  $('guiaInput').blur()
+  $('guiaSaveBtn').disabled = true
+  let result
+  try {
+    result = await api('/conversations/' + encodeURIComponent(phone) + '/guia', {
+      method: 'POST',
+      body: JSON.stringify({ guia }),
+    })
+  } catch (err) {
+    showError(err)
+    $('guiaSaveBtn').disabled = false
+    return
+  }
+  $('guiaSaveBtn').disabled = false
+  const notice = result?.notice
+  if (notice?.sent) {
+    $('guiaStatus').textContent = notice.viaTemplate ? 'Avisado con plantilla ✅' : 'Avisado ✅'
+  } else if (notice?.reason === 'sin_plantilla') {
+    $('guiaStatus').textContent = 'No se pudo avisar: falta elegir la plantilla en Configuración → Plantillas'
+  } else if (notice?.reason === 'error') {
+    $('guiaStatus').textContent = 'No se pudo avisar: ' + (notice.error || 'error desconocido')
+  } else if (notice?.reason === 'ya_avisado') {
+    $('guiaStatus').textContent = 'Ya se le había avisado antes'
+  }
+  if (phone === state.selectedPhone) loadChat()
 }
 
 /* ---------- nota interna del cliente ---------- */
@@ -1473,6 +1518,12 @@ async function loadSettings() {
   $('cfg_remarketingEnabled').checked = s.remarketingEnabled !== false
   $('cfg_remarketingHourStart').value = s.remarketingHourStart ?? 8
   $('cfg_remarketingHourEnd').value = s.remarketingHourEnd ?? 21
+  $('cfg_shippingTemplateName').value = s.shippingTemplateName || ''
+  $('cfg_shippingTemplateLanguage').value = s.shippingTemplateLanguage || 'es'
+  $('cfg_shippingFreeText').value = s.shippingFreeText || ''
+  ensureTemplatesLoaded().then((templates) => {
+    $('cfg_shippingTemplateList').innerHTML = (templates || []).map((t) => `<option value="${esc(t.name)}"></option>`).join('')
+  })
   try { libraryCache = await api('/library') } catch { /* si falla, el selector queda vacío */ }
   initImagePicker('welcomeImage', s.welcomeImageIds)
   updateTempDisplay()
@@ -1511,6 +1562,9 @@ $('cfg_save').addEventListener('click', async () => {
     remarketingEnabled: $('cfg_remarketingEnabled').checked,
     remarketingHourStart: Number($('cfg_remarketingHourStart').value),
     remarketingHourEnd: Number($('cfg_remarketingHourEnd').value),
+    shippingTemplateName: $('cfg_shippingTemplateName').value.trim(),
+    shippingTemplateLanguage: $('cfg_shippingTemplateLanguage').value.trim() || 'es',
+    shippingFreeText: $('cfg_shippingFreeText').value,
   }
   $('cfg_save').disabled = true
   try {
