@@ -53,6 +53,15 @@ function blankProduct() {
     // Oferta que la IA puede ofrecer una sola vez, justo cuando el cliente
     // ya dijo que si a este producto.
     upsell: '',
+    // Remarketing automatico (ver remarketing.js): mensajes de recordatorio
+    // que se mandan solos, TAL CUAL estan escritos aca (igual que "intro"),
+    // si esta conversacion queda vinculada a este producto y se cuelga sin
+    // novedad en una etapa que todavia no es una venta cerrada. El de 2h es
+    // el primero, mas suave; el de 5h es el segundo, mas directo. Si se deja
+    // vacio, no se manda nada para ese paso.
+    remarketingEnabled: true,
+    remarketing2h: '',
+    remarketing5h: '',
   };
 }
 

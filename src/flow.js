@@ -385,6 +385,15 @@ async function handleIncomingMessage(from, message, profileName) {
     appendMessage(from, 'user', `[${type || 'mensaje'}]`);
   }
 
+  // Llego novedad de verdad del cliente: si habia quedado marcado que ya se
+  // le mando un recordatorio de remarketing (ver remarketing.js), se resetea
+  // aca, para que si la conversacion se vuelve a colgar mas adelante le
+  // pueda volver a tocar remarketing (los tiempos de 2h/5h se cuentan
+  // siempre desde la ULTIMA interaccion, no desde la primera vez).
+  if (session.remarketingSentAt2h || session.remarketingSentAt5h) {
+    updateSession(from, { remarketingSentAt2h: null, remarketingSentAt5h: null });
+  }
+
   // Switch maestro (Configuracion, apaga TODO el bot) o pausa de esta
   // conversacion puntual (panel, boton "Bot activo" del chat): en cualquiera
   // de los dos casos un humano esta atendiendo, asi que no se contesta solo.
@@ -544,6 +553,11 @@ async function processReply(from) {
         patch.stage = 'vendido';
         patch.stageReason = 'Pedido cerrado (deteccion automatica)';
       }
+      // Se guarda la fecha real de la venta (separada de updatedAt, que se
+      // pisa con cualquier mensaje posterior) para que las metricas puedan
+      // segmentar por dia cuando se cerro el pedido, no cuando fue el ultimo
+      // mensaje de la conversacion.
+      if (!session.soldAt) patch.soldAt = new Date().toISOString();
     }
     updateSession(from, patch);
     if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
@@ -578,4 +592,4 @@ async function processReply(from) {
   }
 }
 
-module.exports = { handleIncomingMessage, sendSplit, sendGreeting, mediaUrl, SOLD_STAGES };
+module.exports = { handleIncomingMessage, sendSplit, sendRawReply, sendGreeting, mediaUrl, SOLD_STAGES };

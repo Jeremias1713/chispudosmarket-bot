@@ -5,6 +5,7 @@ const { markAsRead } = require('./whatsapp');
 const { MEDIA_DIR } = require('./library');
 const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
+const remarketing = require('./remarketing');
 
 const app = express();
 app.use(express.json());
@@ -41,6 +42,15 @@ app.post('/webhook', async (req, res) => {
     // se procesan todos, uno por uno, en el orden en que llegaron.
     for (const message of messages) {
       const from = message.from; // numero del cliente
+      if (!from) {
+        // Sin numero no hay a quien contestarle ni donde guardar el
+        // mensaje: antes esto terminaba creando una conversacion fantasma
+        // con la clave literal "undefined". Se loguea el payload completo
+        // para poder diagnosticarlo (ej. un formato de webhook distinto,
+        // como un mensaje de Instagram en vez de WhatsApp) y se lo saltea.
+        console.warn('Mensaje entrante sin "from", se ignora:', JSON.stringify(message));
+        continue;
+      }
       const profileName = value?.contacts?.find((c) => c.wa_id === from)?.profile?.name || null;
 
       if (message.id) {
@@ -67,4 +77,5 @@ app.get('/health', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
+  remarketing.start();
 });

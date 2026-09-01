@@ -50,6 +50,19 @@ const DEFAULTS = {
   splitGapMaxMs: 9500,
   // Ademas del texto, manda una nota de voz con la misma respuesta.
   audioReplyEnabled: true,
+  // Remarketing automatico: si una conversacion queda sin novedad (ver
+  // remarketing.js) se le manda un recordatorio a las 2 horas y otro a las 5
+  // horas, usando el texto cargado en el producto vinculado a esa charla
+  // (Catalogo > producto > "Remarketing automatico"). Apagar esto frena
+  // TODOS los envios automaticos, sin tocar el texto cargado en cada
+  // producto (sirve para pausarlo de golpe sin perder la configuracion).
+  remarketingEnabled: true,
+  // Rango de horas (0-23, hora de Venezuela) en el que esta permitido mandar
+  // los recordatorios: fuera de ese rango simplemente se posponen hasta que
+  // vuelva a abrir la ventana. remarketingHourEnd es exclusivo (21 = hasta
+  // las 20:59).
+  remarketingHourStart: 8,
+  remarketingHourEnd: 21,
 };
 
 function load() {
