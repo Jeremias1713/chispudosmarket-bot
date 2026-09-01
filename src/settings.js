@@ -75,6 +75,21 @@ const DEFAULTS = {
   // "colgadas" cuando se prendio esta funcion): solo aplica de ahi para
   // adelante.
   remarketingActivatedAt: null,
+  // Aviso automatico de guia de envio (ver src/shipping.js): nombre EXACTO
+  // de la plantilla ya aprobada en Meta que se usa cuando se carga la guia
+  // de un pedido y la ventana de 24h ya esta cerrada. null = todavia no hay
+  // ninguna configurada, asi que en ese caso el aviso automatico no manda
+  // nada (no puede mandar texto libre fuera de la ventana, y sin plantilla
+  // no tiene otra cosa que mandar).
+  shippingTemplateName: null,
+  // Idioma con el que quedo aprobada la plantilla en Meta (el codigo que
+  // Meta usa, ej. "es" o "es_MX"), no el idioma en el que esta escrita.
+  shippingTemplateLanguage: 'es',
+  // Texto que se manda SOLO cuando la ventana de 24h todavia esta abierta
+  // (no hace falta plantilla en ese caso). Admite {{nombre}}, {{producto}}
+  // y {{guia}}, que se reemplazan por los datos de cada pedido. null = usa
+  // el texto por defecto que trae el codigo.
+  shippingFreeText: null,
 };
 
 function load() {
