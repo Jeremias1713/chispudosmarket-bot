@@ -620,20 +620,39 @@ router.post('/api/conversations/:phone/amount', (req, res) => {
   res.json({ ok: true, card: updated.card });
 });
 
-// Guarda el numero de guia de envio de un pedido (a mano, desde el panel).
-// En cuanto queda cargada, dispara el aviso automatico al cliente (plantilla
-// o texto libre segun la ventana de 24h — ver shipping.js): esta es la
-// funcion que reemplaza tener que entrar al chat a avisarle a mano.
-router.post('/api/conversations/:phone/guia', async (req, res) => {
+// Guarda el numero de guia de envio de un pedido (a mano, desde el panel), y
+// opcionalmente la FOTO de esa guia (la mayoria de las agencias piden mostrar
+// la foto del comprobante ademas del numero para poder retirar el pedido).
+// En cuanto queda cargada, dispara el aviso automatico al cliente con ambas
+// cosas (plantilla o texto libre segun la ventana de 24h — ver shipping.js):
+// esta es la funcion que reemplaza tener que entrar al chat a avisarle a mano.
+router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (req, res) => {
   const phone = req.params.phone;
   const guia = String(req.body?.guia ?? '').trim();
 
   const s = getSession(phone);
-  const card = { ...(s.card || {}), guia: guia || null };
+  const card = { ...(s.card || {}) };
+  if (req.body?.guia !== undefined) card.guia = guia || null;
+
+  if (req.file) {
+    let item;
+    try {
+      item = library.addImage({
+        buffer: req.file.buffer,
+        mime: req.file.mimetype,
+        name: `Guia de envio - ${phone}`,
+        folder: 'Guias de envio',
+      });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    card.guiaImageUrl = mediaUrl(item.filename);
+  }
+
   const updated = updateSession(phone, { card });
 
   let notice = { sent: false, reason: 'sin_guia' };
-  if (guia) {
+  if (card.guia) {
     notice = await shipping.maybeNotifyShipping(phone, updated);
   }
   res.json({ ok: true, card: updated.card, notice });
