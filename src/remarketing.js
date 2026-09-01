@@ -15,7 +15,7 @@
 // solo cuando el cliente vuelve a escribir de verdad (ver flow.js).
 const { listSessions, updateSession } = require('./state');
 const { findProduct } = require('./catalog');
-const { getSettings } = require('./settings');
+const { getSettings, updateSettings } = require('./settings');
 const { SOLD_STAGES, sendRawReply } = require('./flow');
 
 const REVISAR_CADA_MS = 5 * 60 * 1000; // cada 5 minutos alcanza de sobra
@@ -52,6 +52,16 @@ async function mandarSiCorresponde(session, texto, campoFlag) {
   return true;
 }
 
+// Se fija UNA sola vez (la primera vez que corre esto despues de activarse
+// la funcion): todo lo que haya quedado "colgado" de antes de este momento
+// nunca recibe remarketing, solo lo que se cuelgue de aca para adelante.
+function activatedAtMs(settings) {
+  if (settings.remarketingActivatedAt) return new Date(settings.remarketingActivatedAt).getTime();
+  const now = new Date().toISOString();
+  updateSettings({ remarketingActivatedAt: now });
+  return new Date(now).getTime();
+}
+
 async function revisarUnaVez() {
   const settings = getSettings();
   if (settings.remarketingEnabled === false) return;
@@ -59,10 +69,12 @@ async function revisarUnaVez() {
   if (!dentroDelHorarioPermitido(settings)) return;
 
   const ahora = Date.now();
+  const activadoDesde = activatedAtMs(settings);
   const sessions = listSessions();
 
   for (const session of sessions) {
     try {
+      if (!session.phone || session.phone === 'undefined') continue; // sesion "fantasma" sin numero real
       if (session.paused) continue;
       if (!session.linkedProductId) continue; // sin producto vinculado no hay que texto usar
       const etapa = session.stage || 'nuevo';
@@ -73,7 +85,11 @@ async function revisarUnaVez() {
 
       const ultimaInteraccion = session.updatedAt || session.createdAt;
       if (!ultimaInteraccion) continue;
-      const transcurrido = ahora - new Date(ultimaInteraccion).getTime();
+      const ultimaInteraccionMs = new Date(ultimaInteraccion).getTime();
+      // Conversacion vieja, de antes de activar remarketing: nunca le toca,
+      // ni aunque siga "colgada" para siempre (ver activatedAtMs arriba).
+      if (ultimaInteraccionMs < activadoDesde) continue;
+      const transcurrido = ahora - ultimaInteraccionMs;
 
       // Si paso de largo la marca de las 5h y ese paso todavia no se mando,
       // se manda directo el de 5h (mas directo) y se salta el de 2h: evita

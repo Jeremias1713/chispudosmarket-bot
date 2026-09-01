@@ -67,6 +67,14 @@ const DEFAULTS = {
   // las 20:59).
   remarketingHourStart: 8,
   remarketingHourEnd: 21,
+  // Momento (ISO) a partir del cual el remarketing automatico empieza a
+  // contar: se fija SOLO una vez, la primera vez que arranca remarketing.js
+  // despues de activarse la funcion. Las conversaciones cuya ULTIMA
+  // interaccion sea de ANTES de este momento nunca reciben remarketing (para
+  // no bombardear de golpe a todas las charlas viejas que ya estaban
+  // "colgadas" cuando se prendio esta funcion): solo aplica de ahi para
+  // adelante.
+  remarketingActivatedAt: null,
 };
 
 function load() {
