@@ -16,6 +16,10 @@ const DEFAULTS = {
   welcomeMessage: null, // null = usa el saludo por defecto de flow.js
   welcomeImageIds: [], // ids de imagenes de la biblioteca para mandar junto al saludo inicial (puede ser mas de una)
   knowledgeBase: '', // datos de envio/pago/promos que el bot da por ciertos
+  // Texto EXACTO que el bot manda cuando pide nombre/cedula/telefono para
+  // cerrar un pedido que retira en agencia (ver ai.js, CIERRE DEL PEDIDO).
+  // null = usa el texto por defecto que trae el codigo.
+  dataRequestTemplate: null,
   openaiModel: null,
   openaiTemperature: null,
   openaiHistoryN: null,

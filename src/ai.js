@@ -119,6 +119,15 @@ function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequ
   const splitEnabled = settings.splitRepliesEnabled !== false;
   const knownCityClean = String(knownCity || '').trim();
   const knownProductClean = String(knownProduct || '').trim();
+  // Texto EXACTO que el bot manda para pedir nombre/cedula/telefono cuando
+  // retira en agencia. Editable desde Configuracion (Configuracion > "Texto
+  // para pedir los datos del pedido"); si no se cargo nada ahi, usa este por
+  // defecto. OJO: si se cambian las ETIQUETAS (Nombre/Cedula/Telefono), hay
+  // que revisar tambien looksLikeEmptyDataRequest mas abajo en este mismo
+  // archivo: el sistema que evita que el bot lo pida dos veces en la misma
+  // conversacion busca esas palabras puntuales en la respuesta.
+  const dataRequestTemplate = (settings.dataRequestTemplate && settings.dataRequestTemplate.trim())
+    || '📦 Para procesar tu pedido envíanos:\n👤 Nombre y apellido:\n🆔 Cédula:\n📞 Teléfono:\n🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana';
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
@@ -167,11 +176,7 @@ ${knownCityClean ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de
      - IMPORTANTE: en cuanto la agencia (o la modalidad domicilio/agencia en Caracas) ya quedo resuelta, esa parte del pedido esta cerrada para siempre en esta conversacion. NUNCA vuelvas a mencionarla como un dato pendiente, ni le vuelvas a pedir que la confirme o que te de una direccion, salvo que el cliente mismo diga que cambio de ciudad o quiere otra agencia.
   4. Nombre y apellido, telefono y cedula: una vez que ya sabes el producto+cantidad y ya quedo resuelta la entrega (paso 3), pedi estos tres datos juntos, en un solo pedido (no de a uno), usando EXACTAMENTE este texto, en un UNICO mensaje de WhatsApp (no le cambies ni una palabra, ni el orden, ni le agregues nada, y no le pongas nada antes tipo "necesito estos datos": eso ya queda dicho en este mismo mensaje, ponerlo dos veces se ve repetido):
 
-📦 Para procesar tu pedido envíanos:
-👤 Nombre y apellido:
-🆔 Cédula:
-📞 Teléfono:
-🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana
+${dataRequestTemplate}
 
      Esto aplica cuando el cliente retira en agencia (Tealca). Si es domicilio en Caracas, pedi los mismos tres datos (nombre y apellido, telefono, cedula) juntos en un solo mensaje pero con tus propias palabras, sin mencionar Tealca ni oficina (ya tiene la direccion con punto de referencia).
      Cuando el cliente te conteste con esos datos, leelos con cuidado y fijate bien cual valor es cual aunque los mande en un orden distinto al que pediste, o todos juntos en un solo mensaje: el nombre es texto con letras, el telefono venezolano tiene 10 u 11 digitos (suele empezar con 0 o con 4), la cedula tiene entre 6 y 9 digitos. Si el cliente dice algo como "la direccion que me pasaste" o similar, es solo una confirmacion de la agencia/direccion, no un dato nuevo, no lo cuentes como si faltara. En cuanto identifiques nombre, telefono y cedula (aunque hayan llegado mezclados en un mismo mensaje o en un orden distinto), da esos tres datos por completos y NUNCA le vuelvas a pedir ninguno de ellos.
