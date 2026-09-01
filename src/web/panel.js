@@ -553,14 +553,24 @@ router.get('/api/metrics', (req, res) => {
 
     let rangeRevenue = 0;
     let rangeSales = 0;
+    let undatedSales = 0;
     const rangeProductStats = new Map();
     for (const s of sessions) {
       if (!SOLD_STAGES.includes(s.stage)) continue;
-      // soldAt se agrego recien (ver flow.js/panel.js): para ventas viejas
-      // que todavia no lo tienen, se usa updatedAt como mejor aproximacion
-      // disponible.
-      const soldRef = s.soldAt || s.updatedAt;
-      if (!inDateRange(soldRef, fromTs, toTs)) continue;
+      // OJO (bug ya corregido): esto antes caia a s.updatedAt cuando no
+      // habia soldAt, pero updatedAt se pisa con CUALQUIER mensaje nuevo de
+      // la conversacion (el cliente dice "gracias" tres dias despues de
+      // comprar, o se le edita una nota) asi que una venta vieja terminaba
+      // contando como "vendida hoy" no bien alguien le escribia de nuevo.
+      // Ahora solo se cuenta si soldAt esta guardado de verdad: las ventas
+      // de antes de que existiera este campo quedan afuera de los rangos
+      // por fecha (siguen contando en el total historico de arriba), no se
+      // inventa una fecha que no se sabe.
+      if (!s.soldAt) {
+        undatedSales++;
+        continue;
+      }
+      if (!inDateRange(s.soldAt, fromTs, toTs)) continue;
       rangeSales++;
       const monto = Number(s.card?.monto);
       const montoValido = s.card?.monto != null && !Number.isNaN(monto);
@@ -590,6 +600,10 @@ router.get('/api/metrics', (req, res) => {
       revenue: rangeRevenue,
       conversionRate: newConversations > 0 ? (rangeSales / newConversations) * 100 : null,
       messages: rangeMessages,
+      // Ventas cerradas ANTES de que existiera el campo soldAt: no se sabe
+      // que dia fue, asi que no se pueden ubicar en ningun rango. Se avisa
+      // la cantidad para que no parezca que "faltan" ventas sin explicacion.
+      undatedSales,
       topProducts: [...rangeProductStats.values()].sort((a, b) => b.count - a.count).slice(0, 10),
     };
   }
@@ -776,7 +790,7 @@ router.get('/api/settings', (_req, res) => {
 router.post('/api/settings', (req, res) => {
   const body = req.body || {};
   const patch = {};
-  const fields = ['businessName', 'welcomeMessage', 'knowledgeBase', 'openaiModel'];
+  const fields = ['businessName', 'welcomeMessage', 'knowledgeBase', 'openaiModel', 'dataRequestTemplate'];
   for (const f of fields) if (body[f] != null) patch[f] = String(body[f]);
   if (body.welcomeImageIds !== undefined) {
     patch.welcomeImageIds = Array.isArray(body.welcomeImageIds)
