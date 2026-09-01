@@ -495,31 +495,54 @@ function renderGuia(convo) {
   if (document.activeElement !== $('guiaInput')) {
     $('guiaInput').value = convo.card?.guia || ''
   }
+  $('guiaImageName').textContent = convo.card?.guiaImageUrl ? '✅ tiene foto' : ''
+  $('guiaImageFile').value = ''
   $('guiaStatus').textContent = convo.shippingNotifiedAt
     ? `Avisado ${timeInStage(convo.shippingNotifiedAt)}`
     : ''
   $('guiaSaveBtn').onclick = () => saveGuia(convo.phone)
 }
 
+$('guiaImageFile').addEventListener('change', () => {
+  const file = $('guiaImageFile').files[0]
+  $('guiaImageName').textContent = file ? file.name : ''
+})
+
 async function saveGuia(phone) {
   const guia = $('guiaInput').value.trim()
+  const file = $('guiaImageFile').files[0]
   $('guiaInput').blur()
   $('guiaSaveBtn').disabled = true
+
+  const form = new FormData()
+  form.append('guia', guia)
+  if (file) form.append('imagen', file)
+
   let result
   try {
-    result = await api('/conversations/' + encodeURIComponent(phone) + '/guia', {
+    const res = await fetch('/panel/api/conversations/' + encodeURIComponent(phone) + '/guia', {
       method: 'POST',
-      body: JSON.stringify({ guia }),
+      body: form,
     })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    result = await res.json()
   } catch (err) {
     showError(err)
     $('guiaSaveBtn').disabled = false
     return
   }
   $('guiaSaveBtn').disabled = false
+  $('guiaImageFile').value = ''
   const notice = result?.notice
   if (notice?.sent) {
-    $('guiaStatus').textContent = notice.viaTemplate ? 'Avisado con plantilla ✅' : 'Avisado ✅'
+    let msg = notice.viaTemplate ? 'Avisado con plantilla ✅' : 'Avisado ✅'
+    if (notice.imageSent) msg += ' (con foto)'
+    if (notice.imageSkipped) msg += ' — la foto NO se pudo mandar sola (ventana cerrada), mandala vos a mano'
+    $('guiaStatus').textContent = msg
   } else if (notice?.reason === 'sin_plantilla') {
     $('guiaStatus').textContent = 'No se pudo avisar: falta elegir la plantilla en Configuración → Plantillas'
   } else if (notice?.reason === 'error') {

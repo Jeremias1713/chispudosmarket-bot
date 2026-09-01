@@ -151,6 +151,11 @@
             <div class="followup-bar" id="guiaBar" hidden>
               <span class="followup-info">Número de guía</span>
               <input type="text" id="guiaInput" placeholder="Ej: 123456789" style="width:160px">
+              <label class="btn" id="guiaImageLabel" title="Adjuntar foto de la guía" style="cursor:pointer">
+                📎 Foto
+                <input type="file" id="guiaImageFile" accept="image/jpeg,image/png,image/webp" hidden>
+              </label>
+              <span class="followup-info" id="guiaImageName"></span>
               <button class="btn" id="guiaSaveBtn" type="button">Guardar y avisar</button>
               <span class="followup-info" id="guiaStatus"></span>
             </div>
