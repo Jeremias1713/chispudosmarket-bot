@@ -1,8 +1,11 @@
 // Panel web para ver y manejar las conversaciones del bot sin abrir WhatsApp,
 // administrar el catalogo, la biblioteca de imagenes, la configuracion en
 // vivo, mandar envios masivos con plantillas aprobadas y probar el bot en un
-// simulador. Protegido con usuario/clave (HTTP Basic Auth) leidos de las
-// variables de entorno PANEL_USER / PANEL_PASS.
+// simulador. Protegido con usuario/clave, leidos de las variables de entorno
+// PANEL_USER / PANEL_PASS (ver login() mas abajo: la sesion queda guardada
+// en una cookie firmada por 30 dias, para no tener que iniciar sesion de
+// nuevo cada rato en el celular).
+const crypto = require('crypto');
 const express = require('express');
 const path = require('path');
 const multer = require('multer');
@@ -17,7 +20,7 @@ const {
   unlockStage,
   markFollowUp,
 } = require('../state');
-const { sendText, sendImageByLink } = require('../whatsapp');
+const { sendText, sendImageByLink, sendTemplate } = require('../whatsapp');
 const { STAGES } = require('../classifier');
 const catalog = require('../catalog');
 const library = require('../library');
@@ -28,6 +31,13 @@ const simulator = require('../simulator');
 const coupons = require('../coupons');
 const { mediaUrl, SOLD_STAGES } = require('../flow');
 const push = require('../push');
+
+// Ventana de 24 horas de WhatsApp: pasado ese tiempo desde el ULTIMO mensaje
+// que mando el CLIENTE (no el bot), la API de Meta ya no deja mandar texto
+// libre, solo plantillas ya aprobadas. Se usa para avisarle al negocio en el
+// panel ANTES de que intente escribir y le rebote (ver windowOpen en
+// toConvo, y el chequeo en /send y /send-image).
+const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -43,40 +53,168 @@ const STAGE_LABELS = {
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-function basicAuth(req, res, next) {
-  const user = process.env.PANEL_USER;
-  const pass = process.env.PANEL_PASS;
+/* ---------- login (cookie firmada, 30 dias) ---------- */
+// Antes esto era HTTP Basic Auth: el navegador (sobre todo en el celular)
+// olvidaba las credenciales cada rato y pedia usuario/clave de nuevo. Ahora
+// es una pantalla de login propia que deja una cookie firmada (HMAC, sin
+// guardar sesiones en el servidor) valida por 30 dias.
+const SESSION_COOKIE = 'panel_session';
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 
-  if (!user || !pass) {
-    return res
-      .status(503)
-      .send('El panel no esta configurado. Falta PANEL_USER / PANEL_PASS en las variables de entorno.');
+function sessionSecret() {
+  // Si se define PANEL_SESSION_SECRET en las variables de entorno se usa esa
+  // (mejor, no depende de la clave del panel); si no, se deriva de
+  // PANEL_PASS para que funcione sin configuracion extra.
+  return process.env.PANEL_SESSION_SECRET || `${process.env.PANEL_PASS || ''}::chispudos-panel-session`;
+}
+
+function signSession(payload) {
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', sessionSecret()).update(data).digest('base64url');
+  return `${data}.${sig}`;
+}
+
+function verifySession(token) {
+  if (!token || typeof token !== 'string') return null;
+  const dot = token.lastIndexOf('.');
+  if (dot === -1) return null;
+  const data = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', sessionSecret()).update(data).digest('base64url');
+  try {
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+    if (!payload.exp || Date.now() > payload.exp) return null;
+    return payload;
+  } catch (err) {
+    return null;
   }
+}
 
-  const header = req.headers.authorization || '';
-  const [scheme, encoded] = header.split(' ');
+function parseCookies(req) {
+  const header = req.headers.cookie || '';
+  const out = {};
+  header.split(';').forEach((pair) => {
+    const idx = pair.indexOf('=');
+    if (idx === -1) return;
+    const k = pair.slice(0, idx).trim();
+    if (!k) return;
+    out[k] = decodeURIComponent(pair.slice(idx + 1).trim());
+  });
+  return out;
+}
 
-  if (scheme === 'Basic' && encoded) {
-    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-    const sep = decoded.indexOf(':');
-    const u = decoded.slice(0, sep);
-    const p = decoded.slice(sep + 1);
-    if (u === user && p === pass) return next();
-  }
-
-  res.set('WWW-Authenticate', 'Basic realm="Panel ChispudosMarket"');
-  return res.status(401).send('Autenticacion requerida.');
+function loginPageHtml(errorMsg) {
+  return `<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingresar — Panel ChispudosMarket</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #f4f4fb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .card { background: #fff; border-radius: 16px; padding: 32px 28px; width: 100%; max-width: 340px;
+    box-shadow: 0 10px 30px rgba(20,20,50,.08); }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #1a1a2e; }
+  p.sub { margin: 0 0 20px; color: #70708a; font-size: 13px; }
+  label { display: block; font-size: 13px; color: #40405a; margin-bottom: 4px; margin-top: 14px; }
+  input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #dcdce8; font-size: 15px; }
+  input:focus { outline: 2px solid #5D5FEF; border-color: transparent; }
+  button { width: 100%; margin-top: 20px; padding: 11px; border: none; border-radius: 10px;
+    background: #5D5FEF; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:hover { background: #4c4ed6; }
+  .err { color: #d33; font-size: 13px; margin: 14px 0 0; }
+</style></head>
+<body>
+  <form class="card" method="post" action="/panel/login">
+    <h1>Panel ChispudosMarket</h1>
+    <p class="sub">Iniciá sesión para entrar. Queda guardado en este dispositivo por 30 días.</p>
+    <label for="username">Usuario</label>
+    <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+    <label for="password">Clave</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" required>
+    <button type="submit">Ingresar</button>
+    ${errorMsg ? `<p class="err">${errorMsg}</p>` : ''}
+  </form>
+</body></html>`;
 }
 
 const router = express.Router();
-router.use(basicAuth);
+
+router.get('/login', (_req, res) => {
+  res.type('html').send(loginPageHtml());
+});
+
+router.post('/login', express.urlencoded({ extended: false }), (req, res) => {
+  const user = process.env.PANEL_USER;
+  const pass = process.env.PANEL_PASS;
+  if (!user || !pass) {
+    return res.status(503).send('El panel no esta configurado. Falta PANEL_USER / PANEL_PASS en las variables de entorno.');
+  }
+  const { username, password } = req.body || {};
+  if (username !== user || password !== pass) {
+    return res.status(401).type('html').send(loginPageHtml('Usuario o clave incorrectos.'));
+  }
+  const token = signSession({ u: username, exp: Date.now() + SESSION_TTL_MS });
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    maxAge: SESSION_TTL_MS,
+    path: '/panel',
+  });
+  res.redirect('/panel/');
+});
+
+router.post('/logout', (_req, res) => {
+  res.clearCookie(SESSION_COOKIE, { path: '/panel' });
+  res.redirect('/panel/login');
+});
+
+function cookieAuth(req, res, next) {
+  const user = process.env.PANEL_USER;
+  const pass = process.env.PANEL_PASS;
+  if (!user || !pass) {
+    return res.status(503).send('El panel no esta configurado. Falta PANEL_USER / PANEL_PASS en las variables de entorno.');
+  }
+
+  const cookies = parseCookies(req);
+  const session = verifySession(cookies[SESSION_COOKIE]);
+  if (session && session.u === user) return next();
+
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Sesion vencida o no iniciada. Iniciá sesión de nuevo.' });
+  }
+  return res.redirect('/panel/login');
+}
+
+router.use(cookieAuth);
 router.use(express.static(path.join(__dirname, '..', '..', 'public', 'panel')));
 
 /* ---------- conversaciones ---------- */
 
+// Ultimo mensaje que mando el CLIENTE (role 'user'), no el bot ni el
+// negocio: es lo unico que cuenta para la ventana de 24h de WhatsApp.
+function lastInboundAt(history) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'user') return history[i].at || null;
+  }
+  return null;
+}
+
+function isWindowOpen(session) {
+  const at = lastInboundAt(session.history || []);
+  if (!at) return false; // nunca escribio: no hay ventana abierta para texto libre
+  return Date.now() - new Date(at).getTime() < WHATSAPP_WINDOW_MS;
+}
+
 function toConvo(s) {
   const history = s.history || [];
   const last = history[history.length - 1];
+  const inboundAt = lastInboundAt(history);
   return {
     phone: s.phone,
     name: s.name || null,
@@ -91,6 +229,10 @@ function toConvo(s) {
     createdAt: s.createdAt || null,
     lastFollowUpAt: s.lastFollowUpAt || null,
     note: s.internalNote || null,
+    // Ventana de 24h de WhatsApp: si esta cerrada, el panel avisa y bloquea
+    // el texto libre en vez de dejar que WhatsApp lo rebote solo.
+    lastInboundAt: inboundAt,
+    windowOpen: inboundAt ? Date.now() - new Date(inboundAt).getTime() < WHATSAPP_WINDOW_MS : false,
   };
 }
 
@@ -133,6 +275,13 @@ router.post('/api/conversations/:phone/send', async (req, res) => {
   const text = String(req.body?.text ?? '').trim();
   if (!text) return res.status(400).json({ error: 'El mensaje esta vacio' });
 
+  if (!isWindowOpen(getSession(phone))) {
+    return res.status(409).json({
+      error: 'Pasaron mas de 24 horas desde el ultimo mensaje del cliente: WhatsApp ya no deja mandar texto libre. Mandale una plantilla aprobada.',
+      windowClosed: true,
+    });
+  }
+
   try {
     await sendText(phone, text);
   } catch (err) {
@@ -140,6 +289,29 @@ router.post('/api/conversations/:phone/send', async (req, res) => {
   }
 
   appendMessage(phone, 'human', text);
+  res.json({ ok: true });
+});
+
+// Manda una plantilla ya aprobada por Meta a UNA sola conversacion puntual
+// (a diferencia de /api/broadcasts, que es para mandar a varias de una).
+// Pensado para el caso de "se me cerro la ventana de 24h y necesito mandar
+// la guia de envio igual": el panel ofrece este boton apenas detecta que la
+// ventana esta cerrada (ver windowOpen en toConvo).
+router.post('/api/conversations/:phone/send-template', async (req, res) => {
+  const phone = req.params.phone;
+  const templateName = String(req.body?.templateName || '').trim();
+  if (!templateName) return res.status(400).json({ error: 'Falta el nombre de la plantilla' });
+  const languageCode = String(req.body?.languageCode || 'es').trim() || 'es';
+  const params = Array.isArray(req.body?.params) ? req.body.params : [];
+
+  try {
+    await sendTemplate(phone, templateName, languageCode, params);
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
+    return res.status(502).json({ error: 'No se pudo mandar la plantilla: ' + detail });
+  }
+
+  appendMessage(phone, 'human', `[plantilla] ${templateName}`);
   res.json({ ok: true });
 });
 
@@ -151,6 +323,12 @@ router.post('/api/conversations/:phone/send', async (req, res) => {
 router.post('/api/conversations/:phone/send-image', upload.single('file'), async (req, res) => {
   const phone = req.params.phone;
   if (!req.file) return res.status(400).json({ error: 'Falta la imagen' });
+  if (!isWindowOpen(getSession(phone))) {
+    return res.status(409).json({
+      error: 'Pasaron mas de 24 horas desde el ultimo mensaje del cliente: WhatsApp ya no deja mandar nada libre. Mandale una plantilla aprobada.',
+      windowClosed: true,
+    });
+  }
   const caption = String(req.body?.caption ?? '').trim();
 
   let item;
@@ -195,7 +373,14 @@ router.post('/api/conversations/:phone/stage', (req, res) => {
   if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Etapa desconocida' });
 
   const before = getSession(phone);
-  const updated = setStage(phone, stage, 'Fijada desde el panel');
+  let updated = setStage(phone, stage, 'Fijada desde el panel');
+  // Igual que el cierre automatico (ver flow.js): se guarda la fecha real de
+  // la venta la primera vez que la etapa pasa a "vendido", para que las
+  // metricas por rango de fechas (Metricas > por dia) puedan contar esta
+  // venta en el dia que paso, no en el ultimo mensaje de la conversacion.
+  if (stage === 'vendido' && !updated.soldAt) {
+    updated = updateSession(phone, { soldAt: new Date().toISOString() });
+  }
   if (stage === 'vendido' && before.stage !== 'vendido') push.notifySale(phone, updated);
   res.json({ ok: true, locked: true, stage });
 });
@@ -244,7 +429,16 @@ router.post('/api/conversations/:phone/follow-up', (req, res) => {
 const STALE_STAGES = ['interesado', 'negociando', 'necesita_atencion'];
 const STALE_HOURS = 4;
 
-router.get('/api/metrics', (_req, res) => {
+// Junta un dia YYYY-MM-DD con from/to (mismo criterio que el rango manual
+// del pipeline, ver public/panel/app.js filtrarPorRango): inclusive en las
+// dos puntas, y si falta uno de los dos el rango queda abierto de ese lado.
+function inDateRange(iso, fromTs, toTs) {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return t >= fromTs && t <= toTs;
+}
+
+router.get('/api/metrics', (req, res) => {
   const sessions = listSessions();
   const now = Date.now();
 
@@ -343,7 +537,64 @@ router.get('/api/metrics', (_req, res) => {
       return (b.hoursSinceLastMessage || 0) - (a.hoursSinceLastMessage || 0);
     });
 
-  res.json({ byStage, total, conversionRate, messagesToday, topLocations, topProducts, staleAttention, revenue });
+  // Metricas segmentadas por rango de fechas (Metricas > "Por dia"), para
+  // poder comparar un dia/semana contra otro en vez de ver siempre el
+  // acumulado historico. byStage/total de arriba quedan igual (son una
+  // FOTO del estado actual, no tiene sentido filtrarlos por fecha); esto de
+  // aca es aparte: nuevas conversaciones, ventas e ingresos que pasaron dentro
+  // del rango pedido.
+  const { from, to } = req.query;
+  let range = null;
+  if (from || to) {
+    const fromTs = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
+    const toTs = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
+
+    const newConversations = sessions.filter((s) => inDateRange(s.createdAt, fromTs, toTs)).length;
+
+    let rangeRevenue = 0;
+    let rangeSales = 0;
+    const rangeProductStats = new Map();
+    for (const s of sessions) {
+      if (!SOLD_STAGES.includes(s.stage)) continue;
+      // soldAt se agrego recien (ver flow.js/panel.js): para ventas viejas
+      // que todavia no lo tienen, se usa updatedAt como mejor aproximacion
+      // disponible.
+      const soldRef = s.soldAt || s.updatedAt;
+      if (!inDateRange(soldRef, fromTs, toTs)) continue;
+      rangeSales++;
+      const monto = Number(s.card?.monto);
+      const montoValido = s.card?.monto != null && !Number.isNaN(monto);
+      if (montoValido) rangeRevenue += monto;
+      const producto = String(s.card?.producto || '').trim();
+      if (producto) {
+        const key = producto.toLowerCase();
+        const entry = rangeProductStats.get(key) || { producto, count: 0, revenue: 0 };
+        entry.count++;
+        if (montoValido) entry.revenue += monto;
+        rangeProductStats.set(key, entry);
+      }
+    }
+
+    let rangeMessages = 0;
+    for (const s of sessions) {
+      for (const m of s.history || []) {
+        if (inDateRange(m.at, fromTs, toTs)) rangeMessages++;
+      }
+    }
+
+    range = {
+      from: from || null,
+      to: to || null,
+      newConversations,
+      sales: rangeSales,
+      revenue: rangeRevenue,
+      conversionRate: newConversations > 0 ? (rangeSales / newConversations) * 100 : null,
+      messages: rangeMessages,
+      topProducts: [...rangeProductStats.values()].sort((a, b) => b.count - a.count).slice(0, 10),
+    };
+  }
+
+  res.json({ byStage, total, conversionRate, messagesToday, topLocations, topProducts, staleAttention, revenue, range });
 });
 
 // Guarda el monto vendido de una conversacion (cargado a mano desde el
@@ -405,6 +656,9 @@ function sanitizeProductInput(body) {
   if (body.prompt != null) patch.prompt = String(body.prompt);
   if (body.intro != null) patch.intro = String(body.intro);
   if (body.upsell != null) patch.upsell = String(body.upsell);
+  if (body.remarketingEnabled != null) patch.remarketingEnabled = Boolean(body.remarketingEnabled);
+  if (body.remarketing2h != null) patch.remarketing2h = String(body.remarketing2h);
+  if (body.remarketing5h != null) patch.remarketing5h = String(body.remarketing5h);
   if (body.introImageIds !== undefined) {
     patch.introImageIds = Array.isArray(body.introImageIds)
       ? body.introImageIds
@@ -541,6 +795,9 @@ router.post('/api/settings', (req, res) => {
   if (body.splitGapMinMs != null) patch.splitGapMinMs = Number(body.splitGapMinMs);
   if (body.splitGapMaxMs != null) patch.splitGapMaxMs = Number(body.splitGapMaxMs);
   if (body.audioReplyEnabled != null) patch.audioReplyEnabled = Boolean(body.audioReplyEnabled);
+  if (body.remarketingEnabled != null) patch.remarketingEnabled = Boolean(body.remarketingEnabled);
+  if (body.remarketingHourStart != null) patch.remarketingHourStart = Number(body.remarketingHourStart);
+  if (body.remarketingHourEnd != null) patch.remarketingHourEnd = Number(body.remarketingHourEnd);
   res.json(settingsStore.updateSettings(patch));
 });
 
