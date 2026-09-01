@@ -374,11 +374,14 @@ router.post('/api/conversations/:phone/stage', (req, res) => {
 
   const before = getSession(phone);
   let updated = setStage(phone, stage, 'Fijada desde el panel');
-  // Igual que el cierre automatico (ver flow.js): se guarda la fecha real de
-  // la venta la primera vez que la etapa pasa a "vendido", para que las
-  // metricas por rango de fechas (Metricas > por dia) puedan contar esta
-  // venta en el dia que paso, no en el ultimo mensaje de la conversacion.
-  if (stage === 'vendido' && !updated.soldAt) {
+  // Igual que el cierre automatico y la clasificacion por IA (ver flow.js):
+  // se guarda la fecha real de la venta la primera vez que la etapa pasa a
+  // CUALQUIERA de las etapas de SOLD_STAGES (no solo "vendido" textual: si
+  // se fija a mano directamente en "esperando_retiro" o mas adelante,
+  // tambien cuenta como el momento de la venta), para que las metricas por
+  // rango de fechas (Metricas > por dia) puedan contar esta venta en el dia
+  // que paso, no en el ultimo mensaje de la conversacion.
+  if (SOLD_STAGES.includes(stage) && !updated.soldAt) {
     updated = updateSession(phone, { soldAt: new Date().toISOString() });
   }
   if (stage === 'vendido' && before.stage !== 'vendido') push.notifySale(phone, updated);
