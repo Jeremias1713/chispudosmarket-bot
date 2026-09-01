@@ -920,6 +920,13 @@ function renderMetricsRange(range) {
   $('metricsRangeProducts').innerHTML = (range.topProducts || []).length
     ? range.topProducts.map(productRow).join('')
     : emptyState('🏆', 'No hubo ventas en este período', '')
+  // Ventas de antes de esta actualizacion no tienen fecha de venta guardada
+  // (soldAt): no se pueden ubicar en ningun rango, asi que no se cuentan
+  // acá (sí siguen en el total histórico de más abajo). Se avisa para que
+  // no parezca que el número "no cierra".
+  $('metricsRangeNote').textContent = range.undatedSales
+    ? `+ ${range.undatedSales} venta${range.undatedSales === 1 ? '' : 's'} de antes de esta actualización, sin fecha registrada (no entran en este filtro, sí en el total de abajo).`
+    : ''
 }
 
 async function pollMetrics() {
@@ -1450,6 +1457,7 @@ async function loadSettings() {
   $('cfg_businessName').value = s.businessName || ''
   $('cfg_welcome').value = s.welcomeMessage || ''
   $('cfg_knowledge').value = s.knowledgeBase || ''
+  $('cfg_dataRequestTemplate').value = s.dataRequestTemplate || ''
   $('cfg_model').value = s.openaiModel || ''
   $('cfg_temperature').value = s.openaiTemperature ?? 0.7
   $('cfg_historyN').value = s.openaiHistoryN ?? 12
@@ -1487,6 +1495,7 @@ $('cfg_save').addEventListener('click', async () => {
     welcomeMessage: $('cfg_welcome').value,
     welcomeImageIds: getImagePickerSelection('welcomeImage'),
     knowledgeBase: $('cfg_knowledge').value,
+    dataRequestTemplate: $('cfg_dataRequestTemplate').value,
     openaiModel: $('cfg_model').value.trim(),
     openaiTemperature: Number($('cfg_temperature').value),
     openaiHistoryN: Number($('cfg_historyN').value),

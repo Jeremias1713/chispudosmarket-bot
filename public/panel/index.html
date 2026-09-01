@@ -220,6 +220,7 @@
             <div id="metricsRangeCard" hidden>
               <h2 class="section-title" id="metricsRangeTitle">En el período seleccionado</h2>
               <div class="metrics-cards" id="metricsRangeCards"></div>
+              <p class="help" id="metricsRangeNote"></p>
               <h2 class="section-title">Productos más vendidos en el período</h2>
               <div class="card" id="metricsRangeProducts"></div>
             </div>
@@ -624,6 +625,24 @@
 Entrega: 24 a 48 h.
 Pago: contra entrega o por adelantado.
 Cambios: hasta 7 días con el producto sin abrir."></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="cfg_dataRequestTemplate">Texto para pedir los datos del pedido (nombre/cédula/teléfono)</label>
+                  <div class="help">
+                    El bot manda esto TAL CUAL, en un único mensaje, cuando ya cerró el
+                    producto/cantidad/agencia y necesita nombre, cédula y teléfono para
+                    procesar el pedido (retiro en agencia). Dejalo vacío para usar el texto
+                    por defecto. <strong>Importante:</strong> si cambiás las palabras
+                    "Nombre", "Cédula" o "Teléfono" por otras, avisale a quien programó el
+                    bot: el sistema que evita pedir estos datos dos veces en la misma charla
+                    busca esas palabras puntuales.
+                  </div>
+                  <textarea id="cfg_dataRequestTemplate" rows="6" placeholder="📦 Para procesar tu pedido envíanos:
+👤 Nombre y apellido:
+🆔 Cédula:
+📞 Teléfono:
+🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana"></textarea>
                 </div>
               </div>
             </details>
