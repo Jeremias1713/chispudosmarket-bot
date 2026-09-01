@@ -31,13 +31,8 @@ const simulator = require('../simulator');
 const coupons = require('../coupons');
 const { mediaUrl, SOLD_STAGES } = require('../flow');
 const push = require('../push');
-
-// Ventana de 24 horas de WhatsApp: pasado ese tiempo desde el ULTIMO mensaje
-// que mando el CLIENTE (no el bot), la API de Meta ya no deja mandar texto
-// libre, solo plantillas ya aprobadas. Se usa para avisarle al negocio en el
-// panel ANTES de que intente escribir y le rebote (ver windowOpen en
-// toConvo, y el chequeo en /send y /send-image).
-const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
+const { WHATSAPP_WINDOW_MS, lastInboundAt, isWindowOpen } = require('../whatsappWindow');
+const shipping = require('../shipping');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -196,21 +191,6 @@ router.use(express.static(path.join(__dirname, '..', '..', 'public', 'panel')));
 
 /* ---------- conversaciones ---------- */
 
-// Ultimo mensaje que mando el CLIENTE (role 'user'), no el bot ni el
-// negocio: es lo unico que cuenta para la ventana de 24h de WhatsApp.
-function lastInboundAt(history) {
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].role === 'user') return history[i].at || null;
-  }
-  return null;
-}
-
-function isWindowOpen(session) {
-  const at = lastInboundAt(session.history || []);
-  if (!at) return false; // nunca escribio: no hay ventana abierta para texto libre
-  return Date.now() - new Date(at).getTime() < WHATSAPP_WINDOW_MS;
-}
-
 function toConvo(s) {
   const history = s.history || [];
   const last = history[history.length - 1];
@@ -229,6 +209,7 @@ function toConvo(s) {
     createdAt: s.createdAt || null,
     lastFollowUpAt: s.lastFollowUpAt || null,
     note: s.internalNote || null,
+    shippingNotifiedAt: s.shippingNotifiedAt || null,
     // Ventana de 24h de WhatsApp: si esta cerrada, el panel avisa y bloquea
     // el texto libre en vez de dejar que WhatsApp lo rebote solo.
     lastInboundAt: inboundAt,
@@ -385,6 +366,16 @@ router.post('/api/conversations/:phone/stage', (req, res) => {
     updated = updateSession(phone, { soldAt: new Date().toISOString() });
   }
   if (stage === 'vendido' && before.stage !== 'vendido') push.notifySale(phone, updated);
+  // Si el pedido pasa a "en camino" o "esperando retiro" y la guia ya
+  // estaba cargada de antes (se cargo mientras estaba en otra etapa), este
+  // es el momento de avisarle al cliente solo, sin esperar a que alguien
+  // entre al chat. No se espera la respuesta (fire-and-forget): es un aviso
+  // best-effort, nunca debe trabar la respuesta de este endpoint.
+  if (['en_camino', 'esperando_retiro'].includes(stage)) {
+    shipping.maybeNotifyShipping(phone, updated).catch((err) => {
+      console.error('Error avisando la guia automaticamente al cambiar de etapa:', err.message);
+    });
+  }
   res.json({ ok: true, locked: true, stage });
 });
 
@@ -629,6 +620,25 @@ router.post('/api/conversations/:phone/amount', (req, res) => {
   res.json({ ok: true, card: updated.card });
 });
 
+// Guarda el numero de guia de envio de un pedido (a mano, desde el panel).
+// En cuanto queda cargada, dispara el aviso automatico al cliente (plantilla
+// o texto libre segun la ventana de 24h — ver shipping.js): esta es la
+// funcion que reemplaza tener que entrar al chat a avisarle a mano.
+router.post('/api/conversations/:phone/guia', async (req, res) => {
+  const phone = req.params.phone;
+  const guia = String(req.body?.guia ?? '').trim();
+
+  const s = getSession(phone);
+  const card = { ...(s.card || {}), guia: guia || null };
+  const updated = updateSession(phone, { card });
+
+  let notice = { sent: false, reason: 'sin_guia' };
+  if (guia) {
+    notice = await shipping.maybeNotifyShipping(phone, updated);
+  }
+  res.json({ ok: true, card: updated.card, notice });
+});
+
 // Nota interna del negocio sobre este cliente (tags, recordatorios, lo que
 // sea). No la toca el bot ni el clasificador: es aparte de "notas" dentro de
 // card, que es lo que la IA infiere sola de la conversacion.
@@ -793,7 +803,16 @@ router.get('/api/settings', (_req, res) => {
 router.post('/api/settings', (req, res) => {
   const body = req.body || {};
   const patch = {};
-  const fields = ['businessName', 'welcomeMessage', 'knowledgeBase', 'openaiModel', 'dataRequestTemplate'];
+  const fields = [
+    'businessName',
+    'welcomeMessage',
+    'knowledgeBase',
+    'openaiModel',
+    'dataRequestTemplate',
+    'shippingTemplateName',
+    'shippingTemplateLanguage',
+    'shippingFreeText',
+  ];
   for (const f of fields) if (body[f] != null) patch[f] = String(body[f]);
   if (body.welcomeImageIds !== undefined) {
     patch.welcomeImageIds = Array.isArray(body.welcomeImageIds)
