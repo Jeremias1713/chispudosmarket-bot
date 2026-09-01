@@ -1,11 +1,37 @@
 require('dotenv').config();
 const express = require('express');
-const { handleIncomingMessage } = require('./flow');
+const { handleIncomingMessage, SOLD_STAGES } = require('./flow');
 const { markAsRead } = require('./whatsapp');
 const { MEDIA_DIR } = require('./library');
+const { listSessions, updateSession } = require('./state');
 const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
+
+// Relleno de una sola vez para conversaciones que ya estaban vendidas ANTES
+// de que existiera el campo soldAt (agregado recien): sin esto, las metricas
+// por rango de fechas (Metricas > por dia) las mostraba como "sin fecha" en
+// vez de contarlas, aunque la venta haya sido HOY mismo. Como no queda
+// registrado el momento exacto en que paso, se usa updatedAt (la ultima vez
+// que se toco esa conversacion) como mejor aproximacion disponible — es
+// razonable porque lo mas probable es que lo ultimo que le paso a una
+// conversacion que sigue en una etapa vendida sea, justamente, haberse
+// vendido. Es un relleno UNA sola vez: en cuanto una sesion tiene soldAt no
+// se vuelve a tocar, y las ventas nuevas de aca en adelante ya lo guardan
+// solas (ver flow.js y src/web/panel.js).
+function backfillSoldAt() {
+  const sessions = listSessions();
+  let fixed = 0;
+  for (const s of sessions) {
+    if (SOLD_STAGES.includes(s.stage) && !s.soldAt) {
+      updateSession(s.phone, { soldAt: s.updatedAt || s.createdAt || new Date().toISOString() });
+      fixed++;
+    }
+  }
+  if (fixed) {
+    console.log(`Relleno de soldAt: se completo la fecha de venta aproximada en ${fixed} conversacion(es) que ya estaban vendidas de antes.`);
+  }
+}
 
 const app = express();
 app.use(express.json());
@@ -77,5 +103,6 @@ app.get('/health', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
+  backfillSoldAt();
   remarketing.start();
 });

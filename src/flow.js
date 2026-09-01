@@ -572,7 +572,22 @@ async function processReply(from) {
     if (!current.stageLocked) {
       const classification = await classifyConversation(current.history.map((m) => ({ role: m.role, content: m.content })));
       if (classification) {
-        const updated = updateSession(from, { stage: classification.stage, stageReason: classification.razon || null, card: classification.card });
+        const classPatch = { stage: classification.stage, stageReason: classification.razon || null, card: classification.card };
+        // Mismo motivo que en el cierre deterministico de mas arriba: el
+        // clasificador por IA es OTRO camino por el que una conversacion
+        // puede pasar a una etapa de SOLD_STAGES (vendido, esperando_retiro,
+        // en_camino, entregado) directamente, sin pasar nunca por el bloque
+        // de isNewClose de arriba (de hecho, en la practica, la mayoria de
+        // las ventas se detectan ACA, no ahi: el clasificador suele saltar
+        // directo a "esperando_retiro" en vez de marcar "vendido" primero).
+        // Sin esto, soldAt quedaba sin guardar para casi todas las ventas
+        // reales, y las metricas por rango de fechas (Metricas > por dia)
+        // las mostraba como "sin fecha" en vez de contarlas el dia que
+        // pasaron de verdad.
+        if (SOLD_STAGES.includes(classification.stage) && !current.soldAt) {
+          classPatch.soldAt = new Date().toISOString();
+        }
+        const updated = updateSession(from, classPatch);
         if (classification.stage === 'vendido' && current.stage !== 'vendido') push.notifySale(from, updated);
       }
     }
