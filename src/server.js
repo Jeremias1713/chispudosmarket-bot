@@ -8,28 +8,38 @@ const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
 
-// Relleno de una sola vez para conversaciones que ya estaban vendidas ANTES
-// de que existiera el campo soldAt (agregado recien): sin esto, las metricas
-// por rango de fechas (Metricas > por dia) las mostraba como "sin fecha" en
-// vez de contarlas, aunque la venta haya sido HOY mismo. Como no queda
-// registrado el momento exacto en que paso, se usa updatedAt (la ultima vez
-// que se toco esa conversacion) como mejor aproximacion disponible — es
-// razonable porque lo mas probable es que lo ultimo que le paso a una
-// conversacion que sigue en una etapa vendida sea, justamente, haberse
-// vendido. Es un relleno UNA sola vez: en cuanto una sesion tiene soldAt no
-// se vuelve a tocar, y las ventas nuevas de aca en adelante ya lo guardan
-// solas (ver flow.js y src/web/panel.js).
-function backfillSoldAt() {
+// Correccion de una sola vez (retroactiva): antes, a las conversaciones que
+// ya estaban vendidas de antes de existir el campo soldAt se les rellenaba
+// soldAt copiando updatedAt (la ultima vez que se toco esa conversacion por
+// CUALQUIER motivo, no necesariamente la venta). Eso hacia que conversaciones
+// vendidas hace semanas, pero con actividad reciente (una nota, el
+// clasificador corriendo despues de cada respuesta del bot, etc.), aparecieran
+// como "vendidas hoy" en las metricas por rango — el mismo bug que ya se
+// habia arreglado, reintroducido por este relleno.
+//
+// La señal para detectar cuales soldAt vienen de ese relleno viejo (y no de
+// una deteccion real) es que quedaron IDENTICOS a updatedAt: cuando el
+// sistema detecta una venta de verdad, soldAt y updatedAt se calculan por
+// separado (dos llamadas a new Date() distintas, milisegundos aparte), asi
+// que practicamente nunca coinciden byte a byte. Si coinciden, es el relleno
+// viejo. En esos casos se vuelve a dejar soldAt en null: la conversacion
+// sigue contando en el total general de ventas, pero deja de aparecer con
+// una fecha falsa en las metricas por rango (pasa a contarse como "sin fecha
+// registrada").
+//
+// Es segura de correr en cada arranque: una vez corregida, soldAt queda en
+// null y ya no vuelve a coincidir con updatedAt, asi que no se repite.
+function fixBackfilledSoldAt() {
   const sessions = listSessions();
   let fixed = 0;
   for (const s of sessions) {
-    if (SOLD_STAGES.includes(s.stage) && !s.soldAt) {
-      updateSession(s.phone, { soldAt: s.updatedAt || s.createdAt || new Date().toISOString() });
+    if (s.soldAt && s.updatedAt && s.soldAt === s.updatedAt) {
+      updateSession(s.phone, { soldAt: null });
       fixed++;
     }
   }
   if (fixed) {
-    console.log(`Relleno de soldAt: se completo la fecha de venta aproximada en ${fixed} conversacion(es) que ya estaban vendidas de antes.`);
+    console.log(`Correccion de soldAt: se quito la fecha aproximada (no confiable) de ${fixed} conversacion(es); ahora cuentan como "sin fecha registrada" en vez de aparecer como vendidas hoy.`);
   }
 }
 
@@ -103,6 +113,6 @@ app.get('/health', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
-  backfillSoldAt();
+  fixBackfilledSoldAt();
   remarketing.start();
 });
