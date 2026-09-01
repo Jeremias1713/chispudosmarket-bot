@@ -14,7 +14,7 @@
 // un typo en el numero de guia despues de avisado, no se le vuelve a
 // escribir solo por eso.
 const { getSession, updateSession, appendMessage } = require('./state');
-const { sendTemplate } = require('./whatsapp');
+const { sendTemplate, sendImageByLink } = require('./whatsapp');
 const { sendRawReply } = require('./flow');
 const { getSettings } = require('./settings');
 const { isWindowOpen } = require('./whatsappWindow');
@@ -48,7 +48,24 @@ async function maybeNotifyShipping(phone, session) {
   const abierta = isWindowOpen(s);
   const values = placeholderValues(s);
 
+  let imageSent = false;
   try {
+    // La FOTO de la guia (si se cargo una) solo se puede mandar cuando la
+    // ventana de 24h esta abierta: WhatsApp no deja mandar ningun archivo
+    // libre fuera de esa ventana, y una plantilla con imagen requeriria
+    // configurar un header de media aparte en Meta (no soportado por ahora).
+    // Si la ventana esta cerrada, se manda solo el texto/plantilla con el
+    // numero, y se avisa en el resultado que la foto no se pudo mandar sola.
+    if (abierta && s.card?.guiaImageUrl) {
+      try {
+        await sendImageByLink(phone, s.card.guiaImageUrl);
+        appendMessage(phone, 'assistant', '[imagen] Guia de envio');
+        imageSent = true;
+      } catch (err) {
+        console.error('No se pudo mandar la foto de la guia a', phone, err.response?.data || err.message);
+      }
+    }
+
     if (abierta) {
       const texto = fillPlaceholders(settings.shippingFreeText || DEFAULT_FREE_TEXT, values);
       await sendRawReply(phone, texto);
@@ -71,7 +88,14 @@ async function maybeNotifyShipping(phone, session) {
   }
 
   updateSession(phone, { shippingNotifiedAt: new Date().toISOString() });
-  return { sent: true, viaTemplate: !abierta };
+  return {
+    sent: true,
+    viaTemplate: !abierta,
+    imageSent,
+    // Se cargo una foto pero no se pudo mandar sola porque la ventana ya
+    // estaba cerrada: el negocio deberia mandarsela a mano por otro medio.
+    imageSkipped: !abierta && Boolean(s.card?.guiaImageUrl),
+  };
 }
 
 module.exports = { maybeNotifyShipping };
