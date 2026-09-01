@@ -91,6 +91,7 @@
         <span>Bot activo</span>
       </span>
       <span class="avatar avatar-me" id="meAvatar" title="ChispudosMarket">CM</span>
+      <button class="btn" id="logoutBtn" type="button" title="Cerrar sesión">Salir</button>
     </header>
 
     <main class="app-main">
@@ -124,6 +125,16 @@
                 <input type="checkbox" id="chatBotToggle">
                 <span>Bot activo</span>
               </label>
+            </div>
+
+            <div class="followup-bar window-closed-bar" id="windowClosedBar" hidden>
+              <span class="followup-info">⏰ Pasaron más de 24h desde el último mensaje del cliente: WhatsApp ya no deja mandar texto libre. Mandale una plantilla aprobada:</span>
+              <div class="window-closed-actions">
+                <input type="text" list="wcTemplateList" id="wcTemplate" placeholder="Nombre de la plantilla">
+                <datalist id="wcTemplateList"></datalist>
+                <input type="text" id="wcParams" placeholder="Variables (coma)">
+                <button class="btn btn-primary" id="wcSend" type="button">Enviar plantilla</button>
+              </div>
             </div>
 
             <div class="followup-bar" id="followupBar" hidden>
@@ -190,6 +201,30 @@
         <div class="autos-scroll">
           <div class="autos-inner">
 
+            <div class="run-filters" id="metricsFilters">
+              <button class="filter-chip is-on" type="button" data-window="">Todo el historial</button>
+              <button class="filter-chip" type="button" data-window="hoy">Hoy</button>
+              <button class="filter-chip" type="button" data-window="ayer">Ayer</button>
+              <button class="filter-chip" type="button" data-window="7d">Últimos 7 días</button>
+              <button class="filter-chip" type="button" data-window="30d">Últimos 30 días</button>
+            </div>
+            <div class="pipeline-range" id="metricsRangeRow">
+              <label for="metricsFrom">Desde</label>
+              <input type="date" id="metricsFrom">
+              <label for="metricsTo">Hasta</label>
+              <input type="date" id="metricsTo">
+              <button class="btn" id="metricsApplyRange" type="button">Aplicar rango</button>
+              <button class="btn" id="metricsClearRange" type="button" hidden>Quitar filtro</button>
+            </div>
+
+            <div id="metricsRangeCard" hidden>
+              <h2 class="section-title" id="metricsRangeTitle">En el período seleccionado</h2>
+              <div class="metrics-cards" id="metricsRangeCards"></div>
+              <h2 class="section-title">Productos más vendidos en el período</h2>
+              <div class="card" id="metricsRangeProducts"></div>
+            </div>
+
+            <h2 class="section-title">Historial completo</h2>
             <div class="metrics-cards" id="metricsCards"></div>
 
             <h2 class="section-title">Embudo de ventas</h2>
@@ -317,6 +352,30 @@
                   justo cuando el cliente ya dijo que sí, antes de pedirle los datos.
                 </div>
                 <textarea id="p_upsell" rows="2" placeholder="Por $5 más te llevás el segundo, y el envío sigue siendo gratis."></textarea>
+              </div>
+
+              <div class="field field-master">
+                <label class="switch">
+                  <input type="checkbox" id="p_remarketingEnabled" checked>
+                  <span>Remarketing automático para este producto</span>
+                </label>
+                <div class="help">
+                  Si una conversación queda vinculada a este producto y se cuelga sin
+                  novedad en una etapa que todavía no es venta (ni vendido, ni en
+                  camino, ni retirado), se manda el mensaje de 2 horas y, si sigue sin
+                  novedad, el de 5 horas. Dejá el texto vacío para no mandar ese paso.
+                  Solo se manda dentro del horario permitido (Configuración).
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="p_remarketing2h">Remarketing — a las 2 horas</label>
+                <textarea id="p_remarketing2h" rows="2" placeholder="¿Seguís interesado? Te lo puedo apartar cuando quieras 😊"></textarea>
+              </div>
+
+              <div class="field">
+                <label for="p_remarketing5h">Remarketing — a las 5 horas</label>
+                <textarea id="p_remarketing5h" rows="2" placeholder="Última consulta antes de que se me acabe el stock de hoy: ¿te lo aparto?"></textarea>
               </div>
             </div>
 
@@ -671,6 +730,40 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                     Además del texto, el bot manda un audio leyendo la misma respuesta.
                     Necesita que el servidor tenga una URL pública (ya la tiene en Render).
                   </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="card cfg">
+              <summary class="cfg-head">
+                <span class="cfg-title">Remarketing automático</span>
+                <span class="cfg-sub">Recordatorios a las 2h y 5h para pedidos colgados</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="field field-master">
+                  <label class="switch">
+                    <input type="checkbox" id="cfg_remarketingEnabled">
+                    <span>Mandar recordatorios automáticos</span>
+                  </label>
+                  <div class="help">
+                    El texto de cada mensaje (2h y 5h) se carga por producto, en
+                    Catálogo → el producto → "Remarketing automático". Este switch
+                    frena TODOS los envíos automáticos de golpe sin perder ese texto.
+                  </div>
+                </div>
+                <div class="field field-row">
+                  <div>
+                    <label for="cfg_remarketingHourStart">Hora desde (0-23)</label>
+                    <input type="number" id="cfg_remarketingHourStart" min="0" max="23" step="1">
+                  </div>
+                  <div>
+                    <label for="cfg_remarketingHourEnd">Hora hasta (0-23)</label>
+                    <input type="number" id="cfg_remarketingHourEnd" min="0" max="23" step="1">
+                  </div>
+                </div>
+                <div class="help">
+                  Fuera de este rango (hora de Venezuela) los recordatorios se
+                  posponen: no se pierden, se mandan apenas vuelve a abrir el horario.
                 </div>
               </div>
             </details>

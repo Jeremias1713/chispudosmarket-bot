@@ -1984,6 +1984,19 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 }
 .followup-info { color: var(--text-muted); }
 
+.window-closed-bar {
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--warning);
+  flex-wrap: wrap;
+}
+.window-closed-bar .followup-info { color: var(--warning-strong); font-weight: 600; flex: 1 1 260px; }
+.window-closed-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.window-closed-actions input[type="text"] {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 12px;
+}
+#wcTemplate { width: 170px; }
+#wcParams { width: 130px; }
+
 /* ============================================================
    Cupones
    ============================================================ */

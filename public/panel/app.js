@@ -13,6 +13,9 @@ const state = {
   pipelineWindow: '',
   pipelineFrom: '',
   pipelineTo: '',
+  metricsWindow: '',
+  metricsFrom: '',
+  metricsTo: '',
   chatPhone: null,
   libFolder: '',
   libSearch: '',
@@ -25,12 +28,26 @@ async function api(path, options) {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   })
+  if (res.status === 401) {
+    // Sesion vencida o nunca iniciada (cookie de login, ver panel.js): se
+    // manda a la pantalla de login en vez de dejar la pantalla rota
+    // mostrando errores de red por todos lados.
+    window.location.href = '/panel/login'
+    throw new Error('Sesion vencida')
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || res.statusText)
+    const err = new Error(body.error || res.statusText)
+    err.windowClosed = Boolean(body.windowClosed)
+    throw err
   }
   return res.json()
 }
+
+$('logoutBtn')?.addEventListener('click', async () => {
+  try { await fetch('/panel/logout', { method: 'POST' }) } catch { /* igual redirige */ }
+  window.location.href = '/panel/login'
+})
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({
@@ -359,10 +376,62 @@ async function loadChat() {
   renderAmount(conversation)
   renderNote(conversation)
   renderMemory(conversation)
+  renderWindowStatus(conversation)
   const isNewChat = lastRenderedChatPhone !== conversation.phone
   lastRenderedChatPhone = conversation.phone
   renderMessages(messages, isNewChat)
 }
+
+/* ---------- ventana de 24h de WhatsApp ---------- */
+// Pasadas las 24h desde el ULTIMO mensaje del cliente, Meta ya no deja mandar
+// texto libre (solo plantillas aprobadas): se avisa ANTES de que se intente
+// escribir y rebote, se apaga el composer normal, y se ofrece mandar una
+// plantilla puntual a esta conversación en su lugar.
+let templatesCache = null
+async function ensureTemplatesLoaded() {
+  if (templatesCache) return templatesCache
+  try {
+    const { templates } = await api('/templates')
+    templatesCache = templates || []
+  } catch {
+    templatesCache = []
+  }
+  $('wcTemplateList').innerHTML = templatesCache.map((t) => `<option value="${esc(t.name)}"></option>`).join('')
+  return templatesCache
+}
+
+function renderWindowStatus(convo) {
+  const closed = convo.windowOpen === false
+  $('windowClosedBar').hidden = !closed
+  $('chatInput').disabled = closed
+  $('chatSend').disabled = closed
+  $('chatImageFile').disabled = closed
+  $('chatInput').placeholder = closed
+    ? 'Ventana de 24h cerrada: mandá una plantilla arriba'
+    : 'Escribir mensaje manual…'
+  if (closed) ensureTemplatesLoaded()
+}
+
+$('wcSend').addEventListener('click', async () => {
+  const templateName = $('wcTemplate').value.trim()
+  if (!templateName || !state.selectedPhone) return
+  const params = $('wcParams').value.split(',').map((s) => s.trim()).filter(Boolean)
+
+  $('wcSend').disabled = true
+  try {
+    await api('/conversations/' + encodeURIComponent(state.selectedPhone) + '/send-template', {
+      method: 'POST',
+      body: JSON.stringify({ templateName, params }),
+    })
+    $('wcTemplate').value = ''
+    $('wcParams').value = ''
+    await loadChat()
+  } catch (err) {
+    alert('No se pudo mandar la plantilla: ' + err.message)
+  } finally {
+    $('wcSend').disabled = false
+  }
+})
 
 /* ---------- guía enviada (seguimiento) ---------- */
 
@@ -748,11 +817,121 @@ function productRow(p) {
   </div>`
 }
 
+/* ---------- métricas por rango de fechas ---------- */
+
+function ymd(date) {
+  return date.toISOString().slice(0, 10)
+}
+
+// Chips fijos (Hoy/Ayer/7d/30d) traducidos a from/to en formato YYYY-MM-DD,
+// mismo formato que espera el servidor (ver panel.js /api/metrics).
+function metricsChipRange(ventana) {
+  const hoy = new Date()
+  if (ventana === 'hoy') return { from: ymd(hoy), to: ymd(hoy) }
+  if (ventana === 'ayer') {
+    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1)
+    return { from: ymd(ayer), to: ymd(ayer) }
+  }
+  if (ventana === '7d') {
+    const desde = new Date(hoy); desde.setDate(desde.getDate() - 6)
+    return { from: ymd(desde), to: ymd(hoy) }
+  }
+  if (ventana === '30d') {
+    const desde = new Date(hoy); desde.setDate(desde.getDate() - 29)
+    return { from: ymd(desde), to: ymd(hoy) }
+  }
+  return null
+}
+
+function currentMetricsRange() {
+  if (state.metricsWindow === 'custom') return { from: state.metricsFrom, to: state.metricsTo }
+  return metricsChipRange(state.metricsWindow)
+}
+
+function clearMetricsChips() {
+  $('metricsFilters').querySelectorAll('.filter-chip').forEach((c) => c.classList.remove('is-on'))
+}
+
+$('metricsFilters').addEventListener('click', (e) => {
+  const chip = e.target.closest('.filter-chip')
+  if (!chip) return
+  state.metricsWindow = chip.dataset.window
+  state.metricsFrom = ''
+  state.metricsTo = ''
+  $('metricsFrom').value = ''
+  $('metricsTo').value = ''
+  $('metricsClearRange').hidden = true
+  clearMetricsChips()
+  chip.classList.add('is-on')
+  pollMetrics()
+})
+
+$('metricsApplyRange').addEventListener('click', () => {
+  const from = $('metricsFrom').value
+  const to = $('metricsTo').value
+  if (!from && !to) return
+  state.metricsWindow = 'custom'
+  state.metricsFrom = from
+  state.metricsTo = to
+  clearMetricsChips()
+  $('metricsClearRange').hidden = false
+  pollMetrics()
+})
+
+$('metricsClearRange').addEventListener('click', () => {
+  state.metricsWindow = ''
+  state.metricsFrom = ''
+  state.metricsTo = ''
+  $('metricsFrom').value = ''
+  $('metricsTo').value = ''
+  $('metricsClearRange').hidden = true
+  clearMetricsChips()
+  $('metricsFilters').querySelector('.filter-chip[data-window=""]').classList.add('is-on')
+  pollMetrics()
+})
+
+function rangeTiles(r) {
+  const tiles = [
+    ['Conversaciones nuevas', r.newConversations],
+    ['Ventas', r.sales],
+    ['Ingresos', fmtMoney(r.revenue)],
+    ['Conversión (nuevas→venta)', fmtPercent(r.conversionRate)],
+    ['Mensajes', r.messages],
+  ]
+  return tiles.map(([label, value]) => `
+    <div class="metric-tile">
+      <div class="metric-tile-value">${esc(value)}</div>
+      <div class="metric-tile-label">${esc(label)}</div>
+    </div>`).join('')
+}
+
+function renderMetricsRange(range) {
+  const card = $('metricsRangeCard')
+  if (!range) {
+    card.hidden = true
+    return
+  }
+  card.hidden = false
+  const fmtDay = (ymdStr) => new Date(ymdStr + 'T00:00:00').toLocaleDateString('es', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const desde = range.from ? fmtDay(range.from) : 'siempre'
+  const hasta = range.to ? fmtDay(range.to) : 'hoy'
+  $('metricsRangeTitle').textContent = `En el período seleccionado (${desde} — ${hasta})`
+  $('metricsRangeCards').innerHTML = rangeTiles(range)
+  $('metricsRangeProducts').innerHTML = (range.topProducts || []).length
+    ? range.topProducts.map(productRow).join('')
+    : emptyState('🏆', 'No hubo ventas en este período', '')
+}
+
 async function pollMetrics() {
   if (state.activeView !== 'view-metrics') return
+  const range = currentMetricsRange()
+  const qs = range && (range.from || range.to)
+    ? '?' + new URLSearchParams({ from: range.from || '', to: range.to || '' }).toString()
+    : ''
   let m
-  try { m = await api('/metrics') } catch { return }
+  try { m = await api('/metrics' + qs) } catch { return }
 
+  renderMetricsRange(m.range)
   $('metricsCards').innerHTML = metricsTiles(m)
   $('metricsFunnel').innerHTML = metricsFunnel(m.byStage)
 
@@ -900,6 +1079,9 @@ function openProduct(p) {
   $('p_triggers').value = (p?.triggers || []).join(', ')
   $('p_intro').value = p?.intro || ''
   $('p_upsell').value = p?.upsell || ''
+  $('p_remarketingEnabled').checked = p ? p.remarketingEnabled !== false : true
+  $('p_remarketing2h').value = p?.remarketing2h || ''
+  $('p_remarketing5h').value = p?.remarketing5h || ''
   initImagePicker('introImage', p?.introImageIds)
   $('productMsg').textContent = ''
   $('deleteProduct').hidden = !p
@@ -928,6 +1110,9 @@ $('saveProduct').addEventListener('click', async () => {
     intro: $('p_intro').value,
     introImageIds: getImagePickerSelection('introImage'),
     upsell: $('p_upsell').value,
+    remarketingEnabled: $('p_remarketingEnabled').checked,
+    remarketing2h: $('p_remarketing2h').value,
+    remarketing5h: $('p_remarketing5h').value,
   }
   if (!body.name) {
     $('productMsg').textContent = 'Falta el nombre'
@@ -1277,6 +1462,9 @@ async function loadSettings() {
   $('cfg_splitGapMin').value = (s.splitGapMinMs ?? 6000) / 1000
   $('cfg_splitGapMax').value = (s.splitGapMaxMs ?? 9500) / 1000
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
+  $('cfg_remarketingEnabled').checked = s.remarketingEnabled !== false
+  $('cfg_remarketingHourStart').value = s.remarketingHourStart ?? 8
+  $('cfg_remarketingHourEnd').value = s.remarketingHourEnd ?? 21
   try { libraryCache = await api('/library') } catch { /* si falla, el selector queda vacío */ }
   initImagePicker('welcomeImage', s.welcomeImageIds)
   updateTempDisplay()
@@ -1311,6 +1499,9 @@ $('cfg_save').addEventListener('click', async () => {
     splitGapMinMs: Math.round(Number($('cfg_splitGapMin').value) * 1000),
     splitGapMaxMs: Math.round(Number($('cfg_splitGapMax').value) * 1000),
     audioReplyEnabled: $('cfg_audioEnabled').checked,
+    remarketingEnabled: $('cfg_remarketingEnabled').checked,
+    remarketingHourStart: Number($('cfg_remarketingHourStart').value),
+    remarketingHourEnd: Number($('cfg_remarketingHourEnd').value),
   }
   $('cfg_save').disabled = true
   try {
