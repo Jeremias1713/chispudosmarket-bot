@@ -33,6 +33,7 @@ const { mediaUrl, SOLD_STAGES } = require('../flow');
 const push = require('../push');
 const { WHATSAPP_WINDOW_MS, lastInboundAt, isWindowOpen } = require('../whatsappWindow');
 const shipping = require('../shipping');
+const dropanas = require('../dropanas');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -656,6 +657,64 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
     notice = await shipping.maybeNotifyShipping(phone, updated);
   }
   res.json({ ok: true, card: updated.card, notice });
+});
+
+/* ---------- guias por lote (export de Dropanas) ---------- */
+
+// Analiza el Excel que se exporta desde Dropanas (con los numeros de guia ya
+// generados) y propone a que conversacion corresponde cada uno, cruzando por
+// nombre del cliente (ese export no trae telefono). No manda nada todavia:
+// solo arma la lista para que el negocio la revise en el panel antes de
+// confirmar (ver dropanas.js para el detalle del cruce por nombre).
+router.post('/api/dropanas/preview', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
+  try {
+    const rows = dropanas.matchExport(req.file.buffer);
+    res.json({ ok: true, rows });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Espera entre cada envio del lote. No hace falta por limite tecnico de
+// WhatsApp (el limite real es de decenas de mensajes por segundo): es solo
+// para que la tanda salga de forma mas espaciada/natural.
+const BULK_GUIA_DELAY_MS = 1200;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Confirma en bloque: para cada {phone, guia} que el negocio reviso y aprobo
+// en el panel (ya sea una coincidencia automatica o una elegida a mano entre
+// los candidatos ambiguos), guarda la guia y dispara el aviso automatico —
+// exactamente el mismo mecanismo que cargarla una por una desde el chat (ver
+// POST /api/conversations/:phone/guia), pero mandado uno por uno con una
+// pausa chica entre cada uno en vez de todos de golpe.
+router.post('/api/dropanas/confirm', async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: 'No hay nada para confirmar' });
+
+  const results = [];
+  for (const item of items) {
+    const phone = String(item?.phone || '').trim();
+    const guia = String(item?.guia || '').trim();
+    if (!phone || !guia) {
+      results.push({ phone, guia, ok: false, error: 'Faltan datos' });
+      continue;
+    }
+    try {
+      const s = getSession(phone);
+      const card = { ...(s.card || {}), guia };
+      const updated = updateSession(phone, { card });
+      const notice = await shipping.maybeNotifyShipping(phone, updated);
+      results.push({ phone, guia, ok: true, notice });
+    } catch (err) {
+      results.push({ phone, guia, ok: false, error: err.message });
+    }
+    if (items.length > 1) await sleep(BULK_GUIA_DELAY_MS);
+  }
+
+  res.json({ ok: true, results });
 });
 
 // Nota interna del negocio sobre este cliente (tags, recordatorios, lo que
