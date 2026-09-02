@@ -478,6 +478,29 @@
             <h2 class="section-title">Historial</h2>
             <div class="card run-table" id="bc_history"></div>
 
+            <h2 class="section-title">Guías por lote (Dropanas)</h2>
+            <div class="card cfg" style="padding: var(--s5);">
+              <div class="field">
+                <label for="dp_file">Excel de pedidos de Dropanas</label>
+                <div class="help">
+                  Subí el Excel que exportás desde Dropanas (el que ya trae la columna de
+                  guía generada). El bot cruza el nombre del cliente contra las
+                  conversaciones vendidas y te arma la lista abajo para revisar — no manda
+                  nada hasta que confirmes.
+                </div>
+                <input type="file" id="dp_file" accept=".xlsx,.xls">
+                <div class="settings-actions">
+                  <button class="btn" id="dp_analyze">Analizar archivo</button>
+                  <span class="save-msg" id="dp_msg"></span>
+                </div>
+              </div>
+              <div id="dp_results"></div>
+              <div class="settings-actions" id="dp_confirmWrap" hidden>
+                <button class="btn btn-primary" id="dp_confirm">Confirmar y mandar las marcadas</button>
+                <span class="save-msg" id="dp_confirmMsg"></span>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>

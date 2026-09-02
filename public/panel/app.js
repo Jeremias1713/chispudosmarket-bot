@@ -1424,6 +1424,128 @@ $('bc_send').addEventListener('click', async () => {
   }
 })
 
+/* ---------- guias por lote (export de Dropanas) ---------- */
+// Se sube el Excel, el servidor cruza por nombre contra las conversaciones
+// vendidas (ver src/dropanas.js) y devuelve una fila por pedido con su
+// numero de guia y a que telefono cree que corresponde. Nada se manda hasta
+// que el negocio marca los checks y aprieta "Confirmar": recien ahi se
+// dispara el aviso automatico, uno por uno (ver /api/dropanas/confirm).
+let dpRows = []
+
+function dpRowHtml(row, idx) {
+  const badge = row.matchType === 'exacto'
+    ? '<span class="badge">Coincide</span>'
+    : row.matchType === 'ambiguo'
+      ? '<span class="badge badge-warning">Revisar</span>'
+      : '<span class="badge badge-danger">Sin coincidencia</span>'
+
+  let picker
+  if (row.matchType === 'exacto') {
+    picker = `<div class="dp-phone">${esc(row.phone)} — ${esc(row.matchedName || '')}</div>`
+  } else if (row.matchType === 'ambiguo') {
+    const opts = ['<option value="">-- elegí a quién corresponde --</option>'].concat(
+      row.candidates.map((c) => `<option value="${esc(c.phone)}">${esc(c.phone)} — ${esc(c.name || 'sin nombre')}${c.city ? ' (' + esc(c.city) + ')' : ''}</option>`)
+    )
+    picker = `<select class="dp-pick" data-idx="${idx}">${opts.join('')}</select>`
+  } else {
+    picker = '<div class="help">No encontré ninguna conversación vendida con ese nombre. Cargala a mano desde el chat de ese cliente.</div>'
+  }
+
+  const disabled = row.matchType === 'sin_match' ? 'disabled' : ''
+  const checked = row.matchType === 'exacto' ? 'checked' : ''
+
+  return `<div class="dp-row" data-idx="${idx}">
+    <input type="checkbox" class="dp-check" data-idx="${idx}" ${checked} ${disabled}>
+    <div class="dp-info">
+      <div><strong>${esc(row.guia)}</strong> · ${esc(row.cliente)}${row.ciudad ? ' — ' + esc(row.ciudad) : ''}</div>
+      <div class="help">${esc(row.producto || '')}</div>
+      ${picker}
+    </div>
+    ${badge}
+  </div>`
+}
+
+function renderDpResults() {
+  const box = $('dp_results')
+  if (!dpRows.length) {
+    box.innerHTML = ''
+    $('dp_confirmWrap').hidden = true
+    return
+  }
+  box.innerHTML = `<div class="card run-table">${dpRows.map(dpRowHtml).join('')}</div>`
+  $('dp_confirmWrap').hidden = false
+}
+
+$('dp_analyze').addEventListener('click', async () => {
+  const file = $('dp_file').files?.[0]
+  if (!file) { $('dp_msg').textContent = 'Elegí el Excel primero'; return }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  $('dp_analyze').disabled = true
+  $('dp_msg').textContent = 'Analizando…'
+  try {
+    const res = await fetch('/panel/api/dropanas/preview', { method: 'POST', body: formData })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    const data = await res.json()
+    dpRows = data.rows || []
+    renderDpResults()
+    const exactas = dpRows.filter((r) => r.matchType === 'exacto').length
+    $('dp_msg').textContent = dpRows.length
+      ? `${dpRows.length} pedidos con guía · ${exactas} coinciden solas, revisá el resto`
+      : 'No encontré pedidos con guía en ese archivo'
+  } catch (err) {
+    $('dp_msg').textContent = err.message
+  } finally {
+    $('dp_analyze').disabled = false
+  }
+})
+
+// Delegacion de eventos porque las filas se arman dinamicamente: al elegir
+// un candidato en una fila "ambigua" se guarda el telefono elegido y se
+// marca el check solo (no hace falta que la persona haga los dos pasos).
+$('dp_results').addEventListener('change', (e) => {
+  if (e.target.classList.contains('dp-pick')) {
+    const idx = Number(e.target.dataset.idx)
+    const phone = e.target.value
+    dpRows[idx].phone = phone || null
+    const check = $('dp_results').querySelector(`.dp-check[data-idx="${idx}"]`)
+    if (check) check.checked = Boolean(phone)
+  }
+})
+
+$('dp_confirm').addEventListener('click', async () => {
+  const items = []
+  $('dp_results').querySelectorAll('.dp-check:checked').forEach((box) => {
+    const idx = Number(box.dataset.idx)
+    const row = dpRows[idx]
+    if (row && row.phone && row.guia) items.push({ phone: row.phone, guia: row.guia })
+  })
+  if (!items.length) { $('dp_confirmMsg').textContent = 'No hay ninguna marcada (o le falta elegir a quién corresponde)'; return }
+
+  $('dp_confirm').disabled = true
+  $('dp_confirmMsg').textContent = `Mandando ${items.length}…`
+  try {
+    const { results } = await api('/dropanas/confirm', { method: 'POST', body: JSON.stringify({ items }) })
+    const ok = results.filter((r) => r.ok && r.notice?.sent).length
+    const fallo = results.length - ok
+    $('dp_confirmMsg').textContent = `Listo: ${ok} avisadas${fallo ? `, ${fallo} con problema (revisalas a mano)` : ''}`
+    dpRows = []
+    $('dp_file').value = ''
+    renderDpResults()
+    if (state.activeView === 'view-convos') pollConversations()
+  } catch (err) {
+    $('dp_confirmMsg').textContent = err.message
+  } finally {
+    $('dp_confirm').disabled = false
+  }
+})
+
 /* ---------- simulador ---------- */
 
 function simBubbleInner(m) {
