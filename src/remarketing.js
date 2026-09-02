@@ -79,6 +79,7 @@ async function revisarUnaVez() {
       if (!session.linkedProductId) continue; // sin producto vinculado no hay que texto usar
       const etapa = session.stage || 'nuevo';
       if (SOLD_STAGES.includes(etapa)) continue; // ya es una venta cerrada, no molestar mas
+      if (etapa === 'perdido') continue; // dijo que no le interesa: no insistirle mas
 
       const product = findProduct(session.linkedProductId);
       if (!product || product.remarketingEnabled === false) continue;

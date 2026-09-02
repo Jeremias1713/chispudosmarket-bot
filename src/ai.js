@@ -545,13 +545,12 @@ function formatAgencyToolResult(estado, ciudad, scope, results) {
 // busqueda (y el mismo reconocimiento de ciudades conocidas) que usa la
 // herramienta. Devuelve null si no hay ciudad conocida o no encontro nada
 // (en ese caso no se manda nada extra, para no inventar informacion).
-function buildDirectAgencyMessage(ciudadConocida) {
-  if (!ciudadConocida) return null;
-  const cityKey = agencies.findKnownCityKey(ciudadConocida);
-  const estado = cityKey ? agencies.resolveStateForCity(cityKey) : null;
-  const ciudad = cityKey || ciudadConocida;
-  const { scope, results } = searchAgenciesByZone(estado, ciudad);
-  if (!results.length) return null;
+// Arma el mensaje final (el que se le manda de verdad al cliente) para una
+// busqueda de agencias ya resuelta. Se separa de buildDirectAgencyMessage
+// para poder reusarla tambien como red de seguridad de completitud (ver
+// getAssistantReply mas abajo): ambos casos ya tienen el scope/resultados
+// resueltos, solo hace falta redactar el texto.
+function buildAgencyListMessage(scope, estado, ciudad, results) {
   if (scope === 'ciudad') {
     return `Aquí tienes las agencias disponibles en ${ciudad}:\n${formatAgencyList(results)}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`;
   }
@@ -559,6 +558,16 @@ function buildDirectAgencyMessage(ciudadConocida) {
     `A esa ciudad puntual no llega de forma directa, pero en el estado ${estado} sí hay cobertura:\n` +
     `${formatAgencyList(results)}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`
   );
+}
+
+function buildDirectAgencyMessage(ciudadConocida) {
+  if (!ciudadConocida) return null;
+  const cityKey = agencies.findKnownCityKey(ciudadConocida);
+  const estado = cityKey ? agencies.resolveStateForCity(cityKey) : null;
+  const ciudad = cityKey || ciudadConocida;
+  const { scope, results } = searchAgenciesByZone(estado, ciudad);
+  if (!results.length) return null;
+  return buildAgencyListMessage(scope, estado, ciudad, results);
 }
 
 // Busca la imagen por nombre exacto (como aparece en la biblioteca); si no
@@ -619,7 +628,10 @@ function runTool(call) {
   const estado = (ciudadConocida && agencies.resolveStateForCity(ciudadConocida)) || estadoDelModelo;
   const ciudad = ciudadConocida || ciudadDelModelo;
   const { scope, results } = searchAgenciesByZone(estado, ciudad);
-  return { content: formatAgencyToolResult(estado, ciudad, scope, results), image: null };
+  // agencyResult va aparte del texto para el modelo: lo usa getAssistantReply
+  // como red de seguridad de completitud (ver mas abajo), sin tener que
+  // volver a parsear el texto de la herramienta.
+  return { content: formatAgencyToolResult(estado, ciudad, scope, results), image: null, agencyResult: { scope, estado, ciudad, results } };
 }
 
 // Devuelve { text, images }: el texto que hay que mandar por WhatsApp, y la
@@ -753,9 +765,11 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   // final con esa info real.
   messages.push(responseMessage);
   const images = [];
+  let lastAgencyResult = null;
   for (const call of toolCalls) {
     const result = runTool(call);
     if (result.image) images.push(result.image);
+    if (result.agencyResult) lastAgencyResult = result.agencyResult;
     messages.push({
       role: 'tool',
       tool_call_id: call.id,
@@ -770,7 +784,24 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
     tools: TOOLS,
   });
 
-  return { text: scrubGenial(followUp.choices[0].message.content.trim()), images };
+  let text = scrubGenial(followUp.choices[0].message.content.trim());
+
+  // Red de seguridad de codigo: si en este turno se busco una lista de
+  // agencias por ciudad/estado y la herramienta encontro mas de una, pero el
+  // modelo termino mandando MENOS agencias numeradas de las que realmente
+  // hay (esto paso de verdad: en Gran Caracas, con 25 agencias reales, el
+  // modelo "resumio" y solo mando 2, pese a que el prompt pide explicitamente
+  // la lista completa), no confiamos en el resumen: se descarta y se cambia
+  // por la lista completa armada por codigo, con el mismo formato que usa
+  // buildDirectAgencyMessage. Nunca se recorta informacion real al cliente.
+  if (lastAgencyResult && lastAgencyResult.results.length) {
+    const numerados = (text.match(/(^|\n)\s*\d+[.)]\s/g) || []).length;
+    if (numerados < lastAgencyResult.results.length) {
+      text = buildAgencyListMessage(lastAgencyResult.scope, lastAgencyResult.estado, lastAgencyResult.ciudad, lastAgencyResult.results);
+    }
+  }
+
+  return { text, images };
 }
 
 module.exports = {
