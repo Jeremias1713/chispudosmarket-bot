@@ -202,7 +202,7 @@ ${couponsText()}
 ` : ''}
   AGENCIAS Y COBERTURA:
   - Si el cliente comparte su ubicacion GPS, el sistema ya se encarga de mostrarle las agencias mas cercanas automaticamente: vos no necesitas hacer nada en ese caso.
-  - Cuando el cliente nombra una ciudad, estado o zona por CUALQUIER motivo relacionado a donde le llega el pedido, usa la herramienta buscar_agencias_por_zona. Esto incluye tanto cuando pregunta explicitamente por cobertura (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira", "estoy en ciudad bolivar") COMO cuando te esta diciendo esa ciudad como parte de cerrar el pedido, aunque no te lo pregunte (ej. "en que ciudad esta" del paso 2 del pedido, o "me lo envias a cd bolivar", "mandalo a valencia", "vivo en la ciudad de merida"). En estos casos SIEMPRE llama a la herramienta antes de contestar: nunca digas frases como "necesito saber si hay una agencia ahi" sin haber llamado ya a la herramienta, la respuesta tiene que traer el resultado real, no una intencion de averiguarlo despues. Pasale SIEMPRE el estado de Venezuela (deducilo vos con tu conocimiento de la geografia del pais si el cliente solo nombro una ciudad), y ademas la ciudad puntual si el cliente dijo algo mas especifico que el estado. Si el cliente usa una abreviatura o forma corta (ej. "cd bolivar" = Ciudad Bolivar), reconocela igual. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
+  - Cuando el cliente nombra una ciudad, estado o zona por CUALQUIER motivo relacionado a donde le llega el pedido, usa la herramienta buscar_agencias_por_zona. Esto incluye tanto cuando pregunta explicitamente por cobertura (ej. "soy de bolivar", "tienen envios a maracaibo?", "cual es la agencia mas cercana en tachira", "estoy en ciudad bolivar") COMO cuando te esta diciendo esa ciudad como parte de cerrar el pedido, aunque no te lo pregunte (ej. "en que ciudad esta" del paso 2 del pedido, o "me lo envias a cd bolivar", "mandalo a valencia", "vivo en la ciudad de merida"). En estos casos SIEMPRE llama a la herramienta antes de contestar: nunca digas frases como "necesito saber si hay una agencia ahi", "te busco la agencia mas cercana", "dame un momentito" o "ya te paso la direccion" sin haber llamado YA a la herramienta EN ESE MISMO turno: la respuesta tiene que traer el resultado real (la lista de agencias, o el aviso de que no hay cobertura), nunca una promesa de averiguarlo despues o "en un momento". Esto paso de verdad (le prometiste a un cliente de Barinas "te busco la agencia mas cercana, dame un momentito" y nunca le llegaste a mandar nada mas: quedo esperando sin respuesta y la venta se perdio) — NUNCA vuelvas a dejar una promesa de este tipo sin cumplirla en el mismo mensaje. Pasale SIEMPRE el estado de Venezuela (deducilo vos con tu conocimiento de la geografia del pais si el cliente solo nombro una ciudad), y ademas la ciudad puntual si el cliente dijo algo mas especifico que el estado. Si el cliente usa una abreviatura o forma corta (ej. "cd bolivar" = Ciudad Bolivar), reconocela igual. NO inventes direcciones de agencias, NO calcules distancias, dejale la busqueda real a la herramienta.
   - IMPORTANTE: si lo que dijo el cliente NO es un lugar real de Venezuela que reconozcas con confianza (una descripcion vaga como "un caserio alejado", "el campo", "bien lejos de todo", o cualquier cosa que no puedas ubicar en un estado concreto), NO llames a la herramienta y NO inventes ni adivines un estado al azar. En vez de eso, pedile al cliente que te confirme el nombre de su ciudad o estado para poder buscar la cobertura real.
   - NUNCA uses esa herramienta para numeros sueltos que sean cantidad de producto, telefono, respuestas de si/no, ni ningun otro dato del pedido que no sea explicitamente el nombre de un lugar. Un mensaje como "4" respondiendo cuantas unidades quiere NO es una zona.
   - Si la herramienta encuentra agencias en la ciudad puntual, presentaselas al cliente como una lista numerada (1., 2., 3., etc), cada una con nombre y direccion, con TODAS las agencias que encontro la herramienta en esa ciudad (nunca le muestres solo algunas si hay mas disponibles: si pregunta por las agencias, la lista tiene que ser la completa). Esta lista, sin importar cuantas agencias tenga, va SIEMPRE junta en un solo mensaje de WhatsApp (es un caso de "QUE NUNCA SE PARTE"): no dejes ningun renglon en blanco entre una agencia y la siguiente, usa un solo salto de linea, para que no se corte en varios mensajes.
@@ -534,6 +534,33 @@ function formatAgencyToolResult(estado, ciudad, scope, results) {
   return `No se encontraron agencias ni en "${ciudad || ''}" ni en el estado ${estado}. Decile al cliente que por ahora no hay cobertura confirmada en ${lugar}, sin inventar una direccion.`;
 }
 
+// Red de seguridad de codigo (aparte de la instruccion en el prompt de mas
+// arriba): esto paso de verdad una vez — el modelo le prometio a un cliente
+// "te busco la agencia mas cercana, dame un momentito" y nunca llamo a la
+// herramienta ni le mando la lista real, dejando al cliente esperando una
+// respuesta que nunca llego (ver detectPendingAgencyPromise en flow.js, que
+// llama a esta funcion cuando detecta esa promesa incumplida). Arma
+// directamente, sin pasar por el modelo, el mensaje con la lista real de
+// agencias para la ciudad que ya se sabe de la sesion, usando la misma
+// busqueda (y el mismo reconocimiento de ciudades conocidas) que usa la
+// herramienta. Devuelve null si no hay ciudad conocida o no encontro nada
+// (en ese caso no se manda nada extra, para no inventar informacion).
+function buildDirectAgencyMessage(ciudadConocida) {
+  if (!ciudadConocida) return null;
+  const cityKey = agencies.findKnownCityKey(ciudadConocida);
+  const estado = cityKey ? agencies.resolveStateForCity(cityKey) : null;
+  const ciudad = cityKey || ciudadConocida;
+  const { scope, results } = searchAgenciesByZone(estado, ciudad);
+  if (!results.length) return null;
+  if (scope === 'ciudad') {
+    return `Aquí tienes las agencias disponibles en ${ciudad}:\n${formatAgencyList(results)}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`;
+  }
+  return (
+    `A esa ciudad puntual no llega de forma directa, pero en el estado ${estado} sí hay cobertura:\n` +
+    `${formatAgencyList(results)}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`
+  );
+}
+
 // Busca la imagen por nombre exacto (como aparece en la biblioteca); si no
 // hay match exacto, prueba una coincidencia parcial por si el modelo no
 // copio el nombre letra por letra.
@@ -757,4 +784,5 @@ module.exports = {
   looksLikeEmptyDataRequest,
   stripDuplicateDataRequest,
   DATA_REQUEST_REMINDER,
+  buildDirectAgencyMessage,
 };

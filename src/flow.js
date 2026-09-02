@@ -26,6 +26,7 @@ const {
   looksLikeEmptyDataRequest,
   stripDuplicateDataRequest,
   DATA_REQUEST_REMINDER,
+  buildDirectAgencyMessage,
 } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
@@ -47,6 +48,28 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL ||
 // lista para que las metricas (conversion, ingresos) cuenten cualquiera de
 // estas etapas como una venta real, no solo "vendido" al pie de la letra.
 const SOLD_STAGES = ['vendido', 'esperando_retiro', 'en_camino', 'entregado'];
+
+// Red de seguridad de codigo: esto paso de verdad una vez (ver
+// buildDirectAgencyMessage en ai.js) — el modelo le prometio a un cliente
+// "te busco la agencia mas cercana, dame un momentito" y nunca llamo a la
+// herramienta ni mando la lista real, dejando al cliente esperando una
+// respuesta que nunca llegaba. El prompt ya le pide explicitamente que
+// nunca haga esto, pero es una instruccion probabilistica (no siempre se
+// respeta), asi que esto detecta la promesa incumplida por el TEXTO que ya
+// mando el bot y, si corresponde, manda la lista real como mensaje aparte
+// en el mismo momento, en vez de dejar al cliente esperando.
+const PENDING_AGENCY_PROMISE_RE =
+  /te buscar|dame un moment|en un momento|ya te (busco|paso|env[ií]o)|enseguida te|en breve|ahorita te/i;
+
+function looksLikePendingAgencyPromise(text) {
+  const t = String(text || '');
+  if (!/agencia/i.test(t) || !PENDING_AGENCY_PROMISE_RE.test(t)) return false;
+  // Si el mensaje YA trae una lista numerada (1. ... 2. ...), es porque la
+  // herramienta si se llamo y la lista real ya se mando: no es una promesa
+  // sin cumplir, es solo texto de acompañamiento. Solo cuenta como promesa
+  // incumplida cuando NO hay ninguna lista numerada en el mensaje.
+  return !/(^|\n)\s*1\.\s/.test(t);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -531,6 +554,19 @@ async function processReply(from) {
 
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, finalReply);
+
+    // Ver PENDING_AGENCY_PROMISE_RE arriba: si el bot acaba de prometer
+    // buscar la agencia "en un momento" sin haberla mandado ya, y sabemos la
+    // ciudad del cliente, se la mandamos de una nosotros mismos (sin pasar
+    // por el modelo) para no dejar la promesa sin cumplir.
+    if (knownCity && looksLikePendingAgencyPromise(finalReply)) {
+      const followUp = buildDirectAgencyMessage(knownCity);
+      if (followUp) {
+        await sleep(randomGap());
+        await sendReply(from, followUp);
+      }
+    }
+
     const patch = { lastAssistantText: finalReply };
     if (!dataAlreadyRequested && looksLikeEmptyDataRequest(reply)) {
       patch.orderDataRequested = true;
