@@ -254,13 +254,35 @@ const CITY_TO_STATE = {
   machiques: 'Zulia',
 };
 
+// Busca cual de las ciudades conocidas del diccionario de arriba aparece
+// dentro del texto que mando el modelo. Antes esto exigia una IGUALDAD
+// exacta (foldAccents(ciudad) === la clave del diccionario), lo que fallaba
+// en un caso real: el cliente escribio "San Carlos Cojedes Venezuela" y el
+// modelo paso ese texto completo (o parte de el) como "ciudad" en vez de
+// solo "San Carlos", asi que la clave exacta "san carlos" nunca matcheaba,
+// el diccionario no encontraba nada, y el bot terminaba confiando en el
+// estado que el modelo habia adivinado (que en ese caso fue "Distrito
+// Capital", mandandole a un cliente de Cojedes las agencias de Caracas). Con
+// una busqueda por substring esto ya no depende de que el modelo mande el
+// nombre de la ciudad pelado: si "san carlos" aparece en cualquier parte del
+// texto, se lo reconoce igual. Si varias ciudades conocidas aparecen a la
+// vez, se prioriza la mas larga (mas especifica).
+function findKnownCityKey(ciudad) {
+  const key = foldAccents(String(ciudad || '')).trim();
+  if (!key) return null;
+  if (CITY_TO_STATE[key]) return key;
+  const candidates = Object.keys(CITY_TO_STATE)
+    .filter((city) => key.includes(city))
+    .sort((a, b) => b.length - a.length);
+  return candidates[0] || null;
+}
+
 // Devuelve el estado real de una ciudad conocida (o null si no esta en el
 // diccionario de arriba, en cuyo caso el llamador sigue usando el estado que
 // haya deducido la IA).
 function resolveStateForCity(ciudad) {
-  const key = foldAccents(String(ciudad || '')).trim();
-  if (!key) return null;
-  return CITY_TO_STATE[key] || null;
+  const key = findKnownCityKey(ciudad);
+  return key ? CITY_TO_STATE[key] : null;
 }
 
 function formatAgency(a) {
@@ -340,4 +362,5 @@ module.exports = {
   getMeta,
   importFromWorkbookBuffer,
   resolveStateForCity,
+  findKnownCityKey,
 };

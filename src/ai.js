@@ -576,13 +576,21 @@ function runTool(call) {
 
   // buscar_agencias_por_zona (default: es la unica otra herramienta disponible)
   const estadoDelModelo = String(args.estado || '').trim();
-  const ciudad = String(args.ciudad || '').trim();
-  // Si la ciudad esta en nuestro diccionario chico de ciudades conocidas
-  // (agencies.resolveStateForCity), ese estado manda por encima del que haya
-  // deducido el modelo: evita repetir el error real que ya paso dos veces
-  // (Maturin a Monagas y Guasdalito a Merida), donde el modelo "confundio" el
-  // estado de una ciudad real en vez de pedir que se la confirmen.
-  const estado = agencies.resolveStateForCity(ciudad) || estadoDelModelo;
+  const ciudadDelModelo = String(args.ciudad || '').trim();
+  // Si dentro de lo que mando el modelo como "ciudad" reconocemos una de
+  // nuestras ciudades conocidas (agencies.findKnownCityKey), usamos esa
+  // ciudad "limpia" (y su estado real) por encima de lo que haya mandado el
+  // modelo. Esto cubre dos fallas reales que ya pasaron: (1) el modelo
+  // "confundio" el estado de una ciudad real (Maturin a Monagas, Guasdalito
+  // a Merida) en vez de pedir que se la confirmen, y (2) el modelo mando la
+  // frase completa del cliente como ciudad (ej. "San Carlos Cojedes
+  // Venezuela" en vez de solo "San Carlos"), lo que hacia que ni la busqueda
+  // por ciudad ni el diccionario de estados reconocieran nada y el bot
+  // terminaba mandando agencias de un estado totalmente distinto (le llego a
+  // mandar las agencias de Caracas a un cliente de San Carlos, Cojedes).
+  const ciudadConocida = agencies.findKnownCityKey(ciudadDelModelo);
+  const estado = (ciudadConocida && agencies.resolveStateForCity(ciudadConocida)) || estadoDelModelo;
+  const ciudad = ciudadConocida || ciudadDelModelo;
   const { scope, results } = searchAgenciesByZone(estado, ciudad);
   return { content: formatAgencyToolResult(estado, ciudad, scope, results), image: null };
 }
