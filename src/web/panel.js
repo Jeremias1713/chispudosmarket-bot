@@ -40,6 +40,7 @@ const STAGE_LABELS = {
   interesado: 'Interesado',
   negociando: 'Negociando',
   vendido: 'Vendido',
+  esperando_guia: 'Esperando guía',
   esperando_retiro: 'Esperando retiro',
   en_camino: 'En camino',
   entregado: 'Entregado',
