@@ -484,10 +484,25 @@ const TOOLS = [
 // sea un problema de tamano de mensaje real).
 function searchAgenciesByZone(estado, ciudad) {
   const cityResults = ciudad ? agencies.searchByText(ciudad, 50) : [];
+  const stateResults = estado ? agencies.searchByText(estado, 50) : [];
   if (cityResults.length) {
+    // Bug real detectado con logs de produccion: los datos actuales de
+    // agencias (subidos por el panel, pueden cambiar en cualquier momento y
+    // NO son los mismos que el CSV de este repo) tienen las agencias de
+    // Caracas cargadas por barrio ("Catia", "El Junquito"), sin la palabra
+    // "caracas" en el nombre ni en la mayoria de las direcciones. Buscar
+    // "caracas" como texto encontraba solo 2 agencias de las que sí la
+    // mencionaban de casualidad, y el cliente se quedaba sin ver el resto.
+    // Si "caracas" es la unica ciudad conocida de su estado (ver
+    // isSoleCityOfItsState), no hay riesgo de mezclar agencias de otro
+    // pueblo: buscar por el estado completo da exactamente el mismo
+    // conjunto que "buscar por Caracas" deberia dar. Se usa la lista mas
+    // grande de las dos.
+    if (stateResults.length > cityResults.length && agencies.isSoleCityOfItsState(ciudad)) {
+      return { scope: 'ciudad', results: stateResults };
+    }
     return { scope: 'ciudad', results: cityResults };
   }
-  const stateResults = estado ? agencies.searchByText(estado, 50) : [];
   if (stateResults.length) {
     return { scope: 'estado', results: stateResults };
   }

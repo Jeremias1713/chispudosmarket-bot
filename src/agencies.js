@@ -285,6 +285,27 @@ function resolveStateForCity(ciudad) {
   return key ? CITY_TO_STATE[key] : null;
 }
 
+// Cierto de verdad: "caracas" es la UNICA ciudad de este diccionario que
+// mapea a "Distrito Capital". Esto importa porque las agencias reales que
+// carga el negocio (via el Excel del panel) a veces estan nombradas por
+// barrio ("Catia", "El Junquito") en vez de decir literalmente "Caracas" en
+// el nombre o la direccion: buscar el texto "caracas" en esos casos deja
+// afuera a la mayoria de las agencias de Distrito Capital, aunque SI esten
+// cargadas. Como "caracas" es la unica ciudad de ese estado en el
+// diccionario, buscar por el estado completo (Distrito Capital) es
+// exactamente lo mismo que buscar por la ciudad: no hay riesgo de mezclar
+// agencias de otro pueblo lejano bajo el nombre de Caracas. Para estados con
+// mas de una ciudad conocida (ej. Zulia: Maracaibo, Cabimas, Ciudad Ojeda...)
+// esto da false, asi que ahi se sigue confiando solo en el match puntual por
+// nombre de ciudad.
+function isSoleCityOfItsState(ciudad) {
+  const key = findKnownCityKey(ciudad);
+  if (!key) return false;
+  const estado = CITY_TO_STATE[key];
+  const siblings = Object.keys(CITY_TO_STATE).filter((c) => CITY_TO_STATE[c] === estado);
+  return siblings.length === 1;
+}
+
 function formatAgency(a) {
   const distance = a.distanceKm !== undefined ? ` (~${a.distanceKm.toFixed(1)} km)` : '';
   const region = a.region ? ` — ${a.region}` : '';
@@ -363,4 +384,5 @@ module.exports = {
   importFromWorkbookBuffer,
   resolveStateForCity,
   findKnownCityKey,
+  isSoleCityOfItsState,
 };
