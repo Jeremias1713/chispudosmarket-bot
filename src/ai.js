@@ -859,6 +859,19 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
     console.log('[agency-completeness] tool-called pero sin agencyResult/resultados (lastAgencyResult=', lastAgencyResult ? 'presente-vacio' : 'null', ')');
   }
 
+  // Bug real encontrado con los logs de arriba: cuando el modelo SI mando
+  // todas las agencias de Maracaibo (no dispara el override de arriba porque
+  // el conteo ya daba completo), el texto del modelo simplemente no incluia
+  // la nota de la tienda propia, porque esa nota solo vivia adentro de
+  // buildAgencyListMessage (que solo se usa cuando hay override). Antes esto
+  // dependia 100% de que el modelo se acordara solo de mencionarla. Ahora se
+  // agrega por codigo, sin pasar por el modelo, cada vez que la lista final
+  // que se le manda al cliente es de Maracaibo y todavia no la menciona.
+  if (lastAgencyResult && lastAgencyResult.ciudad === 'maracaibo' && !/tienda propia|palacio de eventos/i.test(text)) {
+    console.log('[agency-completeness] agregando nota de tienda propia de Maracaibo (no estaba en el texto del modelo)');
+    text = text.trim() + MARACAIBO_TIENDA_PROPIA_NOTE;
+  }
+
   return { text, images };
 }
 
