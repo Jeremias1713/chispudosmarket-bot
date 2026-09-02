@@ -545,18 +545,41 @@ function formatAgencyToolResult(estado, ciudad, scope, results) {
 // busqueda (y el mismo reconocimiento de ciudades conocidas) que usa la
 // herramienta. Devuelve null si no hay ciudad conocida o no encontro nada
 // (en ese caso no se manda nada extra, para no inventar informacion).
+// Los ciudad/estado que llegan aca vienen "foldeados" (minusculas, sin
+// tildes) porque salen de findKnownCityKey. Para que el mensaje al cliente
+// no diga literalmente "en maracaibo" o "en tachira", se capitaliza cada
+// palabra antes de mostrarlo (no hace falta que quede con tildes perfectas,
+// con la mayuscula alcanza para que se lea natural).
+function capitalizeWords(s) {
+  return String(s || '')
+    .split(' ')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
+// Nota fija de la tienda propia de Maracaibo (ver AGENCIAS Y COBERTURA en el
+// prompt): se agrega SIEMPRE que la lista final que se le manda al cliente
+// sea de Maracaibo, sin importar si el texto lo redacto el modelo o si es la
+// lista armada por codigo (red de seguridad de completitud). Antes esto
+// dependia de que el modelo se acordara de agregarlo el solo, y paso de
+// verdad que la omitio en su respuesta.
+const MARACAIBO_TIENDA_PROPIA_NOTE =
+  '\n\nAdemas de esas agencias, tambien tenemos tienda propia en Maracaibo 📍: Palacio de Eventos, local PBG-16, Maracaibo, estado Zulia.';
+
 // Arma el mensaje final (el que se le manda de verdad al cliente) para una
 // busqueda de agencias ya resuelta. Se separa de buildDirectAgencyMessage
 // para poder reusarla tambien como red de seguridad de completitud (ver
 // getAssistantReply mas abajo): ambos casos ya tienen el scope/resultados
 // resueltos, solo hace falta redactar el texto.
 function buildAgencyListMessage(scope, estado, ciudad, results) {
+  const ciudadMostrable = capitalizeWords(ciudad);
+  const extra = ciudad === 'maracaibo' ? MARACAIBO_TIENDA_PROPIA_NOTE : '';
   if (scope === 'ciudad') {
-    return `Aquí tienes las agencias disponibles en ${ciudad}:\n${formatAgencyList(results)}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`;
+    return `Aquí tienes las agencias disponibles en ${ciudadMostrable}:\n${formatAgencyList(results)}${extra}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`;
   }
   return (
-    `A esa ciudad puntual no llega de forma directa, pero en el estado ${estado} sí hay cobertura:\n` +
-    `${formatAgencyList(results)}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`
+    `A esa ciudad puntual no llega de forma directa, pero en el estado ${capitalizeWords(estado)} sí hay cobertura:\n` +
+    `${formatAgencyList(results)}${extra}\n\n¿Cuál de estas te queda mejor para retirar tu pedido?`
   );
 }
 
@@ -714,6 +737,27 @@ function scrubGenial(text) {
   });
 }
 
+// Red de seguridad de codigo: si el modelo NO llamo a buscar_agencias_por_zona
+// en este turno (por eso se usa desde la rama donde no hubo tool_calls) pero
+// igual escribio algo con forma de lista de agencias (numerada, mencionando
+// "agencia"), no hay forma de confiar en que ese dato sea real: puede
+// haberlo inventado. Esto paso de verdad (le invento a un cliente de Ciudad
+// Bolivar una agencia y una direccion que no existen, en vez de llamar a la
+// herramienta y traer las 6 agencias reales del estado Bolivar). Si se puede
+// reconocer la ciudad (de la ficha ya guardada del cliente, o si no de lo
+// que el cliente acaba de escribir en este mismo mensaje), se reemplaza por
+// la busqueda real hecha aca mismo por codigo. Si no hay ciudad reconocible
+// no se toca nada: mejor dejar el texto del modelo que no contestar nada.
+function guardAgainstUnverifiedAgencyList(text, knownCity, userText) {
+  if (!/agencia/i.test(text) || !/(^|\n)\s*\d+[.)]\s/.test(text)) return text;
+  const ciudadCandidata = agencies.findKnownCityKey(knownCity) || agencies.findKnownCityKey(userText);
+  if (!ciudadCandidata) return text;
+  const estado = agencies.resolveStateForCity(ciudadCandidata);
+  const { scope, results } = searchAgenciesByZone(estado, ciudadCandidata);
+  if (!results.length) return text;
+  return buildAgencyListMessage(scope, estado, ciudadCandidata, results);
+}
+
 async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
@@ -756,7 +800,8 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   const toolCalls = responseMessage.tool_calls;
 
   if (!toolCalls || !toolCalls.length) {
-    return { text: scrubGenial(responseMessage.content.trim()), images: [] };
+    const text = guardAgainstUnverifiedAgencyList(scrubGenial(responseMessage.content.trim()), knownCity, userText);
+    return { text, images: [] };
   }
 
   // El modelo decidio usar una o mas herramientas: las ejecutamos de verdad

@@ -18,7 +18,7 @@ const crypto = require('crypto');
 const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
 const { transcribeAudio } = require('./stt');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
-const { nearestByCoords, formatAgency } = require('./agencies');
+const { nearestByCoords, formatAgency, findKnownCityKey } = require('./agencies');
 const {
   getAssistantReply,
   applySplitPolicy,
@@ -58,8 +58,12 @@ const SOLD_STAGES = ['vendido', 'esperando_guia', 'esperando_retiro', 'en_camino
 // respeta), asi que esto detecta la promesa incumplida por el TEXTO que ya
 // mando el bot y, si corresponde, manda la lista real como mensaje aparte
 // en el mismo momento, en vez de dejar al cliente esperando.
+// OJO: esta lista se amplio despues de un caso real ("voy a buscar las
+// agencias de Tealca mas cercanas... Un momento, por favor") que no matcheaba
+// ninguna de las frases originales (esas cubrian "te buscar", "dame un
+// momento", etc, pero no "voy a buscar" ni "un momento" sin "dame" adelante).
 const PENDING_AGENCY_PROMISE_RE =
-  /te buscar|dame un moment|en un momento|ya te (busco|paso|env[ií]o)|enseguida te|en breve|ahorita te/i;
+  /te buscar|voy a buscar|dame un moment|un momento,?\s*por favor|en un momento|ya te (busco|paso|env[ií]o)|enseguida te|en breve|ahorita te/i;
 
 function looksLikePendingAgencyPromise(text) {
   const t = String(text || '');
@@ -68,7 +72,7 @@ function looksLikePendingAgencyPromise(text) {
   // herramienta si se llamo y la lista real ya se mando: no es una promesa
   // sin cumplir, es solo texto de acompañamiento. Solo cuenta como promesa
   // incumplida cuando NO hay ninguna lista numerada en el mensaje.
-  return !/(^|\n)\s*1\.\s/.test(t);
+  return !/(^|\n)\s*\d+[.)]\s/.test(t);
 }
 
 function sleep(ms) {
@@ -556,11 +560,18 @@ async function processReply(from) {
     await sendReply(from, finalReply);
 
     // Ver PENDING_AGENCY_PROMISE_RE arriba: si el bot acaba de prometer
-    // buscar la agencia "en un momento" sin haberla mandado ya, y sabemos la
-    // ciudad del cliente, se la mandamos de una nosotros mismos (sin pasar
-    // por el modelo) para no dejar la promesa sin cumplir.
-    if (knownCity && looksLikePendingAgencyPromise(finalReply)) {
-      const followUp = buildDirectAgencyMessage(knownCity);
+    // buscar la agencia "en un momento" sin haberla mandado ya, se la
+    // mandamos nosotros mismos (sin pasar por el modelo) para no dejar la
+    // promesa sin cumplir. Preferimos knownCity (la ficha ya guardada del
+    // cliente, actualizada por el clasificador), pero esa ficha se actualiza
+    // DESPUES de mandar la respuesta, asi que en el PRIMER mensaje donde el
+    // cliente recien dice su ciudad, knownCity todavia esta vacio: para no
+    // dejar la promesa sin cumplir justo en ese primer mensaje (paso de
+    // verdad), si no hay knownCity probamos reconocer la ciudad directo del
+    // ultimo mensaje del cliente.
+    const ciudadParaFollowUp = knownCity || findKnownCityKey(userText);
+    if (ciudadParaFollowUp && looksLikePendingAgencyPromise(finalReply)) {
+      const followUp = buildDirectAgencyMessage(ciudadParaFollowUp);
       if (followUp) {
         await sleep(randomGap());
         await sendReply(from, followUp);
@@ -643,4 +654,18 @@ async function processReply(from) {
   }
 }
 
-module.exports = { handleIncomingMessage, sendSplit, sendRawReply, sendGreeting, mediaUrl, SOLD_STAGES };
+module.exports = {
+  handleIncomingMessage,
+  sendSplit,
+  sendRawReply,
+  sendGreeting,
+  mediaUrl,
+  SOLD_STAGES,
+  // Exportados para que el simulador (simulator.js) pueda replicar la MISMA
+  // red de seguridad de la promesa de agencia incumplida que corre en las
+  // conversaciones reales (ver processReply mas arriba): sin esto, el
+  // simulador no reproducia ese comportamiento y daba una falsa sensacion de
+  // que el bot se quedaba "colgado" sin responder, cuando en produccion si
+  // se manda el mensaje de seguimiento.
+  looksLikePendingAgencyPromise,
+};

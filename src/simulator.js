@@ -1,11 +1,24 @@
 // Simulador: mismo prompt, mismo catalogo y misma logica que el bot real,
 // pero nada sale por WhatsApp. Estado en memoria (no se persiste a disco):
 // se resetea solo si el proceso se reinicia, o con el boton "Reiniciar".
-const { nearestByCoords, formatAgency } = require('./agencies');
-const { getAssistantReply, applySplitPolicy } = require('./ai');
+const { nearestByCoords, formatAgency, findKnownCityKey } = require('./agencies');
+const { getAssistantReply, applySplitPolicy, buildDirectAgencyMessage } = require('./ai');
 const { classifyConversation } = require('./classifier');
-const { matchTrigger } = require('./catalog');
+const { matchTrigger, findProduct } = require('./catalog');
 const { getSettings } = require('./settings');
+// looksLikePendingAgencyPromise: misma red de seguridad que corre en las
+// conversaciones reales (ver flow.js processReply). Se reusa aca para que el
+// simulador se comporte IGUAL que un chat real: si el bot promete buscar la
+// agencia y no lo hace, el simulador tiene que mostrar el mismo mensaje de
+// seguimiento que mandaria de verdad, no quedarse "colgado".
+const { looksLikePendingAgencyPromise } = require('./flow');
+
+function randomGap() {
+  return 400 + Math.floor(Math.random() * 500);
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // Misma politica que usa el bot real (Configuracion) para que el simulador
 // previsualice exactamente como se va a partir la respuesta.
@@ -53,7 +66,9 @@ async function sendMessage(rawText) {
   }
 
   const history = state.history.map((m) => ({ role: m.role, content: m.content }));
-  const { text: reply, images } = await getAssistantReply(history.slice(0, -1), rawText);
+  const knownCity = state.card?.ciudad || null;
+  const knownProduct = state.linkedProductId ? findProduct(state.linkedProductId)?.name || null : null;
+  const { text: reply, images } = await getAssistantReply(history.slice(0, -1), rawText, knownCity, knownProduct);
 
   for (const img of images) {
     push('assistant', `[imagen] ${img.name}`);
@@ -68,13 +83,32 @@ async function sendMessage(rawText) {
     push('assistant', part);
   }
 
+  // Misma red de seguridad que corre en produccion (ver flow.js
+  // processReply): si el bot prometio buscar la agencia y no lo hizo, se
+  // manda el mensaje de seguimiento aca tambien, para que el simulador no de
+  // una falsa sensacion de que el bot se quedo "colgado" cuando en un chat
+  // real si se resuelve solo. knownCity puede seguir vacio en el primer
+  // mensaje (la ficha recien se llena con la clasificacion de mas abajo), asi
+  // que ahi se prueba reconocer la ciudad directo de lo que el cliente acaba
+  // de escribir.
+  const extraParts = [];
+  const ciudadParaFollowUp = knownCity || findKnownCityKey(rawText);
+  if (ciudadParaFollowUp && looksLikePendingAgencyPromise(reply)) {
+    const followUp = buildDirectAgencyMessage(ciudadParaFollowUp);
+    if (followUp) {
+      await sleep(randomGap());
+      push('assistant', followUp);
+      extraParts.push(...splitForPreview(followUp));
+    }
+  }
+
   const classification = await classifyConversation(state.history.map((m) => ({ role: m.role, content: m.content })));
   if (classification) {
     state.stage = classification.stage;
     state.card = classification.card;
   }
 
-  return { parts: [...images.map((img) => `[imagen] ${img.name}`), ...parts], state };
+  return { parts: [...images.map((img) => `[imagen] ${img.name}`), ...parts, ...extraParts], state };
 }
 
 async function sendLocation(latitude, longitude) {
