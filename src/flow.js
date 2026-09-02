@@ -47,7 +47,7 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL ||
 // mas alla de "vendido" cuando se detecta el cierre; panel.js usa la misma
 // lista para que las metricas (conversion, ingresos) cuenten cualquiera de
 // estas etapas como una venta real, no solo "vendido" al pie de la letra.
-const SOLD_STAGES = ['vendido', 'esperando_retiro', 'en_camino', 'entregado'];
+const SOLD_STAGES = ['vendido', 'esperando_guia', 'esperando_retiro', 'en_camino', 'entregado'];
 
 // Red de seguridad de codigo: esto paso de verdad una vez (ver
 // buildDirectAgencyMessage en ai.js) — el modelo le prometio a un cliente

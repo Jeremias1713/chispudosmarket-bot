@@ -11,6 +11,14 @@ const STAGES = [
   'interesado',
   'negociando',
   'vendido',
+  // "esperando_guia" es una categoria de uso MANUAL (se fija a mano desde el
+  // panel, el clasificador de IA nunca la elige sola): sirve para separar,
+  // dentro de los pedidos ya vendidos, los que todavia no tienen numero de
+  // guia de los que ya lo tienen y estan "esperando_retiro"/"en_camino". No
+  // esta en el prompt de la IA (ver CLASSIFIER_PROMPT mas abajo) a proposito,
+  // para no repetir el mismo tipo de confusion que ya paso con otras etapas
+  // parecidas (ver esperando_retiro vs en_camino).
+  'esperando_guia',
   'esperando_retiro',
   'en_camino',
   'entregado',
