@@ -489,10 +489,20 @@
                   nada hasta que confirmes.
                 </div>
                 <input type="file" id="dp_file" accept=".xlsx,.xls">
-                <div class="settings-actions">
-                  <button class="btn" id="dp_analyze">Analizar archivo</button>
-                  <span class="save-msg" id="dp_msg"></span>
+              </div>
+              <div class="field">
+                <label for="dp_photos">Fotos de las guías (opcional)</label>
+                <div class="help">
+                  Si tenés una foto por cliente, nombrá cada archivo con el nombre del
+                  cliente (por ejemplo "Ibrahin Ramirez.jpg") y subilas todas juntas acá —
+                  se cruzan solas con la fila que le corresponde. Nada más, se manda igual
+                  que si la hubieras cargado a mano en el chat.
                 </div>
+                <input type="file" id="dp_photos" accept="image/*" multiple>
+              </div>
+              <div class="settings-actions">
+                <button class="btn" id="dp_analyze">Analizar archivo</button>
+                <span class="save-msg" id="dp_msg"></span>
               </div>
               <div id="dp_results"></div>
               <div class="settings-actions" id="dp_confirmWrap" hidden>

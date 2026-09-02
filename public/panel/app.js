@@ -1427,10 +1427,56 @@ $('bc_send').addEventListener('click', async () => {
 /* ---------- guias por lote (export de Dropanas) ---------- */
 // Se sube el Excel, el servidor cruza por nombre contra las conversaciones
 // vendidas (ver src/dropanas.js) y devuelve una fila por pedido con su
-// numero de guia y a que telefono cree que corresponde. Nada se manda hasta
-// que el negocio marca los checks y aprieta "Confirmar": recien ahi se
-// dispara el aviso automatico, uno por uno (ver /api/dropanas/confirm).
+// numero de guia y a que telefono cree que corresponde. Si ademas se suben
+// fotos (una por cliente, nombradas con el nombre del cliente), se cruzan
+// aca mismo en el navegador contra la columna "Cliente" de cada fila — no
+// hace falta mandarlas al servidor solo para intentar el cruce. Nada se
+// manda hasta que el negocio marca los checks y aprieta "Confirmar": recien
+// ahi, fila por fila, se llama al mismo endpoint que cargar la guia a mano
+// desde el chat (POST /api/conversations/:phone/guia, ver saveGuia arriba),
+// asi la foto se manda exactamente con la misma logica ya probada (imagen +
+// texto/plantilla segun este abierta o no la ventana de 24h).
 let dpRows = []
+const BULK_GUIA_CLIENT_DELAY_MS = 1200
+
+function dpFoldText(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Saca la extension, los "(1)"/"(2)" que agrega el sistema operativo cuando
+// hay archivos repetidos, y cambia guiones/guiones bajos por espacios, para
+// que "Ibrahin_Ramirez (1).jpg" matchee igual que "Ibrahin Ramirez".
+function dpFoldFileName(name) {
+  const noExt = String(name || '').replace(/\.[a-z0-9]{2,5}$/i, '')
+  const cleaned = noExt.replace(/\(\d+\)\s*$/, '').replace(/[_-]+/g, ' ')
+  return dpFoldText(cleaned)
+}
+
+// Cruza cada foto subida contra la fila cuyo nombre de cliente calce mejor
+// (exacto primero, contencion parcial despues), sin repetir una fila con
+// dos fotos. Modifica dpRows en el lugar (agrega photoFile/photoName).
+function matchPhotosToRows(rows, files) {
+  rows.forEach((row) => { row.photoFile = null; row.photoName = null; })
+  const used = new Set()
+  Array.from(files || []).forEach((file) => {
+    const key = dpFoldFileName(file.name)
+    if (!key) return
+    let idx = rows.findIndex((r, i) => !used.has(i) && dpFoldText(r.cliente) === key)
+    if (idx === -1) {
+      idx = rows.findIndex((r, i) => !used.has(i) && dpFoldText(r.cliente) && (dpFoldText(r.cliente).includes(key) || key.includes(dpFoldText(r.cliente))))
+    }
+    if (idx !== -1) {
+      rows[idx].photoFile = file
+      rows[idx].photoName = file.name
+      used.add(idx)
+    }
+  })
+}
 
 function dpRowHtml(row, idx) {
   const badge = row.matchType === 'exacto'
@@ -1453,6 +1499,7 @@ function dpRowHtml(row, idx) {
 
   const disabled = row.matchType === 'sin_match' ? 'disabled' : ''
   const checked = row.matchType === 'exacto' ? 'checked' : ''
+  const foto = row.photoName ? `<div class="dp-phone">📎 ${esc(row.photoName)}</div>` : ''
 
   return `<div class="dp-row" data-idx="${idx}">
     <input type="checkbox" class="dp-check" data-idx="${idx}" ${checked} ${disabled}>
@@ -1460,6 +1507,7 @@ function dpRowHtml(row, idx) {
       <div><strong>${esc(row.guia)}</strong> · ${esc(row.cliente)}${row.ciudad ? ' — ' + esc(row.ciudad) : ''}</div>
       <div class="help">${esc(row.producto || '')}</div>
       ${picker}
+      ${foto}
     </div>
     ${badge}
   </div>`
@@ -1494,10 +1542,12 @@ $('dp_analyze').addEventListener('click', async () => {
     }
     const data = await res.json()
     dpRows = data.rows || []
+    matchPhotosToRows(dpRows, $('dp_photos').files)
     renderDpResults()
     const exactas = dpRows.filter((r) => r.matchType === 'exacto').length
+    const conFoto = dpRows.filter((r) => r.photoFile).length
     $('dp_msg').textContent = dpRows.length
-      ? `${dpRows.length} pedidos con guía · ${exactas} coinciden solas, revisá el resto`
+      ? `${dpRows.length} pedidos con guía · ${exactas} coinciden solas${conFoto ? ` · ${conFoto} con foto cruzada` : ''}, revisá el resto`
       : 'No encontré pedidos con guía en ese archivo'
   } catch (err) {
     $('dp_msg').textContent = err.message
@@ -1519,31 +1569,45 @@ $('dp_results').addEventListener('change', (e) => {
   }
 })
 
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
+
 $('dp_confirm').addEventListener('click', async () => {
-  const items = []
+  const idxs = []
   $('dp_results').querySelectorAll('.dp-check:checked').forEach((box) => {
     const idx = Number(box.dataset.idx)
     const row = dpRows[idx]
-    if (row && row.phone && row.guia) items.push({ phone: row.phone, guia: row.guia })
+    if (row && row.phone && row.guia) idxs.push(idx)
   })
-  if (!items.length) { $('dp_confirmMsg').textContent = 'No hay ninguna marcada (o le falta elegir a quién corresponde)'; return }
+  if (!idxs.length) { $('dp_confirmMsg').textContent = 'No hay ninguna marcada (o le falta elegir a quién corresponde)'; return }
 
   $('dp_confirm').disabled = true
-  $('dp_confirmMsg').textContent = `Mandando ${items.length}…`
-  try {
-    const { results } = await api('/dropanas/confirm', { method: 'POST', body: JSON.stringify({ items }) })
-    const ok = results.filter((r) => r.ok && r.notice?.sent).length
-    const fallo = results.length - ok
-    $('dp_confirmMsg').textContent = `Listo: ${ok} avisadas${fallo ? `, ${fallo} con problema (revisalas a mano)` : ''}`
-    dpRows = []
-    $('dp_file').value = ''
-    renderDpResults()
-    if (state.activeView === 'view-convos') pollConversations()
-  } catch (err) {
-    $('dp_confirmMsg').textContent = err.message
-  } finally {
-    $('dp_confirm').disabled = false
+  let ok = 0
+  let fallo = 0
+  for (let i = 0; i < idxs.length; i++) {
+    const row = dpRows[idxs[i]]
+    $('dp_confirmMsg').textContent = `Mandando ${i + 1}/${idxs.length}…`
+    const form = new FormData()
+    form.append('guia', row.guia)
+    if (row.photoFile) form.append('imagen', row.photoFile)
+    try {
+      const res = await fetch('/panel/api/conversations/' + encodeURIComponent(row.phone) + '/guia', { method: 'POST', body: form })
+      if (res.status === 401) { window.location.href = '/panel/login'; return }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+      const body = await res.json()
+      if (body.notice?.sent) ok++
+      else fallo++
+    } catch {
+      fallo++
+    }
+    if (i < idxs.length - 1) await sleep(BULK_GUIA_CLIENT_DELAY_MS)
   }
+  $('dp_confirmMsg').textContent = `Listo: ${ok} avisadas${fallo ? `, ${fallo} con problema (revisalas a mano)` : ''}`
+  dpRows = []
+  $('dp_file').value = ''
+  $('dp_photos').value = ''
+  renderDpResults()
+  $('dp_confirm').disabled = false
+  if (state.activeView === 'view-convos') pollConversations()
 })
 
 /* ---------- simulador ---------- */
