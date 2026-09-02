@@ -751,10 +751,17 @@ function scrubGenial(text) {
 function guardAgainstUnverifiedAgencyList(text, knownCity, userText) {
   if (!/agencia/i.test(text) || !/(^|\n)\s*\d+[.)]\s/.test(text)) return text;
   const ciudadCandidata = agencies.findKnownCityKey(knownCity) || agencies.findKnownCityKey(userText);
-  if (!ciudadCandidata) return text;
+  if (!ciudadCandidata) {
+    console.log('[agency-guard] sin-tool: no reconoci ciudad, dejo el texto del modelo tal cual. knownCity=', knownCity, 'userText=', userText);
+    return text;
+  }
   const estado = agencies.resolveStateForCity(ciudadCandidata);
   const { scope, results } = searchAgenciesByZone(estado, ciudadCandidata);
-  if (!results.length) return text;
+  if (!results.length) {
+    console.log('[agency-guard] sin-tool: ciudad reconocida pero sin resultados, dejo el texto del modelo. ciudad=', ciudadCandidata);
+    return text;
+  }
+  console.log('[agency-guard] sin-tool: OVERRIDE aplicado. ciudad=', ciudadCandidata, 'scope=', scope, 'resultados=', results.length);
   return buildAgencyListMessage(scope, estado, ciudadCandidata, results);
 }
 
@@ -800,9 +807,11 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   const toolCalls = responseMessage.tool_calls;
 
   if (!toolCalls || !toolCalls.length) {
+    console.log('[agency-guard] el modelo NO llamo ninguna herramienta este turno. userText=', userText, 'knownCity=', knownCity);
     const text = guardAgainstUnverifiedAgencyList(scrubGenial(responseMessage.content.trim()), knownCity, userText);
     return { text, images: [] };
   }
+  console.log('[agency-guard] el modelo SI llamo herramienta(s):', toolCalls.map((c) => c.function.name).join(', '));
 
   // El modelo decidio usar una o mas herramientas: las ejecutamos de verdad
   // (busqueda contra el CSV, o resolver el nombre de una imagen) y le
@@ -841,9 +850,13 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   // buildDirectAgencyMessage. Nunca se recorta informacion real al cliente.
   if (lastAgencyResult && lastAgencyResult.results.length) {
     const numerados = (text.match(/(^|\n)\s*\d+[.)]\s/g) || []).length;
+    console.log('[agency-completeness] tool-called: ciudad=', lastAgencyResult.ciudad, 'scope=', lastAgencyResult.scope, 'resultadosReales=', lastAgencyResult.results.length, 'numeradosEnTexto=', numerados);
     if (numerados < lastAgencyResult.results.length) {
+      console.log('[agency-completeness] OVERRIDE aplicado (numerados < resultadosReales)');
       text = buildAgencyListMessage(lastAgencyResult.scope, lastAgencyResult.estado, lastAgencyResult.ciudad, lastAgencyResult.results);
     }
+  } else {
+    console.log('[agency-completeness] tool-called pero sin agencyResult/resultados (lastAgencyResult=', lastAgencyResult ? 'presente-vacio' : 'null', ')');
   }
 
   return { text, images };
