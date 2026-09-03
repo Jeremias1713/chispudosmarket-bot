@@ -30,7 +30,7 @@ function blankState() {
   return {
     history: [], // {role, content, at}
     stage: 'nuevo',
-    card: { nombre: null, ciudad: null, telefono: null, producto: null, notas: null },
+    card: { nombre: null, ciudad: null, telefono: null, cedula: null, producto: null, notas: null },
     linkedProductId: null,
   };
 }
@@ -105,7 +105,16 @@ async function sendMessage(rawText) {
   const classification = await classifyConversation(state.history.map((m) => ({ role: m.role, content: m.content })));
   if (classification) {
     state.stage = classification.stage;
-    state.card = classification.card;
+    // Mismo motivo que en flow.js: fusionar, no reemplazar, para no borrar
+    // un dato ya confirmado si este turno el clasificador no lo vuelve a
+    // detectar (por ejemplo por un mensaje fuera de tema en el medio).
+    const mergedCard = { ...(state.card || {}) };
+    for (const [key, value] of Object.entries(classification.card || {})) {
+      if (value !== null && value !== undefined && String(value).trim() !== '') {
+        mergedCard[key] = value;
+      }
+    }
+    state.card = mergedCard;
   }
 
   return { parts: [...images.map((img) => `[imagen] ${img.name}`), ...parts, ...extraParts], state };

@@ -39,7 +39,7 @@ function blankSession() {
     // (para que el panel lo vea) pero no se le contesta solo.
     paused: false,
     pausedReason: null,
-    card: { nombre: null, ciudad: null, telefono: null, producto: null, notas: null },
+    card: { nombre: null, ciudad: null, telefono: null, cedula: null, producto: null, notas: null },
     createdAt: now,
     updatedAt: now,
   };

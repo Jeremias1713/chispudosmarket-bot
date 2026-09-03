@@ -619,7 +619,28 @@ async function processReply(from) {
     if (!current.stageLocked) {
       const classification = await classifyConversation(current.history.map((m) => ({ role: m.role, content: m.content })));
       if (classification) {
-        const classPatch = { stage: classification.stage, stageReason: classification.razon || null, card: classification.card };
+        // OJO: nunca reemplazar la ficha entera por lo que devuelve el
+        // clasificador. Este clasificador relee TODA la conversacion cada
+        // vez y a veces, en un turno puntual (por ejemplo si el cliente mete
+        // un mensaje fuera de tema), no vuelve a detectar un dato que ya
+        // habia dado antes (ciudad, nombre, etc) — si se pisara la ficha
+        // entera, ese dato ya confirmado se borraria solo, y el bot volveria
+        // a preguntarlo como si nunca lo hubiera sabido (esto paso de
+        // verdad: un cliente ya habia dado su ciudad y el bot se la volvio a
+        // pedir varias veces mas adelante en la misma conversacion). Ademas,
+        // la ficha tambien guarda campos que este clasificador ni conoce
+        // (guia, agencia, monto, foto de la guia...) cargados desde otro
+        // lado (panel, seguimiento diario): reemplazarla entera tambien
+        // borraria esos. Por eso se fusiona: solo se pisa un campo si esta
+        // vuelta el clasificador SI trajo un valor para el; si vino vacio,
+        // se conserva lo que ya habia.
+        const mergedCard = { ...(current.card || {}) };
+        for (const [key, value] of Object.entries(classification.card || {})) {
+          if (value !== null && value !== undefined && String(value).trim() !== '') {
+            mergedCard[key] = value;
+          }
+        }
+        const classPatch = { stage: classification.stage, stageReason: classification.razon || null, card: mergedCard };
         // Mismo motivo que en el cierre deterministico de mas arriba: el
         // clasificador por IA es OTRO camino por el que una conversacion
         // puede pasar a una etapa de SOLD_STAGES (vendido, esperando_retiro,

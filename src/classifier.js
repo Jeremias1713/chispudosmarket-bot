@@ -83,13 +83,14 @@ con retiro en agencia o entrega a domicilio.
   - ciudad: ciudad o zona que menciono, si no null.
 - telefono: telefono de contacto SOLO si lo escribio explicitamente (el numero desde el que
   escribe no cuenta), si no null.
+- cedula: numero de cedula si lo escribio explicitamente, si no null.
 - producto: que producto pidio, aunque no haya cerrado el pedido, si no null.
   - notas: cualquier dato relevante para la venta que no entre en los otros campos, si no null.
 
   Copia lo que dijo el cliente, no lo inventes ni lo completes. Un dato que no aparece va en null.
 
   Devolve SOLO un JSON con esta forma exacta, nada de texto extra:
-{"etapa": "...", "razon": "...", "card": {"nombre": null, "ciudad": null, "telefono": null, "producto": null, "notas": null}}`;
+{"etapa": "...", "razon": "...", "card": {"nombre": null, "ciudad": null, "telefono": null, "cedula": null, "producto": null, "notas": null}}`;
 
 async function classifyConversation(history) {
   const transcript = (history || [])
@@ -118,6 +119,7 @@ async function classifyConversation(history) {
         nombre: card.nombre || null,
         ciudad: card.ciudad || null,
         telefono: card.telefono || null,
+        cedula: card.cedula || null,
         producto: card.producto || null,
         notas: card.notas || null,
 },
