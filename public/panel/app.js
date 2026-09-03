@@ -895,7 +895,14 @@ function productRow(p) {
 /* ---------- métricas por rango de fechas ---------- */
 
 function ymd(date) {
-  return date.toISOString().slice(0, 10)
+  // OJO: NUNCA usar date.toISOString() aca. Eso convierte a UTC, y de noche
+  // (hora de Venezuela) ya es "mañana" en UTC — el chip "Hoy" terminaba
+  // mandando la fecha del dia siguiente. Usamos los componentes locales del
+  // navegador (que para este negocio es la hora de Venezuela) en su lugar.
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 // Chips fijos (Hoy/Ayer/7d/30d) traducidos a from/to en formato YYYY-MM-DD,
