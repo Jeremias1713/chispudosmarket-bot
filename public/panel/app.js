@@ -495,6 +495,9 @@ function renderGuia(convo) {
   if (document.activeElement !== $('guiaInput')) {
     $('guiaInput').value = convo.card?.guia || ''
   }
+  if (document.activeElement !== $('guiaAgenciaInput')) {
+    $('guiaAgenciaInput').value = convo.card?.agencia || ''
+  }
   $('guiaImageName').textContent = convo.card?.guiaImageUrl ? '✅ tiene foto' : ''
   $('guiaImageFile').value = ''
   $('guiaStatus').textContent = convo.shippingNotifiedAt
@@ -510,12 +513,15 @@ $('guiaImageFile').addEventListener('change', () => {
 
 async function saveGuia(phone) {
   const guia = $('guiaInput').value.trim()
+  const agencia = $('guiaAgenciaInput').value.trim()
   const file = $('guiaImageFile').files[0]
   $('guiaInput').blur()
+  $('guiaAgenciaInput').blur()
   $('guiaSaveBtn').disabled = true
 
   const form = new FormData()
   form.append('guia', guia)
+  form.append('agencia', agencia)
   if (file) form.append('imagen', file)
 
   let result
@@ -541,7 +547,7 @@ async function saveGuia(phone) {
   if (notice?.sent) {
     let msg = notice.viaTemplate ? 'Avisado con plantilla ✅' : 'Avisado ✅'
     if (notice.imageSent) msg += ' (con foto)'
-    if (notice.imageSkipped) msg += ' — la foto NO se pudo mandar sola (ventana cerrada), mandala vos a mano'
+    if (notice.imageSkipped) msg += ' — ⚠️ falta cargar la foto de la guía: la plantilla la exige y Meta puede rechazar el envío sin ella'
     $('guiaStatus').textContent = msg
   } else if (notice?.reason === 'sin_plantilla') {
     $('guiaStatus').textContent = 'No se pudo avisar: falta elegir la plantilla en Configuración → Plantillas'
