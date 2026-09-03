@@ -637,6 +637,14 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
   const s = getSession(phone);
   const card = { ...(s.card || {}) };
   if (req.body?.guia !== undefined) card.guia = guia || null;
+  // Agencia de destino: se carga a mano aca porque este flujo (guia por
+  // chat, una por una) no tiene un Excel del que sacarla sola, a diferencia
+  // del seguimiento diario de Dropanas. Se usa como variable de la plantilla
+  // "guia_del_pedido" cuando la ventana de 24h ya esta cerrada.
+  if (req.body?.agencia !== undefined) {
+    const agencia = String(req.body.agencia ?? '').trim();
+    card.agencia = agencia || null;
+  }
 
   if (req.file) {
     let item;
