@@ -34,6 +34,7 @@ const push = require('../push');
 const { WHATSAPP_WINDOW_MS, lastInboundAt, isWindowOpen } = require('../whatsappWindow');
 const shipping = require('../shipping');
 const dropanas = require('../dropanas');
+const personalizedBroadcast = require('../personalizedBroadcast');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -965,6 +966,39 @@ router.post('/api/broadcasts', async (req, res) => {
 
   const run = await broadcasts.startRun({ templateName, languageCode, params, target });
   res.json(run);
+});
+
+/* ---------- envio masivo PERSONALIZADO (variables distintas por cliente) ---------- */
+
+// A diferencia de /api/broadcasts (que manda las mismas variables a todo el
+// mundo), esto lee un Excel con una fila por cliente (telefono, nombre,
+// apellido, monto...) y cada uno recibe la plantilla con SUS propios datos.
+// No manda nada todavia: solo analiza el Excel y devuelve la lista para que
+// el negocio la revise en el panel antes de confirmar.
+router.post('/api/broadcasts/personalized/preview', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
+  try {
+    const { rows, camposDetectados } = personalizedBroadcast.parsePersonalizedList(req.file.buffer);
+    res.json({ ok: true, rows, camposDetectados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Confirma en bloque: manda la plantilla a cada fila valida del Excel ya
+// revisado, con sus propias variables en el orden indicado (order), una por
+// una con una pausa chica entre cada envio (ver personalizedBroadcast.js).
+router.post('/api/broadcasts/personalized/send', async (req, res) => {
+  const templateName = String(req.body?.templateName || '').trim();
+  if (!templateName) return res.status(400).json({ error: 'Falta el nombre de la plantilla' });
+  const order = Array.isArray(req.body?.order) ? req.body.order : [];
+  if (!order.length) return res.status(400).json({ error: 'Falta indicar el orden de las variables de la plantilla' });
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'No hay filas para mandar' });
+  const languageCode = String(req.body?.languageCode || 'es').trim() || 'es';
+
+  const results = await personalizedBroadcast.sendPersonalized({ templateName, languageCode, order, rows });
+  res.json({ ok: true, results });
 });
 
 /* ---------- simulador ---------- */
