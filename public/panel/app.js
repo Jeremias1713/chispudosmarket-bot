@@ -235,6 +235,7 @@ const MEMORY_FIELDS = [
   ['nombre', 'Nombre'],
   ['ciudad', 'Ciudad'],
   ['telefono', 'Teléfono'],
+  ['cedula', 'Cédula'],
   ['producto', 'Producto'],
   ['notas', 'Notas'],
 ]
