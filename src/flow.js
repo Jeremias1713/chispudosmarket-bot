@@ -17,6 +17,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
 const { transcribeAudio } = require('./stt');
+const { describeImage } = require('./vision');
 const { getSession, updateSession, resetSession, appendMessage } = require('./state');
 const { nearestByCoords, formatAgency, findKnownCityKey } = require('./agencies');
 const {
@@ -375,16 +376,36 @@ async function handleIncomingMessage(from, message, profileName) {
   // (caption), ese texto pasa a ser el mensaje normal (rawText), como si lo
   // hubiera escrito aparte: el bot le puede contestar igual.
   let mediaUrlIn = null;
+  let imageDescription = '';
   if ((type === 'image' && message.image?.id) || (type === 'video' && message.video?.id)) {
+    let buffer = null;
+    let mimeType = null;
     try {
       const mediaId = type === 'image' ? message.image.id : message.video.id;
-      const { buffer, mimeType } = await downloadMedia(mediaId);
+      ({ buffer, mimeType } = await downloadMedia(mediaId));
       mediaUrlIn = saveIncomingMedia(buffer, mimeType, type);
     } catch (err) {
       console.warn(`No se pudo descargar el ${type} entrante:`, err.message);
     }
+    // Se "lee" el contenido de la foto con vision (ver vision.js) para que
+    // el bot sepa que muestra aunque el cliente no haya escrito nada (ej.
+    // manda solo una captura de un pago, o una foto de su cedula, o del
+    // producto). Solo fotos, no videos (el modelo no procesa video). Si
+    // falla (sin credito, imagen rara, etc.) sigue igual, sin descripcion.
+    if (type === 'image' && buffer) {
+      try {
+        imageDescription = await describeImage(buffer, mimeType);
+      } catch (err) {
+        console.warn('No se pudo leer el contenido de la imagen:', err.message);
+      }
+    }
     const caption = (type === 'image' ? message.image?.caption : message.video?.caption) || '';
     if (caption.trim()) rawText = caption.trim();
+    if (type === 'image' && imageDescription) {
+      rawText = rawText
+        ? `${rawText}\n[Lo que se ve en la imagen que mando: ${imageDescription}]`
+        : `[Mando una imagen sin texto. Lo que se ve: ${imageDescription}]`;
+    }
   }
 
   const lower = rawText.toLowerCase();
@@ -502,7 +523,7 @@ async function processReply(from) {
   }
 
   if (!rawText) {
-    const reply = 'Por ahora solo puedo leer mensajes de texto o ubicacion. Me lo escribis, porfa?';
+    const reply = 'No pude leer bien eso que mandaste. Me lo podes escribir o mandar de nuevo, porfa?';
     await sendReply(from, reply);
     return;
   }
