@@ -445,14 +445,20 @@ async function handleIncomingMessage(from, message, profileName) {
     appendMessage(from, 'user', `[${type || 'mensaje'}]`);
   }
 
-  // Llego novedad de verdad del cliente: si habia quedado marcado que ya se
-  // le mando un recordatorio de remarketing (ver remarketing.js), se resetea
-  // aca, para que si la conversacion se vuelve a colgar mas adelante le
-  // pueda volver a tocar remarketing (los tiempos de 2h/5h se cuentan
-  // siempre desde la ULTIMA interaccion, no desde la primera vez).
-  if (session.remarketingSentAt2h || session.remarketingSentAt5h) {
-    updateSession(from, { remarketingSentAt2h: null, remarketingSentAt5h: null });
-  }
+  // OJO: antes, cuando llegaba cualquier mensaje nuevo del cliente, se
+  // borraban remarketingSentAt2h/5h para que el ciclo de 2h/5h pudiera
+  // volver a dispararse si la conversacion se colgaba de nuevo mas
+  // adelante. En la practica eso hacia que una conversacion larga, con el
+  // cliente contestando de a ratos (un "ok", un sticker, una pregunta
+  // suelta) a lo largo de varios dias, terminara recibiendo el recordatorio
+  // de remarketing UNA Y OTRA VEZ, ciclo tras ciclo (se detecto con datos
+  // reales: hasta 5 mensajes de remarketing en una misma conversacion),
+  // algo que WhatsApp puede tomar como spam y terminar bloqueando el
+  // numero del negocio. Ahora cada paso (2h y 5h) se manda COMO MUCHO UNA
+  // VEZ en toda la vida de la conversacion: el flag ya no se resetea aca.
+  // Si el cliente arranca una conversacion realmente nueva mas adelante
+  // (escribe "menu"/"inicio"/"reiniciar", ver resetSession en state.js),
+  // ahi si vuelve a tener su propio ciclo de remarketing de cero.
 
   // Switch maestro (Configuracion, apaga TODO el bot) o pausa de esta
   // conversacion puntual (panel, boton "Bot activo" del chat): en cualquiera

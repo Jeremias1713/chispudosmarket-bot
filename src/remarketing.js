@@ -10,9 +10,14 @@
 //
 // No hace falta node-cron ni nada externo: alcanza con un setInterval que
 // revisa todas las conversaciones cada pocos minutos (REVISAR_CADA_MS). Cada
-// conversacion se manda como mucho una vez por paso (2h, despues 5h): el
-// flag queda guardado en la sesion (remarketingSentAt2h/5h) y se resetea
-// solo cuando el cliente vuelve a escribir de verdad (ver flow.js).
+// conversacion se manda como mucho UNA VEZ EN TOTAL por paso (2h, despues
+// 5h): el flag queda guardado en la sesion (remarketingSentAt2h/5h) y ya NO
+// se resetea aunque el cliente vuelva a escribir (antes si se reseteaba en
+// flow.js, y eso hacia que una conversacion larga con idas y vueltas
+// terminara recibiendo el mismo recordatorio ciclo tras ciclo, un patron
+// que WhatsApp puede tomar como spam). El unico modo de que a una
+// conversacion le vuelva a tocar remarketing es que arranque de cero de
+// verdad (resetSession, ver flow.js: "menu"/"inicio"/"reiniciar").
 const { listSessions, updateSession } = require('./state');
 const { findProduct } = require('./catalog');
 const { getSettings, updateSettings } = require('./settings');
