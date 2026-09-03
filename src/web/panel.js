@@ -528,6 +528,24 @@ router.get('/api/metrics', (req, res) => {
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
+  // Codigo de anuncio (I1C1, I2C3...): se agrupa TODA conversacion que tenga
+  // uno cargado (no solo las vendidas, a diferencia de topProducts de arriba)
+  // para poder calcular una tasa de conversion por codigo — es justamente lo
+  // que hace falta para decidir cual anuncio escalar y cual no. Ver flow.js
+  // para donde se captura el codigo (una sola vez, del primer mensaje).
+  const adCodeStats = new Map();
+  for (const s of sessions) {
+    const codigo = String(s.adCode || '').trim().toUpperCase();
+    if (!codigo) continue;
+    const entry = adCodeStats.get(codigo) || { codigo, count: 0, sales: 0 };
+    entry.count++;
+    if (SOLD_STAGES.includes(s.stage)) entry.sales++;
+    adCodeStats.set(codigo, entry);
+  }
+  const topAdCodes = [...adCodeStats.values()]
+    .map((e) => ({ ...e, conversionRate: e.count > 0 ? (e.sales / e.count) * 100 : null }))
+    .sort((a, b) => b.sales - a.sales || b.count - a.count);
+
   const staleAttention = sessions
     .map((s) => {
       const history = s.history || [];
@@ -609,6 +627,30 @@ router.get('/api/metrics', (req, res) => {
       }
     }
 
+    // Mismo codigo de anuncio que el bloque de arriba, pero acotado al rango:
+    // conversaciones NUEVAS del rango (por createdAt) vs cuantas de esas
+    // (o de cualquier otra, si la venta se cerro despues) se vendieron
+    // tambien dentro del rango (por soldAt).
+    const rangeAdCodeStats = new Map();
+    for (const s of sessions) {
+      const codigo = String(s.adCode || '').trim().toUpperCase();
+      if (!codigo || !inDateRange(s.createdAt, fromTs, toTs)) continue;
+      const entry = rangeAdCodeStats.get(codigo) || { codigo, count: 0, sales: 0 };
+      entry.count++;
+      rangeAdCodeStats.set(codigo, entry);
+    }
+    for (const s of sessions) {
+      const codigo = String(s.adCode || '').trim().toUpperCase();
+      if (!codigo || !SOLD_STAGES.includes(s.stage) || !s.soldAt) continue;
+      if (!inDateRange(s.soldAt, fromTs, toTs)) continue;
+      const entry = rangeAdCodeStats.get(codigo) || { codigo, count: 0, sales: 0 };
+      entry.sales++;
+      rangeAdCodeStats.set(codigo, entry);
+    }
+    const rangeTopAdCodes = [...rangeAdCodeStats.values()]
+      .map((e) => ({ ...e, conversionRate: e.count > 0 ? (e.sales / e.count) * 100 : null }))
+      .sort((a, b) => b.sales - a.sales || b.count - a.count);
+
     range = {
       from: from || null,
       to: to || null,
@@ -622,10 +664,11 @@ router.get('/api/metrics', (req, res) => {
       // la cantidad para que no parezca que "faltan" ventas sin explicacion.
       undatedSales,
       topProducts: [...rangeProductStats.values()].sort((a, b) => b.count - a.count).slice(0, 10),
+      topAdCodes: rangeTopAdCodes,
     };
   }
 
-  res.json({ byStage, total, conversionRate, messagesToday, topLocations, topProducts, staleAttention, revenue, range });
+  res.json({ byStage, total, conversionRate, messagesToday, topLocations, topProducts, topAdCodes, staleAttention, revenue, range });
 });
 
 // Guarda el monto vendido de una conversacion (cargado a mano desde el
