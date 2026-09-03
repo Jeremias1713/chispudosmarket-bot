@@ -1610,6 +1610,152 @@ $('dp_confirm').addEventListener('click', async () => {
   if (state.activeView === 'view-convos') pollConversations()
 })
 
+/* ---------- seguimiento diario (mismo Excel de Dropanas) ---------- */
+// A diferencia de "Guías por lote" (que solo carga el numero de guia), esto
+// ademas actualiza la etapa de la conversacion segun el Estado Pedido de
+// cada fila, y arma el envio de la plantilla de retiro cuando corresponde
+// (ver src/seguimiento.js para las reglas exactas). Mismo patron de picker
+// para filas ambiguas que ya usa Guías por lote.
+let sgItems = []
+
+const SG_ETAPA_LABEL = {
+  esperando_retiro: 'Esperando retiro',
+  en_camino: 'En camino',
+  entregado: 'Entregado',
+}
+
+function sgRowHtml(item, idx) {
+  const badgeMatch = item.matchType === 'exacto'
+    ? '<span class="badge">Coincide</span>'
+    : item.matchType === 'ambiguo'
+      ? '<span class="badge badge-warning">Revisar</span>'
+      : '<span class="badge badge-danger">Sin coincidencia</span>'
+
+  let picker
+  if (item.matchType === 'exacto') {
+    picker = `<div class="dp-phone">${esc(item.phone)} — ${esc(item.candidates[0]?.nombre || '')}</div>`
+  } else if (item.matchType === 'ambiguo') {
+    const opts = ['<option value="">-- elegí a quién corresponde --</option>'].concat(
+      item.candidates.map((c) => `<option value="${esc(c.phone)}">${esc(c.phone)} — ${esc(c.nombre || 'sin nombre')}</option>`)
+    )
+    picker = `<select class="sg-pick" data-idx="${idx}">${opts.join('')}</select>`
+  } else {
+    picker = '<div class="help">No encontré ninguna conversación vendida con ese nombre.</div>'
+  }
+
+  const accionTxt = item.etapaNueva
+    ? `→ ${esc(SG_ETAPA_LABEL[item.etapaNueva] || item.etapaNueva)}${item.enviarPlantilla ? ' + plantilla de retiro' : ''}`
+    : 'Sin acción (revisar a mano si querés)'
+
+  const vars = item.plantillaVars
+    ? `<div class="help">Plantilla: ${esc(item.plantillaVars.nombre)} · ${esc(item.plantillaVars.producto)} · guía ${esc(item.plantillaVars.guia)} · ${esc(item.plantillaVars.monto)}</div>`
+    : ''
+
+  const disabled = item.matchType === 'sin_match' || !item.etapaNueva ? 'disabled' : ''
+  const checked = item.matchType === 'exacto' && item.etapaNueva ? 'checked' : ''
+
+  return `<div class="dp-row" data-idx="${idx}">
+    <input type="checkbox" class="sg-check" data-idx="${idx}" ${checked} ${disabled}>
+    <div class="dp-info">
+      <div><strong>${esc(item.guia)}</strong> · ${esc(item.cliente)}${item.ciudad ? ' — ' + esc(item.ciudad) : ''}</div>
+      <div class="help">Estado Dropanas: ${esc(item.estadoPedido)} · ${accionTxt}</div>
+      ${vars}
+      ${picker}
+    </div>
+    ${badgeMatch}
+  </div>`
+}
+
+function renderSgResults() {
+  const box = $('sg_results')
+  if (!sgItems.length) {
+    box.innerHTML = ''
+    $('sg_confirmWrap').hidden = true
+    return
+  }
+  box.innerHTML = `<div class="card run-table">${sgItems.map(sgRowHtml).join('')}</div>`
+  $('sg_confirmWrap').hidden = false
+}
+
+$('sg_analyze').addEventListener('click', async () => {
+  const file = $('sg_file').files?.[0]
+  if (!file) { $('sg_msg').textContent = 'Elegí el Excel primero'; return }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  $('sg_analyze').disabled = true
+  $('sg_msg').textContent = 'Analizando…'
+  try {
+    const res = await fetch('/panel/api/seguimiento/preview', { method: 'POST', body: formData })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    const data = await res.json()
+    sgItems = data.items || []
+    renderSgResults()
+    const conAccion = sgItems.filter((i) => i.etapaNueva).length
+    const conPlantilla = sgItems.filter((i) => i.enviarPlantilla).length
+    $('sg_msg').textContent = sgItems.length
+      ? `${sgItems.length} filas · ${conAccion} con acción propuesta (${conPlantilla} con envío de plantilla), revisá el resto`
+      : 'No encontré filas en ese archivo'
+  } catch (err) {
+    $('sg_msg').textContent = err.message
+  } finally {
+    $('sg_analyze').disabled = false
+  }
+})
+
+$('sg_results').addEventListener('change', (e) => {
+  if (e.target.classList.contains('sg-pick')) {
+    const idx = Number(e.target.dataset.idx)
+    const phone = e.target.value
+    sgItems[idx].phone = phone || null
+    const check = $('sg_results').querySelector(`.sg-check[data-idx="${idx}"]`)
+    if (check) check.checked = Boolean(phone)
+  }
+})
+
+$('sg_confirm').addEventListener('click', async () => {
+  const idxs = []
+  $('sg_results').querySelectorAll('.sg-check:checked').forEach((box) => {
+    const idx = Number(box.dataset.idx)
+    const item = sgItems[idx]
+    if (item && item.phone && item.etapaNueva) idxs.push(idx)
+  })
+  if (!idxs.length) { $('sg_confirmMsg').textContent = 'No hay ninguna marcada (o le falta elegir a quién corresponde)'; return }
+
+  $('sg_confirm').disabled = true
+  $('sg_confirmMsg').textContent = `Aplicando ${idxs.length}…`
+  try {
+    const items = idxs.map((i) => {
+      const it = sgItems[i]
+      return { phone: it.phone, etapaNueva: it.etapaNueva, enviarPlantilla: it.enviarPlantilla, plantillaVars: it.plantillaVars }
+    })
+    const res = await fetch('/panel/api/seguimiento/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    const data = await res.json()
+    const ok = (data.results || []).filter((r) => r.ok).length
+    const fallo = (data.results || []).filter((r) => !r.ok).length
+    $('sg_confirmMsg').textContent = `Listo: ${ok} aplicadas${fallo ? `, ${fallo} con problema (revisalas a mano)` : ''}`
+    sgItems = []
+    $('sg_file').value = ''
+    renderSgResults()
+    if (state.activeView === 'view-convos') pollConversations()
+  } catch (err) {
+    $('sg_confirmMsg').textContent = err.message
+  } finally {
+    $('sg_confirm').disabled = false
+  }
+})
+
 /* ---------- envio masivo personalizado (variables distintas por cliente) ---------- */
 // A diferencia del envio masivo de arriba (mismas variables para todos), acá
 // cada fila del Excel manda SUS propios datos. El negocio elige en pb_var1/2/3
@@ -1842,6 +1988,8 @@ async function loadSettings() {
   $('cfg_shippingTemplateName').value = s.shippingTemplateName || ''
   $('cfg_shippingTemplateLanguage').value = s.shippingTemplateLanguage || 'es'
   $('cfg_shippingFreeText').value = s.shippingFreeText || ''
+  $('cfg_pickupTemplateName').value = s.pickupTemplateName || ''
+  $('cfg_pickupTemplateLanguage').value = s.pickupTemplateLanguage || 'es'
   ensureTemplatesLoaded().then((templates) => {
     $('cfg_shippingTemplateList').innerHTML = (templates || []).map((t) => `<option value="${esc(t.name)}"></option>`).join('')
   })
@@ -1886,6 +2034,8 @@ $('cfg_save').addEventListener('click', async () => {
     shippingTemplateName: $('cfg_shippingTemplateName').value.trim(),
     shippingTemplateLanguage: $('cfg_shippingTemplateLanguage').value.trim() || 'es',
     shippingFreeText: $('cfg_shippingFreeText').value,
+    pickupTemplateName: $('cfg_pickupTemplateName').value.trim(),
+    pickupTemplateLanguage: $('cfg_pickupTemplateLanguage').value.trim() || 'es',
   }
   $('cfg_save').disabled = true
   try {

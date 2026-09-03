@@ -567,6 +567,36 @@
               </div>
             </div>
 
+            <h2 class="section-title">Seguimiento diario (Dropanas)</h2>
+            <div class="card cfg" style="padding: var(--s5);">
+              <div class="field">
+                <label for="sg_file">Excel diario de Dropanas</label>
+                <div class="help">
+                  El mismo Excel que exportás todos los días (con Guía, Cliente, Ciudad,
+                  Producto, Estado Pedido, Total Venta y Bodega Destino). El bot cruza cada
+                  fila con la conversación por nombre y arma la lista de abajo para que
+                  revises antes de tocar nada:<br>
+                  · <strong>En oficina</strong> → pasa la conversación a "Esperando retiro" y
+                  te arma el envío de "ya podés pasar a buscarlo" (con nombre, producto,
+                  guía y monto ya calculados de esa misma fila).<br>
+                  · <strong>En camino / En tránsito</strong> → pasa a "En camino", sin mandar nada.<br>
+                  · <strong>Entregado</strong> → pasa a "Entregado", sin mandar nada.<br>
+                  · Cualquier otro estado (Pagado, Cancelado, En novedad, etc.) → no se
+                  toca, solo se lista para que lo revises vos si querés.
+                </div>
+                <input type="file" id="sg_file" accept=".xlsx,.xls">
+              </div>
+              <div class="settings-actions">
+                <button class="btn" id="sg_analyze">Analizar Excel</button>
+                <span class="save-msg" id="sg_msg"></span>
+              </div>
+              <div id="sg_results"></div>
+              <div class="settings-actions" id="sg_confirmWrap" hidden>
+                <button class="btn btn-primary" id="sg_confirm">Confirmar y aplicar las marcadas</button>
+                <span class="save-msg" id="sg_confirmMsg"></span>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
@@ -920,6 +950,19 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
                     Dejalo vacío para usar el texto por defecto.
                   </div>
                   <textarea id="cfg_shippingFreeText" rows="3" placeholder="Hola {{nombre}}! Tu pedido de {{producto}} ya está en camino. Número de guía: {{guia}}."></textarea>
+                </div>
+                <div class="field">
+                  <label for="cfg_pickupTemplateName">Plantilla de "ya podés retirarlo" (seguimiento diario)</label>
+                  <div class="help">
+                    La usa el "Seguimiento diario (Dropanas)" en Envíos masivos cuando el
+                    Excel dice que un pedido ya está en oficina. Nombre EXACTO aprobado en
+                    Meta. Vacío = usa "pedido_ha_llegado_a_tealca".
+                  </div>
+                  <input type="text" list="cfg_shippingTemplateList" id="cfg_pickupTemplateName" placeholder="pedido_ha_llegado_a_tealca">
+                </div>
+                <div class="field">
+                  <label for="cfg_pickupTemplateLanguage">Idioma con el que quedó aprobada esa plantilla</label>
+                  <input type="text" id="cfg_pickupTemplateLanguage" placeholder="es">
                 </div>
               </div>
             </details>
