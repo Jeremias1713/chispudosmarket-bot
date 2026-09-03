@@ -436,6 +436,25 @@ function inDateRange(iso, fromTs, toTs) {
   return t >= fromTs && t <= toTs;
 }
 
+// El negocio es venezolano y el servidor (Render) corre en UTC: "hoy" o un
+// rango de fechas calculado con Date directo queda desfasado hasta 4 horas
+// (a las 8pm hora de Venezuela ya es "manana" en UTC, asi que mensajes de la
+// noche quedaban afuera de "hoy", o el dashboard mostraba el dia siguiente
+// como si ya hubiera arrancado). Todo lo que agrupe o filtre por dia
+// calendario tiene que pasar por esto, nunca por Date/toDateString directo.
+const CARACAS_TZ = 'America/Caracas';
+function caracasDateStr(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: CARACAS_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+// Venezuela usa UTC-4 fijo (sin horario de verano desde 2016), asi que el
+// limite de un dia calendario ahi se puede armar sumando el offset directo.
+function caracasDayRangeMs(dateStr) {
+  return {
+    startMs: new Date(dateStr + 'T00:00:00-04:00').getTime(),
+    endMs: new Date(dateStr + 'T23:59:59.999-04:00').getTime(),
+  };
+}
+
 router.get('/api/metrics', (req, res) => {
   const sessions = listSessions();
   const now = Date.now();
@@ -469,11 +488,11 @@ router.get('/api/metrics', (req, res) => {
     }
   }
 
-  const today = new Date().toDateString();
+  const today = caracasDateStr(new Date());
   let messagesToday = 0;
   for (const s of sessions) {
     for (const m of s.history || []) {
-      if (m.at && new Date(m.at).toDateString() === today) messagesToday++;
+      if (m.at && caracasDateStr(new Date(m.at)) === today) messagesToday++;
     }
   }
 
@@ -544,8 +563,8 @@ router.get('/api/metrics', (req, res) => {
   const { from, to } = req.query;
   let range = null;
   if (from || to) {
-    const fromTs = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
-    const toTs = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
+    const fromTs = from ? caracasDayRangeMs(from).startMs : -Infinity;
+    const toTs = to ? caracasDayRangeMs(to).endMs : Infinity;
 
     const newConversations = sessions.filter((s) => inDateRange(s.createdAt, fromTs, toTs)).length;
 
