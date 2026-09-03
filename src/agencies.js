@@ -198,6 +198,62 @@ const CITY_TO_STATE = {
   tinaquillo: 'Cojedes',
   tucupita: 'Delta Amacuro',
   caracas: 'Distrito Capital',
+  // Parroquias y zonas/urbanizaciones de Caracas de uso muy comun, agregadas
+  // por el mismo motivo que ya paso con Catia/El Junquito: un cliente nombra
+  // una de estas en vez de decir literalmente "Caracas", el modelo a veces
+  // le adivina mal el estado (esto paso de verdad con "Antimano", que
+  // termino buscado en Miranda en vez de Distrito Capital), y como estas SI
+  // estan en el diccionario, el codigo (ver runTool en ai.js) ignora el
+  // estado que haya dicho el modelo y usa el real.
+  // OJO: esto NO sigue estrictamente la division politica de Venezuela (el
+  // area metropolitana de Caracas en realidad se reparte entre el Distrito
+  // Capital y varios municipios del estado Miranda — Chacao, Baruta, Sucre,
+  // El Hatillo). Lo que importa aca es como el NEGOCIO agrupa sus propias
+  // agencias: las agencias reales que carga (ver el Excel del panel) meten
+  // TODAS estas zonas juntas bajo un mismo bloque "Caracas" (asi salieron
+  // agrupadas Boleita, Catia, El Cafetal, Chacao, Filas de Mariches, Los
+  // Palos Grandes, etc. cuando un cliente pregunto por Caracas), asi que
+  // "Distrito Capital" aca funciona como el nombre de ESE bloque, no como la
+  // division administrativa real. Si el negocio llega a separar sus agencias
+  // por municipio en vez de agruparlas todas como "Caracas", esta lista
+  // dejaria de ser correcta y habria que revisarla.
+  'la candelaria': 'Distrito Capital',
+  candelaria: 'Distrito Capital',
+  antimano: 'Distrito Capital',
+  catia: 'Distrito Capital',
+  'el paraiso': 'Distrito Capital',
+  'el valle': 'Distrito Capital',
+  'el recreo': 'Distrito Capital',
+  'la vega': 'Distrito Capital',
+  'la pastora': 'Distrito Capital',
+  macarao: 'Distrito Capital',
+  caricuao: 'Distrito Capital',
+  coche: 'Distrito Capital',
+  'san agustin': 'Distrito Capital',
+  'san bernardino': 'Distrito Capital',
+  'san jose': 'Distrito Capital',
+  'san juan': 'Distrito Capital',
+  'san pedro': 'Distrito Capital',
+  'santa rosalia': 'Distrito Capital',
+  'santa teresa': 'Distrito Capital',
+  altagracia: 'Distrito Capital',
+  '23 de enero': 'Distrito Capital',
+  'el junquito': 'Distrito Capital',
+  junquito: 'Distrito Capital',
+  chacao: 'Distrito Capital',
+  boleita: 'Distrito Capital',
+  'el cafetal': 'Distrito Capital',
+  'el cementerio': 'Distrito Capital',
+  'el rosal': 'Distrito Capital',
+  'los caobos': 'Distrito Capital',
+  'los chaguaramos': 'Distrito Capital',
+  'los palos grandes': 'Distrito Capital',
+  montecristo: 'Distrito Capital',
+  'prados del este': 'Distrito Capital',
+  'sabana grande': 'Distrito Capital',
+  'san martin': 'Distrito Capital',
+  california: 'Distrito Capital',
+  'filas de mariches': 'Distrito Capital',
   coro: 'Falcon',
   'punto fijo': 'Falcon',
   judibana: 'Falcon',
@@ -302,6 +358,16 @@ function isSoleCityOfItsState(ciudad) {
   const key = findKnownCityKey(ciudad);
   if (!key) return false;
   const estado = CITY_TO_STATE[key];
+  // Distrito Capital es un caso especial: ahora el diccionario tiene MUCHAS
+  // entradas para ahi a proposito (Antimano, Catia, Chacao, etc. — ver el
+  // comentario donde se cargan), todas dentro del mismo bloque "Caracas" que
+  // usa el negocio. A diferencia de un estado real con varias ciudades
+  // DISTINTAS (ej. Zulia: Maracaibo, Cabimas...), ampliar de una zona
+  // puntual de Caracas a todo el bloque "Distrito Capital" sigue siendo
+  // seguro (es el mismo bloque, no se mezclan pueblos de otro lado), asi que
+  // esto siempre da true para Distrito Capital sin importar cuantas zonas
+  // tenga cargadas.
+  if (estado === 'Distrito Capital') return true;
   const siblings = Object.keys(CITY_TO_STATE).filter((c) => CITY_TO_STATE[c] === estado);
   return siblings.length === 1;
 }

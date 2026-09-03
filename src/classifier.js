@@ -3,6 +3,7 @@
 // bot anterior. Corre en cada turno, aparte de la respuesta al cliente:
 // si falla, no rompe nada, simplemente no actualiza la etapa.
 const OpenAI = require('openai');
+const { normalizeProductName } = require('./catalog');
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
@@ -120,7 +121,12 @@ async function classifyConversation(history) {
         ciudad: card.ciudad || null,
         telefono: card.telefono || null,
         cedula: card.cedula || null,
-        producto: card.producto || null,
+        // Se normaliza contra el nombre EXACTO del catalogo (ver
+        // catalog.normalizeProductName) para que variantes distintas del
+        // mismo producto ("shilajit", "1 frasco de Shilajit", "Shilajit
+        // Viking"...) no queden separadas en Metricas > Productos mas
+        // vendidos.
+        producto: card.producto ? normalizeProductName(card.producto) : null,
         notas: card.notas || null,
 },
 };

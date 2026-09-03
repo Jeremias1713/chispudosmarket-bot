@@ -7,6 +7,7 @@ const { listSessions, updateSession } = require('./state');
 const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
+const { normalizeProductName } = require('./catalog');
 
 // Correccion de una sola vez (retroactiva): antes, a las conversaciones que
 // ya estaban vendidas de antes de existir el campo soldAt se les rellenaba
@@ -40,6 +41,37 @@ function fixBackfilledSoldAt() {
   }
   if (fixed) {
     console.log(`Correccion de soldAt: se quito la fecha aproximada (no confiable) de ${fixed} conversacion(es); ahora cuentan como "sin fecha registrada" en vez de aparecer como vendidas hoy.`);
+  }
+}
+
+// Correccion de una sola vez (retroactiva): card.producto se guarda como
+// texto libre (lo que anota la IA charlando), asi que con el tiempo terminan
+// quedando muchas variantes distintas del MISMO producto ("shilajit", "1
+// frasco de Shilajit", "combo de 2 frascos de Shilajit", "Shilajit Viking"),
+// fragmentando Metricas > Productos mas vendidos como si fueran ventas
+// separadas (se detecto con datos reales: mas de 13 variantes para un solo
+// item). El clasificador (ver classifier.js) ya normaliza esto de ahora en
+// mas contra el catalogo, pero eso solo corrige conversaciones con mensajes
+// nuevos: esto de aca pasa una vez por TODAS las conversaciones ya guardadas
+// para que el arreglo se vea reflejado tambien en las ventas de antes.
+//
+// Segura de correr en cada arranque: normalizar un nombre que ya esta
+// normalizado no cambia nada, asi que no se repite el trabajo ni hay riesgo
+// de ir empeorando el dato con cada reinicio.
+function fixFragmentedProductNames() {
+  const sessions = listSessions();
+  let fixed = 0;
+  for (const s of sessions) {
+    const actual = s.card?.producto;
+    if (!actual) continue;
+    const normalizado = normalizeProductName(actual);
+    if (normalizado !== actual) {
+      updateSession(s.phone, { card: { ...s.card, producto: normalizado } });
+      fixed++;
+    }
+  }
+  if (fixed) {
+    console.log(`Normalizacion de productos: se unifico el nombre de producto de ${fixed} conversacion(es) contra el catalogo.`);
   }
 }
 
@@ -114,5 +146,6 @@ app.get('/health', (_req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
   fixBackfilledSoldAt();
+  fixFragmentedProductNames();
   remarketing.start();
 });

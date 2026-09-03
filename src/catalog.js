@@ -103,6 +103,79 @@ function findProduct(idOrName) {
   );
 }
 
+function foldText(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Palabras demasiado genericas como para servir de pista de que producto es
+// (articulos, preposiciones): se ignoran al comparar, si no "de" o "con"
+// harian "matchear" cualquier cosa con cualquier cosa.
+const STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'con', 'para']);
+
+// Palabras "de verdad" de un nombre (sin stopwords ni palabras sueltas de 1-2
+// letras que no aportan nada para reconocer el producto).
+function significantWords(name) {
+  return foldText(name)
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+}
+
+// Normaliza un texto libre de producto (lo que anota la IA en card.producto,
+// ver classifier.js) contra el nombre EXACTO tal cual esta cargado en el
+// catalogo. Sin esto, variantes como "shilajit", "Shilajit", "1 frasco de
+// Shilajit", "combo de 2 frascos de Shilajit", "gomitas de shilajit" o
+// "Shilajit Viking" quedaban como productos DISTINTOS en Metricas >
+// Productos mas vendidos (se detecto con datos reales: mas de 13 variantes
+// escritas para el mismo item), aunque sea siempre la misma venta.
+// - Coincidencia exacta primero (insensible a mayusculas/acentos).
+// - Si no hay exacta, se compara por PALABRAS: de cada producto del catalogo
+//   se sacan sus palabras significativas (sin "de", "un", etc.) y se ve que
+//   fraccion de esas palabras aparece en el texto a normalizar. Esto agarra
+//   frases como "1 frasco de Shilajit" o "combo de 2 frascos de Shilajit"
+//   (que NO son substring de "Shilajit Viking" ni al reves, por eso el
+//   chequeo viejo de substring se quedaba corto), porque igual contienen la
+//   palabra "shilajit". Se elige el producto con mayor fraccion de palabras
+//   encontradas (y, en empate, el nombre mas largo/especifico).
+// - Si no hay ningun match razonable, se devuelve el texto tal cual: puede
+//   ser un producto que ya no esta en el catalogo, o algo que la IA anoto
+//   raro — mejor dejarlo visible que perderlo silenciosamente.
+function normalizeProductName(texto) {
+  const limpio = String(texto || '').trim();
+  if (!limpio) return limpio;
+  const products = loadProducts();
+  if (!products.length) return limpio;
+  const q = foldText(limpio);
+  const exacto = products.find((p) => p.name && foldText(p.name) === q);
+  if (exacto) return exacto.name;
+
+  let best = null;
+  let bestScore = 0;
+  for (const p of products) {
+    if (!p.name) continue;
+    const words = significantWords(p.name);
+    if (!words.length) continue;
+    const matched = words.filter((w) => q.includes(w)).length;
+    const score = matched / words.length;
+    if (score > bestScore || (score === bestScore && best && p.name.length > best.name.length)) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  // Se exige encontrar al menos la MITAD de las palabras significativas del
+  // nombre de catalogo (no todas): "shilajit" solo trae una de las dos
+  // palabras de "Shilajit Viking" (score 0.5) y por eso tiene que matchear
+  // igual, pero un umbral de 0 (una sola palabra suelta alcanza) haria que
+  // "de" o una palabra generica compartida matcheara cualquier cosa con
+  // cualquier cosa -- por eso el filtro de STOPWORDS de arriba y este piso
+  // de la mitad, no cero.
+  return best && bestScore >= 0.5 ? best.name : limpio;
+}
+
 function findProductByIndex(index) {
   const products = loadProducts().filter((p) => p.active !== false);
   const i = parseInt(index, 10) - 1;
@@ -186,6 +259,7 @@ module.exports = {
   loadProducts,
   findProduct,
   findProductByIndex,
+  normalizeProductName,
   formatCatalog,
   matchTrigger,
   listProducts,
