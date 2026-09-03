@@ -576,7 +576,15 @@ async function processReply(from) {
     // para avisarle al modelo (dentro del prompt) como para, si igual lo
     // repite, sacarle el bloque duplicado antes de mandarlo (ver mas abajo).
     const dataAlreadyRequested = session.orderDataRequested === true;
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested);
+    // Etapa real del pedido (automatica del clasificador, o fijada a mano
+    // desde el panel: ver setStage en state.js) para que el bot sepa QUE
+    // puede decir sobre el envio (ver SHIPPING_STAGE_TEXT en ai.js). Bug real
+    // que esto arregla: el bot le dijo a un cliente que su pedido ya habia
+    // llegado, cuando en realidad se habia armado hacia apenas 2 horas y la
+    // etapa en el panel ni siquiera era "entregado". El tiempo transcurrido
+    // nunca alcanza para asumir eso; ahora la unica fuente es esta etapa.
+    const shippingStage = session.stage || null;
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage);
 
     // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
     // habia pedido nombre/cedula/telefono antes y el modelo igual intento
