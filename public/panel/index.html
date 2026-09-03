@@ -478,6 +478,62 @@
             <h2 class="section-title">Historial</h2>
             <div class="card run-table" id="bc_history"></div>
 
+            <h2 class="section-title">Envío masivo personalizado (nombre, apellido, monto por cliente)</h2>
+            <div class="card cfg" style="padding: var(--s5);">
+              <div class="field">
+                <label for="pb_template">Plantilla</label>
+                <div class="help">
+                  Usá esto cuando cada cliente tiene que recibir SUS propios datos (por
+                  ejemplo nombre, apellido y monto), a diferencia del envío masivo de
+                  arriba que manda las mismas variables a todo el mundo.
+                </div>
+                <input type="text" list="bc_templateList" id="pb_template" placeholder="Nombre de la plantilla">
+              </div>
+
+              <div class="field field-row">
+                <div>
+                  <label for="pb_lang">Idioma</label>
+                  <input type="text" id="pb_lang" value="es">
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Orden de las variables de la plantilla</label>
+                <div class="help">
+                  Elegí qué dato va en {{1}}, {{2}} y {{3}} tal cual quedó aprobada la
+                  plantilla en Meta. Si tiene menos de 3 variables, dejá las que sobran en
+                  "No aplica".
+                </div>
+                <div class="field-row">
+                  <select id="pb_var1"><option value="">{{1}} = ...</option></select>
+                  <select id="pb_var2"><option value="">{{2}} = ...</option></select>
+                  <select id="pb_var3"><option value="">{{3}} = ...</option></select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="pb_file">Excel con la lista de clientes</label>
+                <div class="help">
+                  Una fila por cliente, con columnas "Telefono", "Nombre", "Apellido" y
+                  "Monto" (podés usar otros nombres parecidos, se detectan solos). El
+                  teléfono tiene que incluir el código de país (ej. 584121234567).
+                </div>
+                <input type="file" id="pb_file" accept=".xlsx,.xls">
+              </div>
+
+              <div class="settings-actions">
+                <button class="btn" id="pb_analyze">Analizar Excel</button>
+                <span class="save-msg" id="pb_msg"></span>
+              </div>
+
+              <div id="pb_results"></div>
+
+              <div class="settings-actions" id="pb_confirmWrap" hidden>
+                <button class="btn btn-primary" id="pb_confirm">Mandar a todos</button>
+                <span class="save-msg" id="pb_confirmMsg"></span>
+              </div>
+            </div>
+
             <h2 class="section-title">Guías por lote (Dropanas)</h2>
             <div class="card cfg" style="padding: var(--s5);">
               <div class="field">

@@ -1610,6 +1610,118 @@ $('dp_confirm').addEventListener('click', async () => {
   if (state.activeView === 'view-convos') pollConversations()
 })
 
+/* ---------- envio masivo personalizado (variables distintas por cliente) ---------- */
+// A diferencia del envio masivo de arriba (mismas variables para todos), acá
+// cada fila del Excel manda SUS propios datos. El negocio elige en pb_var1/2/3
+// qué columna corresponde a {{1}}, {{2}}, {{3}} de la plantilla ya aprobada.
+const PB_CAMPOS = [
+  { value: '', label: 'No aplica' },
+  { value: 'nombre', label: 'Nombre' },
+  { value: 'apellido', label: 'Apellido' },
+  { value: 'monto', label: 'Monto' },
+]
+
+let pbRows = []
+
+function pbInitVarSelects() {
+  ['pb_var1', 'pb_var2', 'pb_var3'].forEach((id, i) => {
+    $(id).innerHTML = PB_CAMPOS.map((c) => `<option value="${esc(c.value)}">{{${i + 1}}} = ${esc(c.label)}</option>`).join('')
+  })
+}
+pbInitVarSelects()
+
+function pbRowHtml(row, idx) {
+  const invalido = !row.valido
+  const motivo = row.motivo === 'sin_telefono' ? 'Sin teléfono: no se puede mandar' : ''
+  return `<div class="dp-row" data-idx="${idx}">
+    <input type="checkbox" class="pb-check" data-idx="${idx}" ${invalido ? 'disabled' : 'checked'}>
+    <div class="dp-info">
+      <div><strong>${esc(row.telefono || '(sin teléfono)')}</strong>${row.nombre ? ' — ' + esc(row.nombre) : ''} ${esc(row.apellido || '')}</div>
+      <div class="help">${row.monto ? 'Monto: ' + esc(row.monto) : ''} · fila ${esc(row.fila)}</div>
+    </div>
+    ${invalido ? `<span class="badge badge-warning">${esc(motivo)}</span>` : ''}
+  </div>`
+}
+
+function renderPbResults() {
+  const box = $('pb_results')
+  if (!pbRows.length) {
+    box.innerHTML = ''
+    $('pb_confirmWrap').hidden = true
+    return
+  }
+  box.innerHTML = `<div class="card run-table">${pbRows.map(pbRowHtml).join('')}</div>`
+  $('pb_confirmWrap').hidden = false
+}
+
+$('pb_analyze').addEventListener('click', async () => {
+  const file = $('pb_file').files?.[0]
+  if (!file) { $('pb_msg').textContent = 'Elegí el Excel primero'; return }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  $('pb_analyze').disabled = true
+  $('pb_msg').textContent = 'Analizando…'
+  try {
+    const res = await fetch('/panel/api/broadcasts/personalized/preview', { method: 'POST', body: formData })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || res.statusText)
+    }
+    const data = await res.json()
+    pbRows = data.rows || []
+    renderPbResults()
+    const validas = pbRows.filter((r) => r.valido).length
+    $('pb_msg').textContent = pbRows.length
+      ? `${pbRows.length} filas · ${validas} listas para mandar${pbRows.length - validas ? `, ${pbRows.length - validas} con problema` : ''}`
+      : 'No encontré filas con datos en ese archivo'
+  } catch (err) {
+    $('pb_msg').textContent = err.message
+  } finally {
+    $('pb_analyze').disabled = false
+  }
+})
+
+$('pb_confirm').addEventListener('click', async () => {
+  const templateName = $('pb_template').value.trim()
+  if (!templateName) { $('pb_confirmMsg').textContent = 'Falta el nombre de la plantilla'; return }
+  const order = [$('pb_var1').value, $('pb_var2').value, $('pb_var3').value].filter(Boolean)
+  if (!order.length) { $('pb_confirmMsg').textContent = 'Elegí al menos una variable ({{1}}, {{2}}...)'; return }
+
+  const rows = []
+  $('pb_results').querySelectorAll('.pb-check:checked').forEach((box) => {
+    const idx = Number(box.dataset.idx)
+    const row = pbRows[idx]
+    if (row && row.valido) rows.push(row)
+  })
+  if (!rows.length) { $('pb_confirmMsg').textContent = 'No hay ninguna fila marcada para mandar'; return }
+
+  $('pb_confirm').disabled = true
+  $('pb_confirmMsg').textContent = `Mandando a ${rows.length} clientes…`
+  try {
+    const res = await fetch('/panel/api/broadcasts/personalized/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateName, languageCode: $('pb_lang').value.trim() || 'es', order, rows }),
+    })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+    const data = await res.json()
+    const ok = (data.results || []).filter((r) => r.ok).length
+    const fallo = (data.results || []).filter((r) => !r.ok).length
+    $('pb_confirmMsg').textContent = `Listo: ${ok} enviados${fallo ? `, ${fallo} con problema (revisalos a mano)` : ''}`
+    pbRows = []
+    $('pb_file').value = ''
+    renderPbResults()
+  } catch (err) {
+    $('pb_confirmMsg').textContent = err.message
+  } finally {
+    $('pb_confirm').disabled = false
+  }
+})
+
 /* ---------- simulador ---------- */
 
 function simBubbleInner(m) {
