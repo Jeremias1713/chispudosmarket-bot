@@ -892,6 +892,14 @@ function productRow(p) {
   </div>`
 }
 
+function adCodeRow(a) {
+  const tasa = a.conversionRate != null ? ` · ${fmtPercent(a.conversionRate)} conversión` : ''
+  return `<div class="location-row">
+    <span class="location-name">${esc(a.codigo)}</span>
+    <span class="location-count">${esc(a.sales)} venta${a.sales === 1 ? '' : 's'} de ${esc(a.count)} conversación${a.count === 1 ? '' : 'es'}${tasa}</span>
+  </div>`
+}
+
 /* ---------- métricas por rango de fechas ---------- */
 
 function ymd(date) {
@@ -1002,6 +1010,9 @@ function renderMetricsRange(range) {
   $('metricsRangeProducts').innerHTML = (range.topProducts || []).length
     ? range.topProducts.map(productRow).join('')
     : emptyState('🏆', 'No hubo ventas en este período', '')
+  $('metricsRangeAdCodes').innerHTML = (range.topAdCodes || []).length
+    ? range.topAdCodes.map(adCodeRow).join('')
+    : emptyState('🏷️', 'No hubo conversaciones con código en este período', '')
   // Ventas de antes de esta actualizacion no tienen fecha de venta guardada
   // (soldAt): no se pueden ubicar en ningun rango, asi que no se cuentan
   // acá (sí siguen en el total histórico de más abajo). Se avisa para que
@@ -1044,6 +1055,10 @@ async function pollMetrics() {
   $('metricsProducts').innerHTML = (m.topProducts || []).length
     ? m.topProducts.map(productRow).join('')
     : emptyState('🏆', 'Todavía no hay ventas cargadas', 'Aparece apenas marques una conversación como "Vendido" con su producto.')
+
+  $('metricsAdCodes').innerHTML = (m.topAdCodes || []).length
+    ? m.topAdCodes.map(adCodeRow).join('')
+    : emptyState('🏷️', 'Todavía no hay conversaciones con código de anuncio', 'Aparece apenas llegue un cliente cuyo primer mensaje traiga un código tipo I1C1.')
 }
 
 /* ---------- catálogo de productos ---------- */
