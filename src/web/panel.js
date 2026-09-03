@@ -35,6 +35,7 @@ const { WHATSAPP_WINDOW_MS, lastInboundAt, isWindowOpen } = require('../whatsapp
 const shipping = require('../shipping');
 const dropanas = require('../dropanas');
 const personalizedBroadcast = require('../personalizedBroadcast');
+const seguimiento = require('../seguimiento');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -719,6 +720,34 @@ router.post('/api/dropanas/confirm', async (req, res) => {
   res.json({ ok: true, results });
 });
 
+/* ---------- seguimiento diario (mismo Excel de Dropanas, actualiza etapas + avisa retiro) ---------- */
+
+// Analiza el mismo Excel de Dropanas (guia, cliente, ciudad, producto,
+// estado pedido, total venta, bodega destino) y arma una fila por pedido con
+// la etapa nueva propuesta (si corresponde) y, si el estado es "En oficina",
+// las variables ya calculadas de la plantilla de retiro. No cambia ni manda
+// nada todavia: el negocio lo revisa en el panel y confirma.
+router.post('/api/seguimiento/preview', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
+  try {
+    const rows = dropanas.parseExportBuffer(req.file.buffer);
+    const items = seguimiento.buildPreview(rows);
+    res.json({ ok: true, items });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Confirma en bloque: por cada fila que el negocio reviso y marco, actualiza
+// la etapa (si corresponde) y manda la plantilla de retiro (si corresponde),
+// una por una con una pausa chica entre cada una.
+router.post('/api/seguimiento/confirm', async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: 'No hay nada para confirmar' });
+  const results = await seguimiento.applyItems(items);
+  res.json({ ok: true, results });
+});
+
 // Nota interna del negocio sobre este cliente (tags, recordatorios, lo que
 // sea). No la toca el bot ni el clasificador: es aparte de "notas" dentro de
 // card, que es lo que la IA infiere sola de la conversacion.
@@ -892,6 +921,8 @@ router.post('/api/settings', (req, res) => {
     'shippingTemplateName',
     'shippingTemplateLanguage',
     'shippingFreeText',
+    'pickupTemplateName',
+    'pickupTemplateLanguage',
   ];
   for (const f of fields) if (body[f] != null) patch[f] = String(body[f]);
   if (body.welcomeImageIds !== undefined) {
