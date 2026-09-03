@@ -18,15 +18,39 @@ const { sendTemplate, sendImageByLink } = require('./whatsapp');
 const { sendRawReply } = require('./flow');
 const { getSettings } = require('./settings');
 const { isWindowOpen } = require('./whatsappWindow');
+const { loadProducts, findProduct } = require('./catalog');
 
 const DEFAULT_FREE_TEXT =
   'Hola {{nombre}}! Tu pedido de {{producto}} ya esta en camino. Numero de guia: {{guia}}.';
+
+// La plantilla "guia_del_pedido" (la que se usa aca cuando la ventana ya
+// esta cerrada) quedo aprobada en Meta con 5 variables: nombre, producto,
+// guia, agencia de destino y monto a pagar al retirar — y con un encabezado
+// de IMAGEN obligatorio (la foto de la guia). Si el negocio aprueba otra
+// plantilla con menos variables o sin imagen, hay que ajustar esto.
+function resolveMonto(productoTexto) {
+  const texto = String(productoTexto || '').trim();
+  if (!texto) return '';
+  const exacto = findProduct(texto);
+  if (exacto) return `${Math.round(Number(exacto.price))}${exacto.currency || 'Bs'}`;
+  const q = texto.toLowerCase();
+  const match = loadProducts().find(
+    (p) => p.name && (q.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(q))
+  );
+  return match ? `${Math.round(Number(match.price))}${match.currency || 'Bs'}` : '';
+}
 
 function placeholderValues(session) {
   return {
     nombre: session.name || session.card?.nombre || 'cliente',
     producto: session.card?.producto || 'tu pedido',
     guia: session.card?.guia || '',
+    // agencia: se carga a mano junto con la guia (ver el campo nuevo en el
+    // panel), porque este flujo (cargar guia desde el chat, una por una) no
+    // tiene, como el seguimiento diario de Dropanas, un Excel del que
+    // sacarla sola.
+    agencia: session.card?.agencia || '',
+    monto: resolveMonto(session.card?.producto),
   };
 }
 
@@ -50,12 +74,11 @@ async function maybeNotifyShipping(phone, session) {
 
   let imageSent = false;
   try {
-    // La FOTO de la guia (si se cargo una) solo se puede mandar cuando la
-    // ventana de 24h esta abierta: WhatsApp no deja mandar ningun archivo
-    // libre fuera de esa ventana, y una plantilla con imagen requeriria
-    // configurar un header de media aparte en Meta (no soportado por ahora).
-    // Si la ventana esta cerrada, se manda solo el texto/plantilla con el
-    // numero, y se avisa en el resultado que la foto no se pudo mandar sola.
+    // La FOTO de la guia (si se cargo una) se manda sola como mensaje de
+    // imagen SOLO cuando la ventana de 24h esta abierta (WhatsApp no deja
+    // mandar ningun archivo libre fuera de esa ventana). Si la ventana esta
+    // cerrada, la misma foto va como encabezado de imagen DENTRO de la
+    // plantilla "guia_del_pedido" (ver mas abajo), que la exige.
     if (abierta && s.card?.guiaImageUrl) {
       try {
         await sendImageByLink(phone, s.card.guiaImageUrl);
@@ -71,14 +94,20 @@ async function maybeNotifyShipping(phone, session) {
       await sendRawReply(phone, texto);
     } else {
       if (!settings.shippingTemplateName) return { sent: false, reason: 'sin_plantilla' };
-      // Orden de los parametros de la plantilla: nombre, producto, guia (en
-      // ese orden). Tiene que coincidir con el orden de las variables
-      // {{1}} {{2}} {{3}} tal cual quedaron aprobadas en Meta.
+      // Orden de los parametros de la plantilla "guia_del_pedido": nombre,
+      // producto, guia, agencia de destino, monto (en ese orden). Tiene que
+      // coincidir con el orden de las variables {{1}}..{{5}} tal cual
+      // quedaron aprobadas en Meta. Ademas esta plantilla exige un
+      // encabezado de imagen (la foto de la guia); si todavia no se cargo
+      // ninguna foto para este pedido, Meta va a rechazar el envio, asi que
+      // el negocio deberia cargarla en el panel antes de que se cierre la
+      // ventana de 24h.
       await sendTemplate(
         phone,
         settings.shippingTemplateName,
         settings.shippingTemplateLanguage || 'es',
-        [values.nombre, values.producto, values.guia]
+        [values.nombre, values.producto, values.guia, values.agencia, values.monto],
+        s.card?.guiaImageUrl || null
       );
       appendMessage(phone, 'human', `[plantilla automatica] ${settings.shippingTemplateName}`);
     }
@@ -92,9 +121,11 @@ async function maybeNotifyShipping(phone, session) {
     sent: true,
     viaTemplate: !abierta,
     imageSent,
-    // Se cargo una foto pero no se pudo mandar sola porque la ventana ya
-    // estaba cerrada: el negocio deberia mandarsela a mano por otro medio.
-    imageSkipped: !abierta && Boolean(s.card?.guiaImageUrl),
+    // Ventana cerrada + plantilla: la foto (si hay) va como encabezado DENTRO
+    // de la plantilla, asi que no se "salta". Si no se cargo ninguna foto
+    // todavia, Meta va a rechazar el envio entero (la plantilla la exige) —
+    // eso es lo que marca este flag, para avisarle al negocio que falta.
+    imageSkipped: !abierta && !s.card?.guiaImageUrl,
   };
 }
 

@@ -86,11 +86,19 @@ async function sendAudioByLink(to, link) {
   });
 }
 
-async function sendTemplate(to, templateName, languageCode, params) {
+// headerImageUrl: opcional. Algunas plantillas (ej. "guia_del_pedido") se
+// aprobaron con un encabezado de imagen OBLIGATORIO en Meta: si la plantilla
+// lo tiene, WhatsApp exige mandar ese componente en TODOS los envios, o
+// rechaza el mensaje entero. Tiene que ser una URL publica (nuestro propio
+// /media/<archivo>, igual que usa sendImageByLink) — no un archivo local.
+async function sendTemplate(to, templateName, languageCode, params, headerImageUrl) {
   languageCode = languageCode || 'es';
   params = params || [];
   const api = client();
   const components = params.length > 0 ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text: String(text) })) }] : [];
+  if (headerImageUrl) {
+    components.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: headerImageUrl } }] });
+  }
 
 await api.post('/messages', {
   messaging_product: 'whatsapp',
