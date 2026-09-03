@@ -90,6 +90,12 @@ const DEFAULTS = {
   // y {{guia}}, que se reemplazan por los datos de cada pedido. null = usa
   // el texto por defecto que trae el codigo.
   shippingFreeText: null,
+  // Plantilla que usa el "seguimiento diario" (ver src/seguimiento.js) para
+  // avisar que el pedido ya llego a la agencia y esta listo para retirar.
+  // null = usa "pedido_ha_llegado_a_tealca" (la que se armo para esto), pero
+  // se puede cambiar aca si el negocio la vuelve a aprobar con otro nombre.
+  pickupTemplateName: null,
+  pickupTemplateLanguage: 'es',
 };
 
 function load() {

@@ -48,6 +48,13 @@ function parseExportBuffer(buffer) {
   const idxCiudad = findCol(header, 'ciudad');
   const idxProducto = findCol(header, 'producto');
   const idxEstado = findCol(header, 'estado pedido', 'estado');
+  // Estos dos se agregaron para el seguimiento diario (ver seguimiento.js):
+  // "Total Venta Bs" es el monto que hay que cobrar contra entrega/retiro, y
+  // "Bodega Destino" identifica la agencia/bodega adonde llego el pedido.
+  // Busqueda especifica (no solo "total venta") para no confundirla con la
+  // columna en USD que tiene el mismo prefijo.
+  const idxTotalVentaBs = findCol(header, 'total venta bs');
+  const idxBodegaDestino = findCol(header, 'bodega destino');
 
   if (idxGuia === -1 || idxCliente === -1) {
     throw new Error('No reconozco las columnas de guia/cliente en este Excel. Revisa que sea la exportacion de pedidos de Dropanas.');
@@ -62,6 +69,8 @@ function parseExportBuffer(buffer) {
       ciudad: idxCiudad !== -1 ? String(r[idxCiudad] || '').trim() : '',
       producto: idxProducto !== -1 ? String(r[idxProducto] || '').trim() : '',
       estadoPedido: idxEstado !== -1 ? String(r[idxEstado] || '').trim() : '',
+      totalVentaBs: idxTotalVentaBs !== -1 ? r[idxTotalVentaBs] : '',
+      bodegaDestino: idxBodegaDestino !== -1 ? String(r[idxBodegaDestino] || '').trim() : '',
     }));
 }
 
