@@ -389,6 +389,18 @@ async function handleIncomingMessage(from, message, profileName) {
 
   const lower = rawText.toLowerCase();
 
+  // Codigo de anuncio (ej. I1C1, I2C3): el negocio lo precarga en el texto
+  // del link de cada anuncio para saber despues de que anuncio salio cada
+  // venta y decidir cual escalar. Solo tiene sentido buscarlo en el PRIMER
+  // mensaje de la conversacion (es lo que trae el link armado, no algo que
+  // el cliente escriba despues por su cuenta). Si el cliente lo borro o lo
+  // cambio antes de mandar el mensaje, no hay match y listo: no es un error,
+  // simplemente esa conversacion queda sin codigo.
+  if (session.history.length === 0 && !session.adCode && rawText) {
+    const codeMatch = rawText.trim().match(/^([A-Za-z]\d[A-Za-z]\d)(?=\s|$)/);
+    if (codeMatch) updateSession(from, { adCode: codeMatch[1].toUpperCase() });
+  }
+
   // El mensaje entrante se guarda SIEMPRE, aunque el bot este apagado o
   // pausado en esta conversacion: el panel tiene que ver la conversacion
   // completa para que alguien pueda tomarla a mano.
