@@ -182,6 +182,7 @@ ${dataRequestTemplate}
      Cuando el cliente te conteste con esos datos, leelos con cuidado y fijate bien cual valor es cual aunque los mande en un orden distinto al que pediste, o todos juntos en un solo mensaje: el nombre es texto con letras, el telefono venezolano tiene 10 u 11 digitos (suele empezar con 0 o con 4), la cedula tiene entre 6 y 9 digitos. Si el cliente dice algo como "la direccion que me pasaste" o similar, es solo una confirmacion de la agencia/direccion, no un dato nuevo, no lo cuentes como si faltara. En cuanto identifiques nombre, telefono y cedula (aunque hayan llegado mezclados en un mismo mensaje o en un orden distinto), da esos tres datos por completos y NUNCA le vuelvas a pedir ninguno de ellos.
   Si te dice una cantidad sin precio confirmado, nunca inventes ni calcules el precio total: segui tomando los datos y decile que confirmas el precio exacto en un momento.
   Si no sabes un precio, un plazo de envio o un dato del producto, decilo asi de simple: que lo confirmas en un momento. Nunca lo inventes.
+  NUNCA escribas un link ni una imagen en formato markdown (cosas como "![nombre](https://...)" o cualquier link inventado/de ejemplo) directo en el texto del mensaje: WhatsApp no lo muestra como imagen, el cliente ve el texto crudo y el link ni siquiera funciona. Esto paso de verdad: un cliente pidio ver una foto y en vez de mandarsela de verdad (o decirle que no tenias una para ese momento), se le mando un link falso como texto plano, que no le sirvio de nada. Si el cliente pide una foto y no es un caso en el que corresponda usar mostrar_foto (ver mas abajo), decile con tus palabras que por ahora no tenes esa foto para mandarle, sin inventar ningun link.
   Si el cliente pide hablar con una persona, se queja o reclama algo serio, decile que ya lo pasas con un asesor humano y no sigas insistiendo con el guion de venta.
 
   CIERRE DEL PEDIDO:
@@ -217,7 +218,7 @@ ${libraryImagesText() ? `
   FOTOS DURANTE LA CHARLA:
   Estas son las imagenes cargadas en la biblioteca del negocio:
 ${libraryImagesText()}
-  Podes mandar una de estas fotos en medio de la charla usando la herramienta mostrar_foto con el nombre EXACTO tal cual aparece arriba, pero SOLO cuando las instrucciones de un producto (arriba, en el catalogo) o la base de conocimiento del negocio te digan explicitamente que mandes esa foto en ese momento. Nunca la uses por iniciativa propia sin que te lo hayan indicado asi.` : ''}`;
+  Podes mandar una de estas fotos en medio de la charla usando la herramienta mostrar_foto con el nombre EXACTO tal cual aparece arriba, pero SOLO cuando las instrucciones de un producto (arriba, en el catalogo) o la base de conocimiento del negocio te digan explicitamente que mandes esa foto en ese momento. Nunca la uses por iniciativa propia sin que te lo hayan indicado asi. Si el cliente pide ver una foto y no corresponde mandarla asi, NUNCA escribas un link ni una imagen en markdown en el texto (ver la regla de mas arriba): decile con tus palabras que por ahora no tenes esa foto para mandarle.` : ''}`;
 }
 
 // El modelo deberia usar ||| para marcar donde arranca un mensaje nuevo,
@@ -737,6 +738,23 @@ function stripDuplicateDataRequest(text) {
   return filtered.join('\n\n');
 }
 
+// Red de seguridad de codigo (ademas de la instruccion en el prompt): una
+// foto real SIEMPRE se manda por un canal aparte (la herramienta
+// mostrar_foto, ver result.image mas abajo), nunca como markdown adentro
+// del texto del mensaje. Si el modelo igual escribe algo como
+// "![nombre](https://...)" (esto paso de verdad: un cliente pidio ver una
+// foto y en vez de mandarsela o decir que no tenia, le llego ese link falso
+// como texto plano), lo sacamos: WhatsApp no lo muestra como imagen de
+// todos modos, asi que dejarlo ahi solo confunde al cliente con un link roto.
+function scrubFakeImageLinks(text) {
+  if (!text) return text;
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const GENIAL_REPLACEMENTS = ['que bueno', 'perfecto', 'buenisimo', 'dale', 'listo'];
 let _genialCounter = 0;
 function scrubGenial(text) {
@@ -823,7 +841,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
 
   if (!toolCalls || !toolCalls.length) {
     console.log('[agency-guard] el modelo NO llamo ninguna herramienta este turno. userText=', userText, 'knownCity=', knownCity);
-    const text = guardAgainstUnverifiedAgencyList(scrubGenial(responseMessage.content.trim()), knownCity, userText);
+    const text = guardAgainstUnverifiedAgencyList(scrubFakeImageLinks(scrubGenial(responseMessage.content.trim())), knownCity, userText);
     return { text, images: [] };
   }
   console.log('[agency-guard] el modelo SI llamo herramienta(s):', toolCalls.map((c) => c.function.name).join(', '));
@@ -853,7 +871,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
     tools: TOOLS,
   });
 
-  let text = scrubGenial(followUp.choices[0].message.content.trim());
+  let text = scrubFakeImageLinks(scrubGenial(followUp.choices[0].message.content.trim()));
 
   // Red de seguridad de codigo: si en este turno se busco una lista de
   // agencias por ciudad/estado y la herramienta encontro mas de una, pero el
