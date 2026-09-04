@@ -499,7 +499,12 @@ function renderGuia(convo) {
   if (document.activeElement !== $('guiaAgenciaInput')) {
     $('guiaAgenciaInput').value = convo.card?.agencia || ''
   }
-  $('guiaImageName').textContent = convo.card?.guiaImageUrl ? '✅ tiene foto' : ''
+  // Es un link a la MISMA foto ya guardada (no una copia aparte), asi que
+  // verla aca no gasta espacio de mas: es la misma imagen que se le mando o
+  // se le va a mandar al cliente.
+  $('guiaImageName').innerHTML = convo.card?.guiaImageUrl
+    ? `✅ <a href="${esc(convo.card.guiaImageUrl)}" target="_blank" rel="noopener">ver foto</a>`
+    : ''
   $('guiaImageFile').value = ''
   $('guiaStatus').textContent = convo.shippingNotifiedAt
     ? `Avisado ${timeInStage(convo.shippingNotifiedAt)}`
@@ -1528,7 +1533,13 @@ function dpRowHtml(row, idx) {
 
   const disabled = row.matchType === 'sin_match' ? 'disabled' : ''
   const checked = row.matchType === 'exacto' ? 'checked' : ''
-  const foto = row.photoName ? `<div class="dp-phone">📎 ${esc(row.photoName)}</div>` : ''
+  // El link de "ver" abre un blob local del propio archivo que ya elegiste
+  // en tu computadora: no se sube a ningun lado solo por mirarlo, es nada
+  // mas una vista previa antes de mandarlo de verdad.
+  const foto = row.photoName
+    ? `<div class="dp-phone">📎 ${esc(row.photoName)} · <a href="#" class="dp-view-photo" data-idx="${idx}">ver</a></div>`
+    : ''
+  const testBtn = `<button type="button" class="btn dp-test" data-idx="${idx}" ${row.matchType === 'sin_match' ? 'disabled' : ''}>🧪 Probar</button>`
 
   return `<div class="dp-row" data-idx="${idx}">
     <input type="checkbox" class="dp-check" data-idx="${idx}" ${checked} ${disabled}>
@@ -1538,6 +1549,7 @@ function dpRowHtml(row, idx) {
       ${picker}
       ${foto}
     </div>
+    ${testBtn}
     ${badge}
   </div>`
 }
@@ -1598,6 +1610,49 @@ $('dp_results').addEventListener('change', (e) => {
   }
 })
 
+// "ver" la foto matcheada (vista previa local, no sube nada) y "🧪 Probar"
+// (manda la plantilla real, con los datos de esa fila, a tu propio numero de
+// prueba, sin tocar ninguna conversacion) — ver el field #dp_testPhone.
+$('dp_results').addEventListener('click', async (e) => {
+  const viewBtn = e.target.closest('.dp-view-photo')
+  if (viewBtn) {
+    e.preventDefault()
+    const row = dpRows[Number(viewBtn.dataset.idx)]
+    if (row?.photoFile) window.open(URL.createObjectURL(row.photoFile), '_blank')
+    return
+  }
+
+  const testBtn = e.target.closest('.dp-test')
+  if (testBtn) {
+    const idx = Number(testBtn.dataset.idx)
+    const row = dpRows[idx]
+    const testPhone = $('dp_testPhone').value.trim()
+    if (!testPhone) { alert('Escribí primero tu número de prueba, arriba del todo.'); return }
+    testBtn.disabled = true
+    const textoOriginal = testBtn.textContent
+    testBtn.textContent = 'Mandando…'
+    const form = new FormData()
+    form.append('testPhone', testPhone)
+    form.append('nombre', row.matchedName || row.cliente || '')
+    form.append('producto', row.producto || '')
+    form.append('guia', row.guia || '')
+    form.append('agencia', row.bodegaDestino || row.ciudad || '')
+    if (row.photoFile) form.append('imagen', row.photoFile)
+    try {
+      const res = await fetch('/panel/api/dropanas/test-send', { method: 'POST', body: form })
+      if (res.status === 401) { window.location.href = '/panel/login'; return }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'No se pudo mandar la prueba')
+      testBtn.textContent = '✅ Mandada'
+    } catch (err) {
+      testBtn.textContent = textoOriginal
+      alert(err.message)
+    } finally {
+      testBtn.disabled = false
+    }
+  }
+})
+
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
 
 $('dp_confirm').addEventListener('click', async () => {
@@ -1617,6 +1672,13 @@ $('dp_confirm').addEventListener('click', async () => {
     $('dp_confirmMsg').textContent = `Mandando ${i + 1}/${idxs.length}…`
     const form = new FormData()
     form.append('guia', row.guia)
+    // Bug real que rompio el envio anterior: esto no se mandaba, la agencia
+    // quedaba vacia, y una plantilla de WhatsApp con UN solo parametro vacio
+    // sale entera sin reemplazar (el cliente ve los {{1}} {{2}} crudos, no
+    // solo el dato que faltaba). "Bodega Destino" del Excel es el dato mas
+    // preciso; si esa columna no vino, se usa la ciudad como respaldo.
+    const agencia = String(row.bodegaDestino || row.ciudad || '').trim()
+    if (agencia) form.append('agencia', agencia)
     if (row.photoFile) form.append('imagen', row.photoFile)
     try {
       const res = await fetch('/panel/api/conversations/' + encodeURIComponent(row.phone) + '/guia', { method: 'POST', body: form })
