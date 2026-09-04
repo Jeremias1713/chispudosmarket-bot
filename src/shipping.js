@@ -148,6 +148,13 @@ async function testSend(phone, datos) {
   if (!settings.shippingTemplateName) {
     throw new Error('Todavia no cargaste el nombre de la plantilla (Configuracion > Plantillas > "Plantilla para cuando la ventana ya esta cerrada").');
   }
+  // Esta plantilla exige SIEMPRE una foto como encabezado (ver mas arriba en
+  // maybeNotifyShipping): si la fila que se esta probando no tiene ninguna
+  // foto matcheada, Meta va a rechazar el envio con un 400 generico y poco
+  // claro. Se avisa esto de entrada, antes de siquiera llamar a Meta.
+  if (!datos?.guiaImageUrl) {
+    throw new Error('Esta plantilla necesita SIEMPRE la foto de la guia como encabezado, y esta fila no tiene ninguna foto matcheada. Subi las fotos (nombradas con el nombre del cliente) en "Fotos de las guias" y volve a analizar el archivo antes de probar esta fila.');
+  }
   const values = {
     nombre: String(datos?.nombre || '').trim() || 'cliente',
     producto: String(datos?.producto || '').trim() || 'tu pedido',
@@ -155,13 +162,21 @@ async function testSend(phone, datos) {
     agencia: String(datos?.agencia || '').trim() || '-',
     monto: String(datos?.monto || '').trim() || resolveMonto(datos?.producto) || '-',
   };
-  await sendTemplate(
-    phone,
-    settings.shippingTemplateName,
-    settings.shippingTemplateLanguage || 'es',
-    [values.nombre, values.producto, values.guia, values.agencia, values.monto],
-    datos?.guiaImageUrl || null
-  );
+  try {
+    await sendTemplate(
+      phone,
+      settings.shippingTemplateName,
+      settings.shippingTemplateLanguage || 'es',
+      [values.nombre, values.producto, values.guia, values.agencia, values.monto],
+      datos.guiaImageUrl
+    );
+  } catch (err) {
+    // El axios generico dice solo "Request failed with status code 400", sin
+    // decir POR QUE — el motivo real que manda Meta viene adentro de
+    // err.response.data.error.message, mucho mas util para poder arreglarlo.
+    const metaMsg = err.response?.data?.error?.message;
+    throw new Error(metaMsg ? `Meta rechazo el envio: ${metaMsg}` : err.message);
+  }
   return { sent: true, values };
 }
 
