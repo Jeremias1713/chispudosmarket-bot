@@ -749,6 +749,37 @@ router.post('/api/dropanas/preview', upload.single('file'), (req, res) => {
   }
 });
 
+// Modo de prueba: manda la plantilla de guia (con estos datos puntuales) a
+// un numero cualquiera que se escriba en el panel, SIN tocar ninguna
+// conversacion real ni guardar nada — para poder ver como va a quedar el
+// mensaje antes de confirmar el envio real a los clientes de una fila.
+router.post('/api/dropanas/test-send', upload.single('imagen'), async (req, res) => {
+  const testPhone = String(req.body?.testPhone || '').trim();
+  if (!testPhone) return res.status(400).json({ error: 'Falta el numero de prueba' });
+  try {
+    const datos = {
+      nombre: req.body?.nombre,
+      producto: req.body?.producto,
+      guia: req.body?.guia,
+      agencia: req.body?.agencia,
+      monto: req.body?.monto,
+    };
+    if (req.file) {
+      const item = library.addImage({
+        buffer: req.file.buffer,
+        mime: req.file.mimetype,
+        name: `Prueba de guia - ${testPhone}`,
+        folder: 'Guias de envio',
+      });
+      datos.guiaImageUrl = mediaUrl(item.filename);
+    }
+    const result = await shipping.testSend(testPhone, datos);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Espera entre cada envio del lote. No hace falta por limite tecnico de
 // WhatsApp (el limite real es de decenas de mensajes por segundo): es solo
 // para que la tanda salga de forma mas espaciada/natural.
