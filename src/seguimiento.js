@@ -94,12 +94,15 @@ function buildPreview(rows) {
       matchType,
       candidates: candidates.map((s) => ({ phone: s.phone, nombre: s.card?.nombre || s.name || '', stage: s.stage })),
       phone: matchType === 'exacto' ? candidates[0].phone : null,
+      // Igual que en shipping.js: WhatsApp/Meta rompe la plantilla ENTERA (sin
+      // reemplazar ninguna variable) si UN solo parametro llega vacio, asi
+      // que ninguno de estos puede quedar en '' — siempre un respaldo.
       plantillaVars: enviarPlantilla
         ? {
-            nombre: firstName(row.cliente),
-            producto: row.producto,
-            guia: row.guia,
-            monto: formatMonto(row.totalVentaBs),
+            nombre: firstName(row.cliente) || 'cliente',
+            producto: row.producto || 'tu pedido',
+            guia: row.guia || '-',
+            monto: formatMonto(row.totalVentaBs) || '-',
           }
         : null,
     };
@@ -148,4 +151,27 @@ async function applyItems(items) {
   return results;
 }
 
-module.exports = { buildPreview, applyItems };
+// Modo de prueba: manda la plantilla de "ya podes retirarlo" (con estos
+// datos puntuales) a CUALQUIER numero que se le pase, sin leer ni tocar
+// ninguna conversacion real ni guardar nada — para poder ver como sale el
+// mensaje antes de confirmar el envio real a los clientes que ya llegaron.
+async function testSend(phone, vars) {
+  const settings = getSettings();
+  const templateName = settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca';
+  const languageCode = settings.pickupTemplateLanguage || 'es';
+  const values = {
+    nombre: String(vars?.nombre || '').trim() || 'cliente',
+    producto: String(vars?.producto || '').trim() || 'tu pedido',
+    guia: String(vars?.guia || '').trim() || '-',
+    monto: String(vars?.monto || '').trim() || '-',
+  };
+  try {
+    await sendTemplate(phone, templateName, languageCode, [values.nombre, values.producto, values.guia, values.monto]);
+  } catch (err) {
+    const metaMsg = err.response?.data?.error?.message;
+    throw new Error(metaMsg ? `Meta rechazo el envio: ${metaMsg}` : err.message);
+  }
+  return { sent: true, values };
+}
+
+module.exports = { buildPreview, applyItems, testSend };
