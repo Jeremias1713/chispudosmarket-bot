@@ -590,7 +590,19 @@ async function processReply(from) {
     // etapa en el panel ni siquiera era "entregado". El tiempo transcurrido
     // nunca alcanza para asumir eso; ahora la unica fuente es esta etapa.
     const shippingStage = session.stage || null;
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage);
+    // Nombre/cedula/telefono ya confirmados por el cliente (ver ai.js): se
+    // pasan aparte del historial, igual que knownCity, para que sigan
+    // valiendo aunque esos mensajes ya hayan quedado afuera de la ventana de
+    // historial reciente que ve el modelo, o aunque se reabra el pedido para
+    // cambiar algo. Bug real que esto arregla: un cliente ya habia dado sus
+    // tres datos, cambio la cantidad de su pedido varios mensajes despues, y
+    // el bot se los volvio a pedir enteros como si nunca los hubiera tenido.
+    const knownCustomer = {
+      nombre: session.card?.nombre || null,
+      cedula: session.card?.cedula || null,
+      telefono: session.card?.telefono || null,
+    };
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer);
 
     // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
     // habia pedido nombre/cedula/telefono antes y el modelo igual intento
