@@ -332,10 +332,18 @@ async function handleIncomingMessage(from, message, profileName) {
   let rawText =
     type === 'text'
       ? message.text.body.trim()
-      : type === 'interactive' && message.interactive?.button_reply
-        ? message.interactive.button_reply.title
-        : type === 'interactive' && message.interactive?.list_reply
-          ? message.interactive.list_reply.title
+      // Boton de una PLANTILLA aprobada (ej. "Ya voy a retirarlo" de la
+      // plantilla de retiro): WhatsApp lo manda con este tipo distinto
+      // ("button"), no "interactive" — ese es solo para los botones que arma
+      // el propio bot (ver mas abajo). Sin este caso, tocar un boton de
+      // plantilla quedaba con rawText vacio y el bot contestaba el generico
+      // "no pude leer eso que mandaste", como si no hubiera entendido nada.
+      : type === 'button' && message.button?.text
+        ? message.button.text
+        : type === 'interactive' && message.interactive?.button_reply
+          ? message.interactive.button_reply.title
+          : type === 'interactive' && message.interactive?.list_reply
+            ? message.interactive.list_reply.title
           // Un sticker (la mayoria de los "gifs" que manda la gente por
           // WhatsApp en realidad viajan como sticker animado) no se puede
           // leer, pero en la practica casi siempre es la forma que tiene el
