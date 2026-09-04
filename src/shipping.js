@@ -40,17 +40,24 @@ function resolveMonto(productoTexto) {
   return match ? `${Math.round(Number(match.price))}${match.currency || 'Bs'}` : '';
 }
 
+// IMPORTANTE: WhatsApp/Meta exige que NINGUN parametro de una plantilla
+// llegue vacio ("") — si uno solo llega vacio, Meta no manda un error, manda
+// la plantilla igual pero SIN reemplazar NINGUNA variable (el cliente ve los
+// {{1}} {{2}} crudos, aunque el resto de los datos si estuvieran bien
+// cargados). Por eso aca abajo cada campo tiene un valor de respaldo no
+// vacio ('-'), nunca ''. Esto fue justo lo que paso con un envio en lote de
+// guias donde la agencia habia quedado sin cargar: por esa UNA variable
+// vacia, el mensaje entero le salio roto a todos los clientes de esa tanda.
 function placeholderValues(session) {
   return {
     nombre: session.name || session.card?.nombre || 'cliente',
     producto: session.card?.producto || 'tu pedido',
-    guia: session.card?.guia || '',
-    // agencia: se carga a mano junto con la guia (ver el campo nuevo en el
-    // panel), porque este flujo (cargar guia desde el chat, una por una) no
-    // tiene, como el seguimiento diario de Dropanas, un Excel del que
-    // sacarla sola.
-    agencia: session.card?.agencia || '',
-    monto: resolveMonto(session.card?.producto),
+    guia: session.card?.guia || '-',
+    // agencia: se carga a mano junto con la guia (ver el campo en el panel),
+    // o se completa sola desde el Excel de Dropanas (columna "Bodega
+    // Destino"/"Ciudad") cuando se carga en lote.
+    agencia: session.card?.agencia || '-',
+    monto: resolveMonto(session.card?.producto) || '-',
   };
 }
 
@@ -129,4 +136,33 @@ async function maybeNotifyShipping(phone, session) {
   };
 }
 
-module.exports = { maybeNotifyShipping };
+// Manda una prueba REAL de la plantilla (siempre la plantilla, no el texto
+// libre, porque es la que tiene mas variables y mas riesgo de salir mal si
+// falta un dato) a CUALQUIER numero que se le pase — sin leer ni tocar
+// ninguna sesion/conversacion existente, para poder probar como va a quedar
+// el mensaje antes de mandarlo de verdad a los clientes. Los mismos
+// respaldos ('-') que placeholderValues, para que la prueba muestre
+// exactamente lo mismo que veria el cliente real.
+async function testSend(phone, datos) {
+  const settings = getSettings();
+  if (!settings.shippingTemplateName) {
+    throw new Error('Todavia no cargaste el nombre de la plantilla (Configuracion > Plantillas > "Plantilla para cuando la ventana ya esta cerrada").');
+  }
+  const values = {
+    nombre: String(datos?.nombre || '').trim() || 'cliente',
+    producto: String(datos?.producto || '').trim() || 'tu pedido',
+    guia: String(datos?.guia || '').trim() || '-',
+    agencia: String(datos?.agencia || '').trim() || '-',
+    monto: String(datos?.monto || '').trim() || resolveMonto(datos?.producto) || '-',
+  };
+  await sendTemplate(
+    phone,
+    settings.shippingTemplateName,
+    settings.shippingTemplateLanguage || 'es',
+    [values.nombre, values.producto, values.guia, values.agencia, values.monto],
+    datos?.guiaImageUrl || null
+  );
+  return { sent: true, values };
+}
+
+module.exports = { maybeNotifyShipping, testSend };
