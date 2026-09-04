@@ -249,9 +249,12 @@ async function sendTextOrImage(to, text, imageIds) {
   // PRIMERO que veia el cliente; el pedido es al reves, que las fotos
   // entren primero y el texto sea lo ultimo que lee, tal cual esta escrito.
   const results = await Promise.allSettled(resolved.map((r) => sendImageByLink(to, r.url)));
-  results.forEach((res) => {
+  results.forEach((res, i) => {
     if (res.status === 'fulfilled') {
-      appendMessage(to, 'assistant', '[imagen]');
+      // Se guarda la URL como attachment (igual que las fotos que manda el
+      // cliente) para que el panel la muestre de verdad en el chat, en vez
+      // de solo el texto "[imagen]" sin nada para ver.
+      appendMessage(to, 'assistant', '[imagen]', { attachment: { kind: 'image', url: resolved[i].url } });
     } else {
       console.error('No se pudo mandar una foto, sigo con las demas:', res.reason?.message);
     }
@@ -273,7 +276,9 @@ async function sendConversationImages(to, images) {
   const results = await Promise.allSettled(valid.map((x) => sendImageByLink(to, x.url)));
   results.forEach((res, i) => {
     if (res.status === 'fulfilled') {
-      appendMessage(to, 'assistant', `[imagen] ${valid[i].img.name}`);
+      // Mismo motivo que en sendTextOrImage: guardar el attachment para que
+      // el panel pueda mostrar la imagen real, no solo su nombre en texto.
+      appendMessage(to, 'assistant', `[imagen] ${valid[i].img.name}`, { attachment: { kind: 'image', url: valid[i].url } });
     } else {
       console.error('No se pudo mandar una foto durante la charla:', res.reason?.message);
     }

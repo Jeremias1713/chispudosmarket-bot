@@ -89,7 +89,11 @@ async function maybeNotifyShipping(phone, session) {
     if (abierta && s.card?.guiaImageUrl) {
       try {
         await sendImageByLink(phone, s.card.guiaImageUrl);
-        appendMessage(phone, 'assistant', '[imagen] Guia de envio');
+        // Se guarda el attachment (no solo el texto) para que el panel
+        // muestre la foto real dentro del chat, igual que cualquier otra
+        // imagen — antes solo quedaba el texto "[imagen] Guia de envio" sin
+        // nada para ver.
+        appendMessage(phone, 'assistant', '[imagen] Guia de envio', { attachment: { kind: 'image', url: s.card.guiaImageUrl } });
         imageSent = true;
       } catch (err) {
         console.error('No se pudo mandar la foto de la guia a', phone, err.response?.data || err.message);
