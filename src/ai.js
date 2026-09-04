@@ -120,8 +120,18 @@ function splitInstructions(maxWords, maxWordsHardCap, maxParts) {
 const SHIPPING_STAGE_TEXT = {
   vendido: 'el pedido esta cerrado pero TODAVIA NO se genero ni se mando el numero de guia: no se ha despachado. Si pregunta si ya salio, si ya llego, o por el numero de guia, decile con honestidad que todavia se esta preparando y que en cuanto tengan la guia se la pasan. NUNCA digas que ya se envio, que esta en camino, o que ya llego.',
   esperando_guia: 'el pedido esta cerrado pero TODAVIA NO se genero ni se mando el numero de guia: no se ha despachado. Si pregunta si ya salio, si ya llego, o por el numero de guia, decile con honestidad que todavia se esta preparando y que en cuanto tengan la guia se la pasan. NUNCA digas que ya se envio, que esta en camino, o que ya llego.',
-  esperando_retiro: 'ya se genero y se le paso al cliente el numero de guia (el pedido salio de despacho), pero TODAVIA NO hay confirmacion de que haya llegado a destino. Si pregunta si ya llego, decile que todavia esta en camino/en transito, nunca que ya llego.',
-  en_camino: 'el pedido ya salio y, segun la ultima actualizacion, ya esta en camino o ya llego a la agencia y esta lista para que el cliente lo retire. Podes decir eso (que esta en camino, o que ya puede pasar a retirarlo por la agencia), pero NO digas que "ya llego a sus manos" ni que "ya lo recibio": eso solo lo confirma el cliente cuando lo retire de verdad.',
+  // OJO: estos dos nombres de etapa son justo al reves de lo que suena a
+  // simple vista — "en_camino" es la que todavia NO llego (esta en
+  // transito), y "esperando_retiro" es la que YA llego a la agencia y esta
+  // esperando que el CLIENTE la retire (asi las usa el resto del sistema:
+  // ver seguimiento.js, donde "en oficina" pasa la conversacion justo a
+  // esperando_retiro, y la plantilla "ya podes retirarlo"). Antes esto
+  // estaba invertido aca (el texto de esperando_retiro decia "todavia no
+  // llego" y viceversa), y por eso el bot le decia a un cliente que ya
+  // estaba en Esperando retiro que "todavia hay que enviar tu pedido a la
+  // agencia" — un caso real que reporto el negocio.
+  en_camino: 'el pedido ya salio de despacho (ya tiene numero de guia) pero TODAVIA NO llego a la agencia de destino: esta en camino/en transito. Si pregunta si ya llego, decile con honestidad que todavia esta en camino, nunca que ya llego ni que ya puede pasar a retirarlo.',
+  esperando_retiro: 'el pedido YA LLEGO a la agencia de destino y esta listo para que el cliente lo retire. Podes decir eso con naturalidad (que ya llego a la agencia y ya puede pasar a buscarlo), pero NO digas que "ya lo tiene en sus manos" ni que "ya lo recibio": eso solo lo confirma el cliente cuando lo retire de verdad.',
   entregado: 'el cliente YA CONFIRMO que recibio o retiro su pedido. Si pregunta o menciona algo sobre la entrega, podes hablar de eso con naturalidad como algo ya resuelto.',
 };
 
