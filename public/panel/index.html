@@ -608,6 +608,16 @@
                 </div>
                 <input type="file" id="sg_file" accept=".xlsx,.xls">
               </div>
+              <div class="field">
+                <label for="sg_testPhone">Número para pruebas (opcional)</label>
+                <div class="help">
+                  Poné tu propio número de WhatsApp (con código de país, sin "+") y en las
+                  filas que digan "En oficina" (las que le van a avisar al cliente que ya
+                  llegó) te va a aparecer un botón "🧪 Probar" para mandarte a vos mismo ese
+                  mensaje antes de confirmar el envío real.
+                </div>
+                <input type="text" id="sg_testPhone" placeholder="Ej: 584121234567">
+              </div>
               <div class="settings-actions">
                 <button class="btn" id="sg_analyze">Analizar Excel</button>
                 <span class="save-msg" id="sg_msg"></span>

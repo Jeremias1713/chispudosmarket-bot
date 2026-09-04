@@ -1744,6 +1744,11 @@ function sgRowHtml(item, idx) {
 
   const disabled = item.matchType === 'sin_match' || !item.etapaNueva ? 'disabled' : ''
   const checked = item.matchType === 'exacto' && item.etapaNueva ? 'checked' : ''
+  // El boton de prueba solo tiene sentido en las filas que SI van a mandar
+  // la plantilla (las "En oficina" — el aviso de "ya llego, pasa a buscarlo").
+  const testBtn = item.enviarPlantilla
+    ? `<button type="button" class="btn sg-test" data-idx="${idx}">🧪 Probar</button>`
+    : ''
 
   return `<div class="dp-row" data-idx="${idx}">
     <input type="checkbox" class="sg-check" data-idx="${idx}" ${checked} ${disabled}>
@@ -1753,6 +1758,7 @@ function sgRowHtml(item, idx) {
       ${vars}
       ${picker}
     </div>
+    ${testBtn}
     ${badgeMatch}
   </div>`
 }
@@ -1806,6 +1812,43 @@ $('sg_results').addEventListener('change', (e) => {
     sgItems[idx].phone = phone || null
     const check = $('sg_results').querySelector(`.sg-check[data-idx="${idx}"]`)
     if (check) check.checked = Boolean(phone)
+  }
+})
+
+// "🧪 Probar": manda la plantilla de "ya podés retirarlo" con los datos de
+// esa fila a tu propio número de prueba (#sg_testPhone), sin tocar ninguna
+// conversación real.
+$('sg_results').addEventListener('click', async (e) => {
+  const testBtn = e.target.closest('.sg-test')
+  if (!testBtn) return
+  const idx = Number(testBtn.dataset.idx)
+  const item = sgItems[idx]
+  const testPhone = $('sg_testPhone').value.trim()
+  if (!testPhone) { alert('Escribí primero tu número de prueba, arriba del todo.'); return }
+  testBtn.disabled = true
+  const textoOriginal = testBtn.textContent
+  testBtn.textContent = 'Mandando…'
+  try {
+    const res = await fetch('/panel/api/seguimiento/test-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        testPhone,
+        nombre: item.plantillaVars?.nombre || '',
+        producto: item.plantillaVars?.producto || '',
+        guia: item.plantillaVars?.guia || '',
+        monto: item.plantillaVars?.monto || '',
+      }),
+    })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error || 'No se pudo mandar la prueba')
+    testBtn.textContent = '✅ Mandada'
+  } catch (err) {
+    testBtn.textContent = textoOriginal
+    alert(err.message)
+  } finally {
+    testBtn.disabled = false
   }
 })
 
