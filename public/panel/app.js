@@ -1667,6 +1667,7 @@ $('dp_confirm').addEventListener('click', async () => {
   $('dp_confirm').disabled = true
   let ok = 0
   let fallo = 0
+  const errores = []
   for (let i = 0; i < idxs.length; i++) {
     const row = dpRows[idxs[i]]
     $('dp_confirmMsg').textContent = `Mandando ${i + 1}/${idxs.length}…`
@@ -1685,14 +1686,27 @@ $('dp_confirm').addEventListener('click', async () => {
       if (res.status === 401) { window.location.href = '/panel/login'; return }
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
       const body = await res.json()
-      if (body.notice?.sent) ok++
-      else fallo++
-    } catch {
+      if (body.notice?.sent) {
+        ok++
+      } else {
+        fallo++
+        errores.push(`${row.cliente || row.phone}: ${body.notice?.error || body.notice?.reason || 'no se pudo mandar'}`)
+      }
+    } catch (err) {
       fallo++
+      errores.push(`${row.cliente || row.phone}: ${err.message}`)
     }
     if (i < idxs.length - 1) await sleep(BULK_GUIA_CLIENT_DELAY_MS)
   }
-  $('dp_confirmMsg').textContent = `Listo: ${ok} avisadas${fallo ? `, ${fallo} con problema (revisalas a mano)` : ''}`
+  // Antes esto era un texto chiquito ("Listo: X avisadas, Y con problema")
+  // facil de pasar por alto — ahora se ve clarito que paso con cada uno que
+  // fallo, en vez de tener que adivinar o revisar cliente por cliente.
+  const resumenDp = [ok ? `✅ ${ok} mandada${ok === 1 ? '' : 's'} bien` : '', fallo ? `❌ ${fallo} con error` : '']
+    .filter(Boolean)
+    .join(' · ') || 'Nada para mandar'
+  $('dp_confirmMsg').innerHTML = resumenDp + (errores.length
+    ? `<br><span class="help">${errores.slice(0, 5).map(esc).join('<br>')}${errores.length > 5 ? `<br>y ${errores.length - 5} más…` : ''}</span>`
+    : '')
   dpRows = []
   $('dp_file').value = ''
   $('dp_photos').value = ''
@@ -1876,9 +1890,30 @@ $('sg_confirm').addEventListener('click', async () => {
     if (res.status === 401) { window.location.href = '/panel/login'; return }
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
     const data = await res.json()
-    const ok = (data.results || []).filter((r) => r.ok).length
-    const fallo = (data.results || []).filter((r) => !r.ok).length
-    $('sg_confirmMsg').textContent = `Listo: ${ok} aplicadas${fallo ? `, ${fallo} con problema (revisalas a mano)` : ''}`
+    const results = data.results || []
+    // Antes esto era un texto chiquito ("Listo: X aplicadas, Y con
+    // problema") que se pasaba por alto facil (asi paso la ultima vez: SI se
+    // habia mandado, pero no quedo claro). Ahora se distingue "mandada"
+    // (fila que SI llevaba plantilla) de "sin mensaje" (las que solo
+    // actualizan la etapa, ej. "En camino"/"Entregado", que nunca mandan
+    // nada — eso es normal, no un error) y se listan los errores puntuales.
+    let mandadas = 0
+    let sinMensaje = 0
+    const erroresSg = []
+    results.forEach((r, i) => {
+      const item = sgItems[idxs[i]]
+      if (r.ok && item?.enviarPlantilla) mandadas++
+      else if (r.ok) sinMensaje++
+      else erroresSg.push(`${item?.cliente || r.phone}: ${r.error || 'no se pudo aplicar'}`)
+    })
+    const resumenSg = [
+      mandadas ? `✅ ${mandadas} mandada${mandadas === 1 ? '' : 's'} bien` : '',
+      sinMensaje ? `${sinMensaje} solo actualizada${sinMensaje === 1 ? '' : 's'} (sin mensaje, normal)` : '',
+      erroresSg.length ? `❌ ${erroresSg.length} con error` : '',
+    ].filter(Boolean).join(' · ') || 'Nada para aplicar'
+    $('sg_confirmMsg').innerHTML = resumenSg + (erroresSg.length
+      ? `<br><span class="help">${erroresSg.slice(0, 5).map(esc).join('<br>')}${erroresSg.length > 5 ? `<br>y ${erroresSg.length - 5} más…` : ''}</span>`
+      : '')
     sgItems = []
     $('sg_file').value = ''
     renderSgResults()
