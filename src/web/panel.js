@@ -849,6 +849,25 @@ router.post('/api/seguimiento/confirm', async (req, res) => {
   res.json({ ok: true, results });
 });
 
+// Modo de prueba (mismo mecanismo que el de guias por lote): manda la
+// plantilla de "ya podes retirarlo" a un numero cualquiera, sin tocar
+// ninguna conversacion ni guardar nada.
+router.post('/api/seguimiento/test-send', async (req, res) => {
+  const testPhone = String(req.body?.testPhone || '').trim();
+  if (!testPhone) return res.status(400).json({ error: 'Falta el numero de prueba' });
+  try {
+    const result = await seguimiento.testSend(testPhone, {
+      nombre: req.body?.nombre,
+      producto: req.body?.producto,
+      guia: req.body?.guia,
+      monto: req.body?.monto,
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Nota interna del negocio sobre este cliente (tags, recordatorios, lo que
 // sea). No la toca el bot ni el clasificador: es aparte de "notas" dentro de
 // card, que es lo que la IA infiere sola de la conversacion.
