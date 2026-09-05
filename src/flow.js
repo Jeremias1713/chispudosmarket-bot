@@ -578,16 +578,25 @@ async function processReply(from) {
     const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
     const knownCity = session.card?.ciudad || null;
     const knownProduct = session.linkedProductId ? findProduct(session.linkedProductId)?.name || null : null;
-    // OJO: antes esto se sacaba de session.stage (puesto por el clasificador
-    // por IA, que corre aparte y despues de mandar la respuesta). En la
-    // practica eso resulto poco confiable: hubo conversaciones donde el
-    // pedido ya estaba cerrado (se mando el mensaje de cierre) pero el
-    // clasificador nunca marco la etapa como "vendido", asi que el bot
-    // seguia agregando la pregunta de venta de siempre. Ahora usamos un flag
-    // propio (session.orderClosed) que se prende mas abajo, en el momento
-    // exacto en que el BOT genera el mensaje de cierre (deteccion directa
-    // del texto, sin depender de otra IA aparte).
-    const orderClosed = session.orderClosed === true;
+    // OJO: antes esto se sacaba SOLO de session.stage (puesto por el
+    // clasificador por IA, que corre aparte y despues de mandar la
+    // respuesta). En la practica eso resulto poco confiable: hubo
+    // conversaciones donde el pedido ya estaba cerrado (se mando el mensaje
+    // de cierre) pero el clasificador nunca marco la etapa como "vendido",
+    // asi que el bot seguia agregando la pregunta de venta de siempre. Por
+    // eso se sumo un flag propio (session.orderClosed) que se prende mas
+    // abajo, en el momento exacto en que el BOT genera el mensaje de cierre
+    // (deteccion directa del texto, sin depender de otra IA aparte).
+    // Pero ese flag SOLO se prende si el cierre lo detecto el bot mismo: un
+    // pedido marcado "vendido" (o cualquier etapa de SOLD_STAGES) a mano
+    // desde el panel -por ejemplo una venta cargada manualmente, o una
+    // conversacion vieja de antes de este flag- nunca prende orderClosed, y
+    // el bot seguia preguntando cosas como "avisame cuando estes listo para
+    // hacer el pedido" a un cliente que ya habia comprado (bug real
+    // reportado por el negocio). Por eso ahora se toman las DOS señales: el
+    // flag de deteccion de texto, O la etapa real que ya tiene el pedido en
+    // el panel.
+    const orderClosed = session.orderClosed === true || SOLD_STAGES.includes(session.stage);
     // Mismo criterio que orderClosed, pero para el bloque de "pedime tu
     // nombre, cedula y telefono": se detecto que a veces el modelo lo manda
     // dos veces en la misma conversacion (por ejemplo si el cliente contesta
