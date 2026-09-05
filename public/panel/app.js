@@ -2136,6 +2136,7 @@ async function loadSettings() {
   try { s = await api('/settings') } catch { return }
   $('cfg_botToggle').checked = s.botEnabled !== false
   $('cfg_businessName').value = s.businessName || ''
+  $('cfg_saleNotifyPhone').value = s.saleNotifyPhone || ''
   $('cfg_welcome').value = s.welcomeMessage || ''
   $('cfg_knowledge').value = s.knowledgeBase || ''
   $('cfg_dataRequestTemplate').value = s.dataRequestTemplate || ''
@@ -2181,6 +2182,7 @@ $('cfg_save').addEventListener('click', async () => {
   const body = {
     botEnabled: $('cfg_botToggle').checked,
     businessName: $('cfg_businessName').value.trim(),
+    saleNotifyPhone: $('cfg_saleNotifyPhone').value.trim().replace(/\D/g, ''),
     welcomeMessage: $('cfg_welcome').value,
     welcomeImageIds: getImagePickerSelection('welcomeImage'),
     knowledgeBase: $('cfg_knowledge').value,
