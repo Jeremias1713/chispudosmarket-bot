@@ -15,6 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 const webpush = require('web-push');
+const { sendText } = require('./whatsapp');
+const { getSettings } = require('./settings');
 
 const VAPID_PATH = path.join(__dirname, '..', 'data', 'push-vapid.json');
 const SUBS_PATH = path.join(__dirname, '..', 'data', 'push-subscriptions.json');
@@ -101,6 +103,31 @@ async function sendToAll(payload) {
   return { sent, total: subs.length };
 }
 
+// Manda el aviso de venta nueva por WhatsApp (ademas del push de arriba) al
+// numero configurado en Configuracion > "Numero de WhatsApp para avisos de
+// venta" (settings.saleNotifyPhone), si hay uno cargado. Ver el comentario de
+// saleNotifyPhone en settings.js sobre la ventana de 24h: si el envio falla
+// (ventana cerrada, numero mal puesto, credenciales de WhatsApp con
+// problemas, etc), esto SOLO lo deja en los logs, nunca tira un error para
+// arriba: la venta ya quedo registrada igual, un aviso que no llego no tiene
+// que romper nada mas del flujo.
+async function notifySaleWhatsapp(phone, nombre, producto, montoTxt) {
+  let to;
+  try {
+    const settings = getSettings();
+    to = String(settings.saleNotifyPhone || '').replace(/\D/g, '');
+  } catch (err) {
+    return;
+  }
+  if (!to) return;
+  const body = `💰 Nueva venta\n👤 ${nombre}\n📦 ${producto}${montoTxt}`;
+  try {
+    await sendText(to, body);
+  } catch (err) {
+    console.error('Error mandando aviso de venta por WhatsApp:', err?.response?.data?.error?.message || err.message);
+  }
+}
+
 // Notificacion de venta nueva. session es la conversacion que acaba de
 // pasar a stage 'vendido'.
 function notifySale(phone, session) {
@@ -108,6 +135,8 @@ function notifySale(phone, session) {
   const nombre = session?.card?.nombre || phone;
   const monto = session?.card?.monto;
   const montoTxt = monto != null && !Number.isNaN(Number(monto)) ? ` — ${Number(monto).toLocaleString('es')} Bs` : '';
+
+  notifySaleWhatsapp(phone, nombre, producto, montoTxt);
 
   return sendToAll({
     title: '💰 Nueva venta',

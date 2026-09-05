@@ -96,6 +96,20 @@ const DEFAULTS = {
   // se puede cambiar aca si el negocio la vuelve a aprobar con otro nombre.
   pickupTemplateName: null,
   pickupTemplateLanguage: 'es',
+  // Numero de WhatsApp (con codigo de pais, sin "+", ej. 584121234567) al que
+  // se le manda un aviso de texto libre cada vez que una conversacion pasa a
+  // "vendido" (ver notifySale en push.js). null/vacio = no se manda ningun
+  // aviso por WhatsApp (solo queda la notificacion push del panel, que ya
+  // existia). OJO: WhatsApp solo deja mandar texto libre a un numero si ese
+  // numero le escribio al bot en las ultimas 24h (la "ventana" de siempre,
+  // ver flow.js). Como este numero es el del dueno/vendedor, no un cliente,
+  // para que le lleguen los avisos tiene que escribirle una vez al numero
+  // del bot (un simple "hola" alcanza) y despues los va a recibir por 24h;
+  // pasado ese tiempo sin escribir, hay que volver a escribirle una vez para
+  // reabrir la ventana. Si el envio falla (ventana cerrada, numero mal
+  // puesto, etc), solo se registra en los logs: nunca rompe el flujo de la
+  // venta ni la notificacion push del panel.
+  saleNotifyPhone: null,
 };
 
 function load() {
