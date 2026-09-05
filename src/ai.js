@@ -761,20 +761,87 @@ function looksLikeEmptyDataRequest(text) {
   return matches.length >= 2;
 }
 
+// Red de seguridad ADICIONAL a looksLikeEmptyDataRequest: esa deteccion solo
+// reconoce el formato de plantilla (etiqueta + dos puntos + nada despues).
+// Bug real detectado en produccion: el modelo repitio el mismo pedido de
+// datos ya confirmados, pero en prosa propia ("solo necesito que me
+// confirmes tu nombre y apellido, cedula y telefono para procesar tu
+// pedido"), sin dos puntos ni salto de linea -- eso NO matcheaba el regex de
+// arriba, asi que el pedido duplicado se colaba igual (5 horas despues de
+// que el cliente ya habia dado y confirmado sus datos). Esta funcion cubre
+// ese caso: si YA tenemos los tres datos confirmados (knownCustomer
+// completo) y el texto menciona los tres campos como palabra suelta sin
+// incluir los valores reales (o sea, no es solo un resumen del pedido con
+// los datos ya puestos), se trata como un pedido repetido.
+function mentionsDataFieldsAsRequest(text, knownCustomer) {
+  if (!knownCustomer || !knownCustomer.nombre || !knownCustomer.cedula || !knownCustomer.telefono) return false;
+  const t = String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  const hasNombre = /\bnombre\b/.test(t);
+  const hasCedula = /\bcedula\b/.test(t);
+  const hasTelefono = /\btelefono\b/.test(t);
+  if (!(hasNombre && hasCedula && hasTelefono)) return false;
+  const cedulaDigits = String(knownCustomer.cedula).replace(/\D/g, '');
+  const telefonoDigits = String(knownCustomer.telefono).replace(/\D/g, '');
+  const textDigits = t.replace(/\D/g, '');
+  if (cedulaDigits && textDigits.includes(cedulaDigits)) return false;
+  if (telefonoDigits && textDigits.includes(telefonoDigits)) return false;
+  return true;
+}
+
 // Mensaje corto de repuesto para cuando ya se pidieron los datos antes y el
 // modelo, a pesar de la instruccion, intento mandar el bloque completo de
 // nuevo: en vez de repetir todo el pedido de datos, se manda solo este
 // recordatorio breve.
 const DATA_REQUEST_REMINDER = 'Cuando puedas, pasame tu nombre completo, cedula y telefono para terminar de procesar tu pedido \ud83d\ude4f';
 
+// Red de seguridad para "DESPUES DEL CIERRE" en el prompt: una vez que el
+// pedido ya quedo cerrado, la REGLA DE ORO de terminar cada respuesta con una
+// pregunta que haga avanzar la venta queda apagada para siempre en esa
+// conversacion (el prompt se lo dice explicito). En la practica el modelo a
+// veces igual termina agregando una pregunta de ese estilo por costumbre
+// (ofrecer otra presentacion, preguntar si le interesa algo, cuantos quiere),
+// a pesar de la instruccion. Bug real: un cliente con el pedido ya cerrado
+// pregunto "que mas ofrecen", el bot contesto bien con la info real de las
+// presentaciones, pero igual cerro con "\u00bfTe interesa alguna de estas
+// presentaciones?", como si todavia estuviera vendiendo. Esto detecta y saca
+// esa pregunta final (venga en su propio mensaje/parrafo aparte, o pegada al
+// final del ultimo fragmento), dejando el resto de la respuesta -la info real
+// que si contesta lo que pregunto el cliente- intacta.
+function stripPostCloseQuestion(text) {
+  const parts = splitReply(text);
+  if (!parts.length) return text;
+  const idx = parts.length - 1;
+  let last = parts[idx];
+  const trailing = splitTrailingQuestion(last);
+  if (trailing) {
+    last = trailing[0];
+  } else if (/\?\s*$/.test(last)) {
+    last = '';
+  } else {
+    return text; // el ultimo fragmento no termina en pregunta, no hay nada que sacar
+  }
+  const kept = parts.slice(0, idx);
+  if (last) kept.push(last);
+  if (!kept.length) return null;
+  return kept.join('\n\n');
+}
+
+// Mensaje corto de repuesto para cuando, despues de sacar la pregunta de venta
+// (ver stripPostCloseQuestion), no queda nada mas de la respuesta para mandar
+// (el modelo contesto UNICAMENTE con la pregunta, sin info real antes).
+const POST_CLOSE_REMINDER = 'Dale, cualquier otra cosa me avisas \ud83d\ude4f';
+
 // Saca del texto (separado en partes igual que splitReply) cualquier
 // fragmento que sea un pedido de datos vacio repetido. Si despues de sacarlo
 // no queda nada, devuelve null (el que llama decide que mandar en su lugar,
 // ver DATA_REQUEST_REMINDER). Si no habia nada que sacar, devuelve el texto
 // tal cual.
-function stripDuplicateDataRequest(text) {
+function stripDuplicateDataRequest(text, knownCustomer) {
   const parts = splitReply(text);
-  const filtered = parts.filter((p) => !looksLikeEmptyDataRequest(p));
+  const filtered = parts.filter((p) => !looksLikeEmptyDataRequest(p) && !mentionsDataFieldsAsRequest(p, knownCustomer));
   if (!filtered.length) return null;
   if (filtered.length === parts.length) return text;
   return filtered.join('\n\n');
@@ -959,7 +1026,10 @@ module.exports = {
   catalogText,
   isClosingMessage,
   looksLikeEmptyDataRequest,
+  mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,
   DATA_REQUEST_REMINDER,
+  stripPostCloseQuestion,
+  POST_CLOSE_REMINDER,
   buildDirectAgencyMessage,
 };

@@ -25,8 +25,11 @@ const {
   applySplitPolicy,
   isClosingMessage,
   looksLikeEmptyDataRequest,
+  mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,
   DATA_REQUEST_REMINDER,
+  stripPostCloseQuestion,
+  POST_CLOSE_REMINDER,
   buildDirectAgencyMessage,
 } = require('./ai');
 const { classifyConversation } = require('./classifier');
@@ -623,9 +626,29 @@ async function processReply(from) {
     // corto en su lugar (o el resto del mensaje, si tenia algo mas aparte del
     // bloque repetido).
     let finalReply = reply;
-    if (dataAlreadyRequested && looksLikeEmptyDataRequest(reply)) {
-      const stripped = stripDuplicateDataRequest(reply);
+    // Ver mentionsDataFieldsAsRequest en ai.js: ademas del formato de
+    // plantilla (looksLikeEmptyDataRequest), esto tambien detecta cuando el
+    // modelo repite el mismo pedido de datos pero en prosa propia, sin dos
+    // puntos ni salto de linea (bug real: paso 5 horas despues de que el
+    // cliente ya habia dado y confirmado sus datos, y el modelo se los pidio
+    // de nuevo con otras palabras que no matcheaban el regex original).
+    if (dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || mentionsDataFieldsAsRequest(reply, knownCustomer))) {
+      const stripped = stripDuplicateDataRequest(reply, knownCustomer);
       finalReply = stripped === null ? DATA_REQUEST_REMINDER : stripped;
+    }
+
+    // Ver stripPostCloseQuestion en ai.js: con el pedido ya cerrado (turnos
+    // POSTERIORES al mensaje de cierre, no el de cierre en si: por eso se usa
+    // orderClosed, el flag de sesion de ANTES de este turno, no isNewClose de
+    // mas abajo), el bot nunca tiene que volver a terminar su respuesta con
+    // una pregunta de venta (ofrecer otra presentacion, preguntar si le
+    // interesa algo, etc), aunque el prompt se lo pida explicitamente: eso ya
+    // paso de verdad (cliente con pedido cerrado pregunto "que mas ofrecen" y
+    // el bot, despues de contestar bien, igual cerro con "¿Te interesa
+    // alguna de estas presentaciones?" como si siguiera vendiendo).
+    if (orderClosed) {
+      const strippedClose = stripPostCloseQuestion(finalReply);
+      finalReply = strippedClose === null ? POST_CLOSE_REMINDER : strippedClose;
     }
 
     if (images.length) await sendConversationImages(from, images);
