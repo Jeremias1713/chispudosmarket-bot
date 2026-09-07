@@ -417,7 +417,23 @@ function renderWindowStatus(convo) {
 $('wcSend').addEventListener('click', async () => {
   const templateName = $('wcTemplate').value.trim()
   if (!templateName || !state.selectedPhone) return
-  const params = $('wcParams').value.split(',').map((s) => s.trim()).filter(Boolean)
+  // BUG YA CORREGIDO: antes esto hacia .filter(Boolean), que borraba
+  // cualquier parametro que hubiera quedado vacio (ej. si todavia no se
+  // sabia el numero de guia y se dejaba ese campo en blanco entre las
+  // comas). Eso corria TODOS los parametros siguientes un lugar hacia la
+  // izquierda, asi que a partir de ahi cada variable de la plantilla le
+  // llegaba al cliente con el dato de la variable siguiente (o de plano le
+  // faltaba una al final). Meta, encima, no avisa ese error: si a una
+  // plantilla le falta UN solo parametro respecto a los que espera, manda
+  // el mensaje igual pero SIN reemplazar NINGUNA variable (el cliente ve
+  // literalmente "Hola {{1}}, tu pedido de {{2}}..."). Por eso a unos
+  // clientes les llegaba bien (cuando se habian llenado los 4 campos) y a
+  // otros mal (cuando se habia dejado alguno en blanco). Ahora un campo
+  // vacio entre comas se manda como "-" (mismo respaldo que ya se usa en
+  // shipping.js/seguimiento.js) en vez de desaparecer, para que la posicion
+  // de cada variable nunca se corra.
+  const rawParams = $('wcParams').value.trim()
+  const params = rawParams ? rawParams.split(',').map((s) => s.trim() || '-') : []
 
   $('wcSend').disabled = true
   try {
