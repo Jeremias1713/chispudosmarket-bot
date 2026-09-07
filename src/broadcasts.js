@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { sendTemplate } = require('./whatsapp');
-const { listSessions } = require('./state');
+const { listSessions, appendMessage } = require('./state');
 
 const RUNS_PATH = path.join(__dirname, '..', 'data', 'broadcasts.json');
 const SEND_GAP_MS = 300;
@@ -71,6 +71,11 @@ async function startRun({ templateName, languageCode, params, target }) {
       let error = null;
       try {
         await sendTemplate(phone, templateName, run.languageCode, run.params);
+        // BUG YA CORREGIDO (mismo que el de seguimiento.js): el envio masivo
+        // SI mandaba de verdad la plantilla por WhatsApp, pero nunca quedaba
+        // guardado en el historial de la conversacion de cada cliente, asi
+        // que en el chat individual no se veia ningun rastro del envio.
+        appendMessage(phone, 'human', `[plantilla masiva] ${templateName}`);
       } catch (err) {
         ok = false;
         error = err.response?.data?.error?.message || err.message;
