@@ -19,7 +19,7 @@
 // Nunca manda ni cambia nada por su cuenta: arma la lista completa para que
 // el negocio la revise en el panel y recien mande/actualice lo que confirme
 // (ver /api/seguimiento/preview y /api/seguimiento/confirm en panel.js).
-const { listSessions, updateSession } = require('./state');
+const { listSessions, updateSession, appendMessage } = require('./state');
 const { SOLD_STAGES } = require('./flow');
 const { sendTemplate } = require('./whatsapp');
 const { getSettings } = require('./settings');
@@ -140,6 +140,13 @@ async function applyItems(items) {
           item.plantillaVars.guia,
           item.plantillaVars.monto,
         ]);
+        // BUG YA CORREGIDO: esta plantilla SI se mandaba de verdad por
+        // WhatsApp (mismo sendTemplate que usa todo el resto del bot, que
+        // ya sabemos que entrega bien), pero nunca quedaba guardada en el
+        // historial de la conversacion, asi que en el panel no se veia
+        // ningun rastro de que se hubiera mandado. Por eso parecia que "no
+        // se mando" cuando en realidad si habia salido.
+        appendMessage(item.phone, 'human', `[plantilla] ${templateName}`);
       }
       results.push({ phone: item.phone, ok: true });
     } catch (err) {
