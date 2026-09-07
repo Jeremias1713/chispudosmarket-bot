@@ -41,6 +41,7 @@ const STAGE_LABELS = {
   nuevo: 'Nuevo',
   interesado: 'Interesado',
   negociando: 'Negociando',
+  escribir_mas_tarde: 'Escribir más tarde',
   vendido: 'Vendido',
   esperando_guia: 'Esperando guía',
   esperando_retiro: 'Esperando retiro',
@@ -434,7 +435,7 @@ router.post('/api/conversations/:phone/follow-up', (req, res) => {
 // Conversaciones que necesitan seguimiento: interesado/negociando/necesita_atencion
 // con mas de 4 horas sin novedad, o cualquiera en necesita_atencion (sin
 // importar la antiguedad, esa etapa siempre merece atencion).
-const STALE_STAGES = ['interesado', 'negociando', 'necesita_atencion'];
+const STALE_STAGES = ['interesado', 'negociando', 'escribir_mas_tarde', 'necesita_atencion'];
 const STALE_HOURS = 4;
 
 // Junta un dia YYYY-MM-DD con from/to (mismo criterio que el rango manual
