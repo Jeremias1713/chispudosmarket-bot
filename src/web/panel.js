@@ -412,6 +412,16 @@ router.post('/api/push/test', async (_req, res) => {
   res.json({ ok: true, ...result });
 });
 
+// Boton "Enviar prueba" junto al numero de WhatsApp para avisos de venta
+// (Configuracion). A diferencia de /api/push/test (que es el push del
+// navegador), este manda un WhatsApp real al numero configurado, para que el
+// dueño pueda confirmar de una que le esta llegando sin tener que esperar a
+// la proxima venta ni mirar los logs de Render.
+router.post('/api/settings/test-sale-notify', async (_req, res) => {
+  const result = await push.testSaleNotifyWhatsapp();
+  res.json(result);
+});
+
 // Marca que se le mando la guia de envio (seguimiento) a esta conversacion.
 router.post('/api/conversations/:phone/follow-up', (req, res) => {
   const phone = req.params.phone;
