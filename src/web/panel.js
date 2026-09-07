@@ -288,7 +288,18 @@ router.post('/api/conversations/:phone/send-template', async (req, res) => {
   const templateName = String(req.body?.templateName || '').trim();
   if (!templateName) return res.status(400).json({ error: 'Falta el nombre de la plantilla' });
   const languageCode = String(req.body?.languageCode || 'es').trim() || 'es';
-  const params = Array.isArray(req.body?.params) ? req.body.params : [];
+  // Red de seguridad de codigo (ademas del arreglo en app.js): si por lo
+  // que sea llega un parametro vacio ("") desde el frontend (o de otro
+  // caller de este endpoint), lo cambiamos por "-" en vez de mandarlo tal
+  // cual. Ver el comentario en shipping.js: a Meta le alcanza con QUE UN
+  // solo parametro llegue vacio para mandar la plantilla entera sin
+  // reemplazar ninguna variable (el cliente ve los {{1}} {{2}} crudos),
+  // aunque el resto de los datos hayan estado bien.
+  const rawParams = Array.isArray(req.body?.params) ? req.body.params : [];
+  const params = rawParams.map((p) => {
+    const v = String(p ?? '').trim();
+    return v || '-';
+  });
 
   try {
     await sendTemplate(phone, templateName, languageCode, params);
@@ -734,7 +745,18 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
     card.guiaImageUrl = mediaUrl(item.filename);
   }
 
-  const updated = updateSession(phone, { card });
+  const patch = { card };
+  // Si el pedido estaba en "vendido" o "esperando_guia" (vendido pero
+  // todavia sin numero de guia) y recien se cargo un numero de guia real,
+  // pasa directo a "en_camino": ya no tiene sentido dejarlo atras
+  // "esperando" la guia si la guia ya esta cargada. No se toca si alguien
+  // ya fijo la etapa a mano desde el panel (stageLocked, ver setStage en
+  // state.js), ni si ya esta en una etapa mas avanzada.
+  if (card.guia && !s.stageLocked && ['vendido', 'esperando_guia'].includes(s.stage)) {
+    patch.stage = 'en_camino';
+    patch.stageReason = 'Guia cargada (avance automatico)';
+  }
+  const updated = updateSession(phone, patch);
 
   let notice = { sent: false, reason: 'sin_guia' };
   if (card.guia) {
@@ -820,7 +842,16 @@ router.post('/api/dropanas/confirm', async (req, res) => {
     try {
       const s = getSession(phone);
       const card = { ...(s.card || {}), guia };
-      const updated = updateSession(phone, { card });
+      // Mismo avance automatico que la carga de guia una por una (ver POST
+      // /api/conversations/:phone/guia): si estaba "vendido" o
+      // "esperando_guia", con la guia ya cargada pasa directo a
+      // "en_camino", salvo que la etapa este fijada a mano.
+      const patch = { card };
+      if (!s.stageLocked && ['vendido', 'esperando_guia'].includes(s.stage)) {
+        patch.stage = 'en_camino';
+        patch.stageReason = 'Guia cargada (avance automatico)';
+      }
+      const updated = updateSession(phone, patch);
       const notice = await shipping.maybeNotifyShipping(phone, updated);
       results.push({ phone, guia, ok: true, notice });
     } catch (err) {
