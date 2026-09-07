@@ -128,6 +128,26 @@ async function notifySaleWhatsapp(phone, nombre, producto, montoTxt) {
   }
 }
 
+// Boton de "Enviar prueba" del panel (Configuracion > aviso de venta por
+// WhatsApp). A diferencia de notifySaleWhatsapp (que nunca tira error hacia
+// arriba, para no romper el flujo real de una venta), esta SI devuelve el
+// motivo exacto del fallo, para que el panel se lo pueda mostrar tal cual al
+// usuario y no haya que ir a revisar los logs de Render a ciegas.
+async function testSaleNotifyWhatsapp() {
+  const settings = getSettings();
+  const to = String(settings.saleNotifyPhone || '').replace(/\D/g, '');
+  if (!to) {
+    return { ok: false, error: 'Todavia no cargaste un numero en "Numero de WhatsApp para avisos de venta" (Configuracion).' };
+  }
+  try {
+    await sendText(to, '🔔 Prueba de aviso de venta\nSi ves este mensaje, los avisos de venta por WhatsApp van a funcionar.');
+    return { ok: true, to };
+  } catch (err) {
+    const detail = err?.response?.data?.error?.message || err.message;
+    return { ok: false, to, error: detail };
+  }
+}
+
 // Notificacion de venta nueva. session es la conversacion que acaba de
 // pasar a stage 'vendido'.
 function notifySale(phone, session) {
@@ -148,4 +168,4 @@ function notifySale(phone, session) {
   });
 }
 
-module.exports = { getPublicKey, addSubscription, removeSubscription, sendToAll, notifySale };
+module.exports = { getPublicKey, addSubscription, removeSubscription, sendToAll, notifySale, testSaleNotifyWhatsapp };
