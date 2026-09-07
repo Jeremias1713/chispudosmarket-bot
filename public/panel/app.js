@@ -2220,6 +2220,28 @@ $('cfg_save').addEventListener('click', async () => {
   }
 })
 
+$('cfg_saleNotifyTestBtn').addEventListener('click', async () => {
+  const result = $('cfg_saleNotifyTestResult')
+  $('cfg_saleNotifyTestBtn').disabled = true
+  result.style.color = ''
+  result.textContent = 'Enviando...'
+  try {
+    const res = await api('/settings/test-sale-notify', { method: 'POST' })
+    if (res.ok) {
+      result.style.color = 'var(--ok, green)'
+      result.textContent = `Enviado a ${res.to} ✅`
+    } else {
+      result.style.color = 'var(--danger, crimson)'
+      result.textContent = res.error || 'No se pudo mandar'
+    }
+  } catch (err) {
+    result.style.color = 'var(--danger, crimson)'
+    result.textContent = err.message
+  } finally {
+    $('cfg_saleNotifyTestBtn').disabled = false
+  }
+})
+
 $('backup_download').addEventListener('click', async () => {
   $('backup_download').disabled = true
   $('backup_msg').textContent = 'Generando...'
