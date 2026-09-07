@@ -11,6 +11,16 @@ const STAGES = [
   'nuevo',
   'interesado',
   'negociando',
+  // El cliente promete comprar en una fecha o momento futuro concreto (ej.
+  // "te escribo el 15", "el mes que viene lo pido"), pero el pedido TODAVIA
+  // no se cerro de verdad (sin todos los datos, sin mensaje de cierre). Se
+  // separa de "negociando" y sobre todo de "vendido" porque estas promesas a
+  // futuro se olvidan seguido — no es una venta real todavia, es un
+  // recordatorio pendiente. Al estar en STALE_STAGES (ver panel.js) tambien
+  // va a aparecer en "conversaciones que necesitan seguimiento" si pasa
+  // mucho tiempo sin que el cliente vuelva a escribir, para no perderla de
+  // vista.
+  'escribir_mas_tarde',
   'vendido',
   // "esperando_guia" es una categoria de uso MANUAL (se fija a mano desde el
   // panel, el clasificador de IA nunca la elige sola): sirve para separar,
@@ -55,6 +65,15 @@ con retiro en agencia o entrega a domicilio.
   - interesado: pregunta por precio, producto o disponibilidad.
 - negociando: ya dijo que lo quiere o que lo compra, pero todavia no dio todos sus datos
   (nombre, ciudad, telefono, producto). Ante la duda, va aca.
+  - escribir_mas_tarde: el cliente dijo EXPLICITAMENTE que va a hacer el pedido mas adelante, en un
+  momento o fecha futura concreta (ej. "te escribo el 15", "compro la semana que viene", "dejame
+  pensarlo y te aviso", "el mes que viene lo pido", "ahorita no tengo, despues te escribo"), pero
+  TODAVIA no dio todos los datos para cerrar (nombre, ciudad, telefono, producto) NI el negocio le
+  mando el mensaje de cierre del pedido. MUY IMPORTANTE: esto NUNCA es "vendido", aunque el cliente
+  suene decidido o entusiasmado — son promesas a futuro que se olvidan seguido, no representan una
+  venta real todavia. Si en algun momento posterior el cliente SI termina dando todos los datos y el
+  negocio SI manda el cierre, ahi recien pasa a "vendido" (ver mas abajo), sin importar que antes
+  haya mencionado una fecha.
   - vendido: ya dio nombre, ciudad, telefono y que producto quiere, y el negocio ya le mando el
   mensaje de cierre del pedido (resumen + pago contra entrega + que le pasan la guia). Esta es la
   etapa por defecto de un pedido recien cerrado: quedate aca salvo que la conversacion, DESPUES del
