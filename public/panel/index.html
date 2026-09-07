@@ -752,7 +752,11 @@
                   <div class="help">
                     Cada vez que una conversación pasa a "Vendido", se le manda un aviso de
                     texto a este número (además de la notificación push del panel). Poné el
-                    número con código de país, sin espacios ni "+" (ej. 584121234567).
+                    número CON código de país (sin espacios, sin guiones, sin "+"): para
+                    Venezuela es 58 + el número sin el 0 inicial (ej. 584121234567); para
+                    Estados Unidos es 1 + el número de 10 dígitos (ej. 13055551234). Si te
+                    olvidás del código de país, el mensaje no va a llegar aunque no salga
+                    ningún error.
                     <strong>Importante:</strong> WhatsApp solo deja mandar texto libre a un
                     número si ese número le escribió al bot en las últimas 24 horas. Como este
                     es tu número, no el de un cliente, escribile una vez cualquier cosa (un
@@ -760,7 +764,7 @@
                     si pasan más de 24h sin que le escribas, hay que volver a escribirle una
                     vez para que se reactiven.
                   </div>
-                  <input type="text" id="cfg_saleNotifyPhone" placeholder="584121234567">
+                  <input type="text" id="cfg_saleNotifyPhone" placeholder="Ej: 584121234567 (Venezuela) o 13055551234 (USA)">
                   <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
                     <button class="btn" id="cfg_saleNotifyTestBtn" type="button">Enviar prueba</button>
                     <span id="cfg_saleNotifyTestResult"></span>

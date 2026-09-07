@@ -2220,8 +2220,32 @@ $('cfg_save').addEventListener('click', async () => {
   }
 })
 
-$('cfg_saleNotifyTestBtn').addEventListener('click', async () => {
+// Nota: uso ?. aca (a diferencia de otros botones de este archivo) para que
+// si por algun motivo este elemento todavia no esta en el DOM (cache vieja
+// del panel, etc), esto NO tire un error que corte la ejecucion del resto
+// del script (lo cual romperia TODOS los botones que se registran despues
+// de esta linea). Paso real que confirmo esta necesidad: un usuario reporto
+// que el boton "no hacia nada" al tocarlo, sin ningun error visible.
+$('cfg_saleNotifyTestBtn')?.addEventListener('click', async () => {
   const result = $('cfg_saleNotifyTestResult')
+  const rawDigits = ($('cfg_saleNotifyPhone').value || '').replace(/\D/g, '')
+  // Chequeo rapido del lado del cliente ANTES de mandar nada: el error mas
+  // comun de este campo es guardar el numero SIN el codigo de pais (ej. un
+  // numero de USA de 10 digitos sin el "1" adelante, o un numero de
+  // Venezuela con el 0 local en vez del 58). En ese caso Meta puede aceptar
+  // igual la solicitud (sin tirar error) pero el mensaje nunca llega a
+  // ningun lado real, que es exactamente lo que ya paso una vez: no salio
+  // error pero el mensaje no llego.
+  if (rawDigits.length === 10) {
+    result.style.color = 'var(--danger, crimson)'
+    result.textContent = `El numero "${rawDigits}" tiene 10 digitos: le falta el codigo de pais adelante (ej. anteponer 1 si es de USA, o 58 si es de Venezuela sin el 0). Corregilo, guardá y probá de nuevo.`
+    return
+  }
+  if (rawDigits.length < 10 || rawDigits.length > 15) {
+    result.style.color = 'var(--danger, crimson)'
+    result.textContent = `El numero "${rawDigits}" no parece completo (tiene ${rawDigits.length} digitos). Revisalo, guardá y probá de nuevo.`
+    return
+  }
   $('cfg_saleNotifyTestBtn').disabled = true
   result.style.color = ''
   result.textContent = 'Enviando...'
@@ -2229,7 +2253,7 @@ $('cfg_saleNotifyTestBtn').addEventListener('click', async () => {
     const res = await api('/settings/test-sale-notify', { method: 'POST' })
     if (res.ok) {
       result.style.color = 'var(--ok, green)'
-      result.textContent = `Enviado a ${res.to} ✅`
+      result.textContent = `Enviado a ${res.to} ✅ (si tampoco llega asi, revisa que ese numero le haya escrito "hola" al bot en las ultimas 24h)`
     } else {
       result.style.color = 'var(--danger, crimson)'
       result.textContent = res.error || 'No se pudo mandar'
