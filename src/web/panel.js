@@ -1075,6 +1075,14 @@ router.post('/api/settings', (req, res) => {
   if (body.remarketingEnabled != null) patch.remarketingEnabled = Boolean(body.remarketingEnabled);
   if (body.remarketingHourStart != null) patch.remarketingHourStart = Number(body.remarketingHourStart);
   if (body.remarketingHourEnd != null) patch.remarketingHourEnd = Number(body.remarketingHourEnd);
+  // BUG YA CORREGIDO: este campo se agrego en el panel (index.html/app.js) y
+  // en los defaults (settings.js) pero se quedo afuera de esta lista de
+  // campos que esta ruta realmente persiste, asi que el numero JAMAS se
+  // guardaba en settings.json por mas que el usuario lo cargara y tocara
+  // "Guardar" — por eso el aviso de venta por WhatsApp nunca funcionaba
+  // (ni el envio real en una venta, ni el boton de prueba), sin ningun
+  // error visible: el numero que se probaba siempre terminaba vacio.
+  if (body.saleNotifyPhone != null) patch.saleNotifyPhone = String(body.saleNotifyPhone).replace(/\D/g, '');
   res.json(settingsStore.updateSettings(patch));
 });
 
