@@ -62,12 +62,21 @@ const SOLD_STAGES = ['vendido', 'esperando_guia', 'esperando_retiro', 'en_camino
 // respeta), asi que esto detecta la promesa incumplida por el TEXTO que ya
 // mando el bot y, si corresponde, manda la lista real como mensaje aparte
 // en el mismo momento, en vez de dejar al cliente esperando.
-// OJO: esta lista se amplio despues de un caso real ("voy a buscar las
-// agencias de Tealca mas cercanas... Un momento, por favor") que no matcheaba
-// ninguna de las frases originales (esas cubrian "te buscar", "dame un
-// momento", etc, pero no "voy a buscar" ni "un momento" sin "dame" adelante).
+// OJO: esta lista se amplio despues de DOS casos reales que no matcheaban
+// ninguna de las frases que habia hasta ese momento:
+// 1) "voy a buscar las agencias de Tealca mas cercanas... Un momento, por
+//    favor" (cubria "te buscar", "dame un momento", etc, pero no "voy a
+//    buscar" ni "un momento" sin "dame" adelante).
+// 2) "Perfecto, entonces te busco la agencia Tealca mas cercana. Un
+//    momento. 🔍" — este quedo sin mandar la agencia real NUNCA (el cliente
+//    se quedo esperando sin que nada mas se le enviara), porque el regex
+//    solo tenia "te buscar" (con R al final, infinitivo) y no "te busco"
+//    (presente), y porque "un momento" a secas (sin "en" antes ni "por
+//    favor" despues, como paso aca) tampoco matcheaba ninguna alternativa.
+// Ahora "un momento" solo (en cualquier posicion) ya alcanza para
+// dispararlo, y se agrego "te busco"/"buscando" en presente.
 const PENDING_AGENCY_PROMISE_RE =
-  /te buscar|voy a buscar|dame un moment|un momento,?\s*por favor|en un momento|ya te (busco|paso|env[ií]o)|enseguida te|en breve|ahorita te/i;
+  /te buscar|te busco|buscando la agencia|voy a buscar|dame un moment|un momento|ya te (busco|paso|env[ií]o)|enseguida te|en breve|ahorita te/i;
 
 function looksLikePendingAgencyPromise(text) {
   const t = String(text || '');
