@@ -2,16 +2,17 @@
 // pero nada sale por WhatsApp. Estado en memoria (no se persiste a disco):
 // se resetea solo si el proceso se reinicia, o con el boton "Reiniciar".
 const { nearestByCoords, formatAgency, findKnownCityKey } = require('./agencies');
-const { getAssistantReply, applySplitPolicy, buildDirectAgencyMessage } = require('./ai');
+const { getAssistantReply, applySplitPolicy, buildDirectAgencyMessage, getDataRequestTemplate } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
 const { getSettings } = require('./settings');
-// looksLikePendingAgencyPromise: misma red de seguridad que corre en las
-// conversaciones reales (ver flow.js processReply). Se reusa aca para que el
-// simulador se comporte IGUAL que un chat real: si el bot promete buscar la
-// agencia y no lo hace, el simulador tiene que mostrar el mismo mensaje de
-// seguimiento que mandaria de verdad, no quedarse "colgado".
-const { looksLikePendingAgencyPromise } = require('./flow');
+// looksLikePendingAgencyPromise / looksLikePendingFormPromise: misma red de
+// seguridad que corre en las conversaciones reales (ver flow.js
+// processReply). Se reusa aca para que el simulador se comporte IGUAL que un
+// chat real: si el bot promete buscar la agencia (o mandar un "formulario"
+// que no existe) y no lo hace, el simulador tiene que mostrar el mismo
+// mensaje de seguimiento que mandaria de verdad, no quedarse "colgado".
+const { looksLikePendingAgencyPromise, looksLikePendingFormPromise } = require('./flow');
 
 function randomGap() {
   return 400 + Math.floor(Math.random() * 500);
@@ -100,6 +101,12 @@ async function sendMessage(rawText) {
       push('assistant', followUp);
       extraParts.push(...splitForPreview(followUp));
     }
+  }
+  if (looksLikePendingFormPromise(reply)) {
+    const followUp = getDataRequestTemplate();
+    await sleep(randomGap());
+    push('assistant', followUp);
+    extraParts.push(...splitForPreview(followUp));
   }
 
   const classification = await classifyConversation(state.history.map((m) => ({ role: m.role, content: m.content })));
