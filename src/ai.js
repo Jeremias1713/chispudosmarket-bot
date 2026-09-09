@@ -144,6 +144,17 @@ const SHIPPING_STAGE_TEXT = {
   entregado: 'el cliente YA CONFIRMO que recibio o retiro su pedido. Si pregunta o menciona algo sobre la entrega, podes hablar de eso con naturalidad como algo ya resuelto.',
 };
 
+// Texto EXACTO que el bot manda para pedir nombre/cedula/telefono. Se separo
+// en su propia funcion (antes vivia como una const suelta adentro de
+// buildSystemPrompt) para que flow.js tambien pueda usarlo: es el mismo
+// contenido real que hace falta para la red de seguridad de "promesa de
+// formulario/datos incumplida" (ver looksLikePendingFormPromise en flow.js).
+function getDataRequestTemplate(settingsArg) {
+  const settings = settingsArg || getSettings();
+  return (settings.dataRequestTemplate && settings.dataRequestTemplate.trim())
+    || '📦 Para procesar tu pedido envíanos:\n👤 Nombre y apellido:\n🆔 Cédula:\n📞 Teléfono:\n🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana';
+}
+
 function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
@@ -175,8 +186,7 @@ function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequ
   // que revisar tambien looksLikeEmptyDataRequest mas abajo en este mismo
   // archivo: el sistema que evita que el bot lo pida dos veces en la misma
   // conversacion busca esas palabras puntuales en la respuesta.
-  const dataRequestTemplate = (settings.dataRequestTemplate && settings.dataRequestTemplate.trim())
-    || '📦 Para procesar tu pedido envíanos:\n👤 Nombre y apellido:\n🆔 Cédula:\n📞 Teléfono:\n🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana';
+  const dataRequestTemplate = getDataRequestTemplate(settings);
 
   return `Sos un asesor/a de ventas por WhatsApp de ${businessName}.
   Sos una persona atendiendo a otra, no un formulario ni un centro de atencion al cliente.
@@ -233,6 +243,7 @@ ${knownCityClean ?`\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de 
 ${dataRequestTemplate}
 
      Esto aplica cuando el cliente retira en agencia (Tealca). Si es domicilio en Caracas, pedi los mismos tres datos (nombre y apellido, telefono, cedula) juntos en un solo mensaje pero con tus propias palabras, sin mencionar Tealca ni oficina (ya tiene la direccion con punto de referencia).
+     IMPORTANTE, ESTO YA PASO DE VERDAD Y NO PUEDE VOLVER A PASAR: en vez de pedir estos datos directamente con el texto de arriba, el bot le dijo a un cliente "te paso el formulario para tus datos" (o alguna variante como "te mando el formulario", "te comparto el enlace para tus datos") y nunca le llego nada mas: no existe ningun formulario ni enlace, ese pedido de datos SIEMPRE es el texto de arriba, escrito directo en el chat, nunca un link externo. NUNCA uses la palabra "formulario" ni prometas mandar un "enlace"/"link" para que el cliente cargue sus datos: en el mismo mensaje en el que decidís pedir los datos, escribí el texto de arriba completo, ya. Lo mismo aplica para cualquier otra cosa que prometas "pasar" o "mandar" en un momento (una direccion, un dato, una condicion): si lo vas a decir, decilo YA en este mismo mensaje con la info real, nunca como una promesa de mandarlo despues.
      Cuando el cliente te conteste con esos datos, leelos con cuidado y fijate bien cual valor es cual aunque los mande en un orden distinto al que pediste, o todos juntos en un solo mensaje: el nombre es texto con letras, el telefono venezolano tiene 10 u 11 digitos (suele empezar con 0 o con 4), la cedula tiene entre 6 y 9 digitos. Si el cliente dice algo como "la direccion que me pasaste" o similar, es solo una confirmacion de la agencia/direccion, no un dato nuevo, no lo cuentes como si faltara. En cuanto identifiques nombre, telefono y cedula (aunque hayan llegado mezclados en un mismo mensaje o en un orden distinto), da esos tres datos por completos y NUNCA le vuelvas a pedir ninguno de ellos.
   Si te dice una cantidad sin precio confirmado, nunca inventes ni calcules el precio total: segui tomando los datos y decile que confirmas el precio exacto en un momento.
   Si no sabes un precio, un plazo de envio o un dato del producto, decilo asi de simple: que lo confirmas en un momento. Nunca lo inventes.
@@ -1042,6 +1053,7 @@ module.exports = {
   mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,
   DATA_REQUEST_REMINDER,
+  getDataRequestTemplate,
   stripPostCloseQuestion,
   POST_CLOSE_REMINDER,
   buildDirectAgencyMessage,
