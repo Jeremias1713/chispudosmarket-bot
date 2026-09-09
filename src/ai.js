@@ -45,7 +45,10 @@ function catalogText() {
 function libraryImagesText() {
   let images = [];
   try {
-    images = library.listImages();
+    // FASE 1 (H02): listAiVisibleImages() (no listImages()) para que la IA
+    // ni siquiera se entere de que existen las fotos de "Guias de envio"
+    // (comprobantes de envio de pedidos puntuales, no material de venta).
+    images = library.listAiVisibleImages();
   } catch (err) {
     images = [];
   }
@@ -683,7 +686,13 @@ function findImageByName(nombre) {
   if (!q) return null;
   let images = [];
   try {
-    images = library.listImages();
+    // FASE 1 (H02): defensa en profundidad ademas de libraryImagesText() ya
+    // no listarlas: aunque el modelo alucine o adivine un nombre parecido a
+    // "Guia de envio - <telefono>" (por ejemplo porque un cliente escribio
+    // "mandame mi guia"), esta busqueda NUNCA puede resolver una imagen de
+    // esa carpeta, asi que mostrar_foto no puede terminar mandando la guia
+    // (con datos) de otro pedido/cliente.
+    images = library.listAiVisibleImages();
   } catch (err) {
     images = [];
   }
@@ -1057,4 +1066,9 @@ module.exports = {
   stripPostCloseQuestion,
   POST_CLOSE_REMINDER,
   buildDirectAgencyMessage,
+  // FASE 1 (H02): exportadas para poder probar directamente que la IA nunca
+  // ve ni puede resolver las fotos de "Guias de envio" (ver test/).
+  libraryImagesText,
+  findImageByName,
+  runTool,
 };
