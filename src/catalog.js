@@ -6,8 +6,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { DATA_DIR } = require('./dataDir');
 
-const CATALOG_PATH = path.join(__dirname, '..', 'data', 'products.json');
+const CATALOG_PATH = path.join(DATA_DIR, 'products.json');
 
 function loadProducts() {
   let products;

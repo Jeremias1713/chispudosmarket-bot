@@ -4,8 +4,9 @@
 // (Configuracion > Cobertura de agencias): ver importFromWorkbookBuffer.
 const fs = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('./dataDir');
 
-const CSV_PATH = path.join(__dirname, '..', 'data', 'agencies.csv');
+const CSV_PATH = path.join(DATA_DIR, 'agencies.csv');
 const CSV_HEADERS = ['name', 'country', 'region', 'address', 'phone', 'lat', 'lon'];
 
 function parseCsv(text) {

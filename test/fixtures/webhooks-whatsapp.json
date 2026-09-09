@@ -1,0 +1,98 @@
+{
+  "_nota": "Payloads reducidos, con la forma minima que manda Meta. Usar como base para probar deduplicacion y procesamiento de 'statuses' (Fase 2, H06/H09/H14).",
+  "mensaje_texto": {
+    "entry": [{
+      "id": "WABA_ID_FICTICIO",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "metadata": { "display_phone_number": "0000000000", "phone_number_id": "FICTICIO" },
+          "messages": [{
+            "from": "584120000001",
+            "id": "wamid.FICTICIO_TEXTO_1",
+            "timestamp": "1893456000",
+            "type": "text",
+            "text": { "body": "hola, quiero info" }
+          }]
+        }
+      }]
+    }]
+  },
+  "mensaje_duplicado_mismo_id": {
+    "_nota": "Mismo 'id' de mensaje que mensaje_texto, reenviado por Meta (reintento de red). No debe generar una segunda respuesta.",
+    "entry": [{
+      "id": "WABA_ID_FICTICIO",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "metadata": { "display_phone_number": "0000000000", "phone_number_id": "FICTICIO" },
+          "messages": [{
+            "from": "584120000001",
+            "id": "wamid.FICTICIO_TEXTO_1",
+            "timestamp": "1893456005",
+            "type": "text",
+            "text": { "body": "hola, quiero info" }
+          }]
+        }
+      }]
+    }]
+  },
+  "estado_entregado": {
+    "entry": [{
+      "id": "WABA_ID_FICTICIO",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "metadata": { "display_phone_number": "0000000000", "phone_number_id": "FICTICIO" },
+          "statuses": [{
+            "id": "wamid.FICTICIO_SALIENTE_1",
+            "status": "delivered",
+            "timestamp": "1893456100",
+            "recipient_id": "584120000001"
+          }]
+        }
+      }]
+    }]
+  },
+  "estado_leido_fuera_de_orden": {
+    "_nota": "Llega ANTES que 'delivered' del mismo wamid (orden invertido, ver H06). El estado final debe seguir siendo el mas avanzado, no el mas reciente en llegar.",
+    "entry": [{
+      "id": "WABA_ID_FICTICIO",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "metadata": { "display_phone_number": "0000000000", "phone_number_id": "FICTICIO" },
+          "statuses": [{
+            "id": "wamid.FICTICIO_SALIENTE_1",
+            "status": "read",
+            "timestamp": "1893456090",
+            "recipient_id": "584120000001"
+          }]
+        }
+      }]
+    }]
+  },
+  "estado_fallido": {
+    "entry": [{
+      "id": "WABA_ID_FICTICIO",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "metadata": { "display_phone_number": "0000000000", "phone_number_id": "FICTICIO" },
+          "statuses": [{
+            "id": "wamid.FICTICIO_SALIENTE_2",
+            "status": "failed",
+            "timestamp": "1893456200",
+            "recipient_id": "584120000002",
+            "errors": [{ "code": 131026, "title": "Message undeliverable" }]
+          }]
+        }
+      }]
+    }]
+  }
+}

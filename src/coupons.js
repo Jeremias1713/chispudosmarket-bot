@@ -5,8 +5,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { DATA_DIR } = require('./dataDir');
 
-const COUPONS_PATH = path.join(__dirname, '..', 'data', 'coupons.json');
+const COUPONS_PATH = path.join(DATA_DIR, 'coupons.json');
 
 function loadCoupons() {
   try {

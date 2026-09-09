@@ -1,0 +1,32 @@
+[
+  {
+    "_nota": "Fila representativa de una exportacion de Dropanas, ver src/dropanas.js y src/seguimiento.js",
+    "guia": "GU-000111",
+    "cliente": "Ana María",
+    "ciudad": "Caracas",
+    "producto": "Shilajit 30 caps",
+    "estadoPedido": "en oficina",
+    "totalVentaBs": 38900,
+    "bodegaDestino": "Agencia Caracas Centro"
+  },
+  {
+    "_nota": "Monto como texto con separador de miles, forma tipica de exportacion venezolana (ver H12). estadoPedido='en oficina' para que buildPreview arme plantillaVars.",
+    "guia": "GU-000112",
+    "cliente": "Carlos Perez",
+    "ciudad": "Maracay",
+    "producto": "Shilajit 30 caps",
+    "estadoPedido": "en oficina",
+    "totalVentaBs": "38.900",
+    "bodegaDestino": "Maracay"
+  },
+  {
+    "_nota": "Monto vacio: no debe convertirse en 0bs (ver H12). estadoPedido='en oficina' para que buildPreview arme plantillaVars.",
+    "guia": "GU-000113",
+    "cliente": "Maria Jose Gonzalez",
+    "ciudad": "Valencia",
+    "producto": "Colageno",
+    "estadoPedido": "en oficina",
+    "totalVentaBs": "",
+    "bodegaDestino": "Valencia"
+  }
+]

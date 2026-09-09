@@ -17,9 +17,10 @@ const path = require('path');
 const webpush = require('web-push');
 const { sendText } = require('./whatsapp');
 const { getSettings } = require('./settings');
+const { DATA_DIR } = require('./dataDir');
 
-const VAPID_PATH = path.join(__dirname, '..', 'data', 'push-vapid.json');
-const SUBS_PATH = path.join(__dirname, '..', 'data', 'push-subscriptions.json');
+const VAPID_PATH = path.join(DATA_DIR, 'push-vapid.json');
+const SUBS_PATH = path.join(DATA_DIR, 'push-subscriptions.json');
 
 function loadVapid() {
   try {

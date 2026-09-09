@@ -9,8 +9,9 @@ const path = require('path');
 const crypto = require('crypto');
 const { sendTemplate } = require('./whatsapp');
 const { listSessions, appendMessage } = require('./state');
+const { DATA_DIR } = require('./dataDir');
 
-const RUNS_PATH = path.join(__dirname, '..', 'data', 'broadcasts.json');
+const RUNS_PATH = path.join(DATA_DIR, 'broadcasts.json');
 const SEND_GAP_MS = 300;
 
 function loadRuns() {

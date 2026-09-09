@@ -8,8 +8,9 @@
 // real con volumen conviene una base de datos o un disco persistente de Render.
 const fs = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('./dataDir');
 
-const STATE_PATH = path.join(__dirname, '..', 'data', 'sessions.json');
+const STATE_PATH = path.join(DATA_DIR, 'sessions.json');
 
 function loadAll() {
   try {

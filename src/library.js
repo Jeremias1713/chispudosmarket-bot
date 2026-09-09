@@ -7,9 +7,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { DATA_DIR } = require('./dataDir');
 
-const MEDIA_DIR = path.join(__dirname, '..', 'data', 'media');
-const LIBRARY_PATH = path.join(__dirname, '..', 'data', 'library.json');
+const MEDIA_DIR = path.join(DATA_DIR, 'media');
+const LIBRARY_PATH = path.join(DATA_DIR, 'library.json');
 
 const EXT_BY_MIME = {
   'image/jpeg': 'jpg',

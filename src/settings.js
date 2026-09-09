@@ -7,8 +7,9 @@
 // no es persistente entre reinicios por inactividad.
 const fs = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('./dataDir');
 
-const SETTINGS_PATH = path.join(__dirname, '..', 'data', 'settings.json');
+const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 
 const DEFAULTS = {
   botEnabled: true,

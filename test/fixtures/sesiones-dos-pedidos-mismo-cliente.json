@@ -1,0 +1,24 @@
+{
+  "584120000003": {
+    "step": "IDLE",
+    "cart": [],
+    "history": [
+      { "role": "user", "content": "quiero el shilajit", "at": "2026-06-01T10:00:00.000Z" },
+      { "role": "assistant", "content": "confirmado, te llega la guia", "at": "2026-06-01T10:05:00.000Z" }
+    ],
+    "name": "Carlos Pérez",
+    "stage": "entregado",
+    "stageLocked": true,
+    "stageReason": "Fijada desde el panel",
+    "paused": false,
+    "pausedReason": null,
+    "card": { "nombre": "Carlos Pérez", "ciudad": "Maracay", "telefono": "584120000003", "cedula": "V-12345678", "producto": "Shilajit 30 caps", "notas": null },
+    "adCode": "I1C1",
+    "orderClosed": true,
+    "soldAt": "2026-06-01T10:05:00.000Z",
+    "shippingNotifiedAt": "2026-06-02T09:00:00.000Z",
+    "createdAt": "2026-06-01T10:00:00.000Z",
+    "updatedAt": "2026-06-05T12:00:00.000Z",
+    "_nota_fixture": "Este cliente vuelve a comprar en septiembre (ver H08): con el modelo actual, la segunda compra pisaria esta card/soldAt/shippingNotifiedAt en vez de crear un pedido nuevo."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "_nota": "Forma real de los 'components' que arma src/whatsapp.js sendTemplate al mandar una plantilla de guia con imagen de header. Usar para probar H17 (parametros que se corren de posicion) y H35 (prueba vs envio real).",
+  "templateName": "aviso_guia_envio",
+  "languageCode": "es",
+  "headerImageUrl": "https://ejemplo.invalido/media/guia-GU-000111.jpg",
+  "params_completos": ["Ana María", "Shilajit 30 caps", "GU-000111", "Agencia Caracas Centro", "38900bs"],
+  "params_con_hueco_en_medio": ["Ana María", "", "GU-000111", "Agencia Caracas Centro", "38900bs"],
+  "_nota_hueco": "Con filter(Boolean) (ver H17) el hueco de producto desaparece y TODO se corre una posicion: la guia queda en el lugar de producto, la agencia en el lugar de guia, etc. El valor correcto es reemplazar el hueco por '-', nunca quitarlo.",
+  "params_correctos_con_relleno": ["Ana María", "-", "GU-000111", "Agencia Caracas Centro", "38900bs"]
+}
