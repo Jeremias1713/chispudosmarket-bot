@@ -462,7 +462,15 @@ function isAgencyListBlock(text) {
 // entra entero, devuelve un solo pedazo.
 function chunkByWords(text, maxWords) {
   const words = String(text || '').split(/\s+/).filter(Boolean);
-  if (!maxWords || words.length <= maxWords) return [text];
+  // FASE 1 (H13): defensa en profundidad. El panel ya valida que
+  // maxWordsPerMessage/maxWordsHardCap sean enteros positivos antes de
+  // guardarlos (ver web/panel.js, validateNumericSettings), pero si por
+  // cualquier motivo esta funcion recibe un maxWords invalido (0, negativo,
+  // no numero), antes se colgaba en un loop infinito mas abajo (el `i +=
+  // maxWords` nunca avanzaba o retrocedia sin llegar nunca a
+  // words.length). Tratarlo como "sin tope" es el mismo comportamiento
+  // seguro que ya existia para maxWords=0/undefined.
+  if (!(maxWords > 0) || words.length <= maxWords) return [text];
   const chunks = [];
   for (let i = 0; i < words.length; i += maxWords) {
     chunks.push(words.slice(i, i + maxWords).join(' '));
