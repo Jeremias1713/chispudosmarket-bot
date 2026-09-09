@@ -31,6 +31,7 @@ const {
   stripPostCloseQuestion,
   POST_CLOSE_REMINDER,
   buildDirectAgencyMessage,
+  getDataRequestTemplate,
 } = require('./ai');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
@@ -86,6 +87,26 @@ function looksLikePendingAgencyPromise(text) {
   // sin cumplir, es solo texto de acompañamiento. Solo cuenta como promesa
   // incumplida cuando NO hay ninguna lista numerada en el mensaje.
   return !/(^|\n)\s*\d+[.)]\s/.test(t);
+}
+
+// Mismo mecanismo que looksLikePendingAgencyPromise, para el otro caso real
+// que se detecto: el bot le dice al cliente "te paso el formulario" (o "te
+// mando el enlace/link para tus datos") para pedirle nombre/cedula/telefono,
+// pero no existe ningun formulario ni enlace en el sistema — el pedido de
+// datos SIEMPRE es el texto fijo de dataRequestTemplate (ver ai.js), escrito
+// directo en el chat. Si el bot promete eso y no incluyo el texto real de
+// pedido de datos en el mismo mensaje, se lo mandamos nosotros mismos (sin
+// pasar por el modelo), igual que con la promesa de agencia.
+const PENDING_FORM_PROMISE_RE =
+  /formulario|el enlace|el link/i;
+
+function looksLikePendingFormPromise(text) {
+  const t = String(text || '');
+  if (!PENDING_FORM_PROMISE_RE.test(t)) return false;
+  // Si el mensaje YA trae el pedido de datos real (las etiquetas Nombre/
+  // Cedula/Telefono vacias, ver looksLikeEmptyDataRequest), no es una
+  // promesa sin cumplir: el dato real ya se mando en este mismo mensaje.
+  return !looksLikeEmptyDataRequest(t);
 }
 
 function sleep(ms) {
@@ -691,8 +712,20 @@ async function processReply(from) {
       }
     }
 
+    // Ver PENDING_FORM_PROMISE_RE arriba: si el bot acaba de prometer un
+    // "formulario" o "enlace" para los datos del pedido sin haber mandado ya
+    // el pedido de datos real, se lo mandamos nosotros mismos, salvo que ya
+    // se lo hayamos pedido antes en esta conversacion (dataAlreadyRequested)
+    // — en ese caso no hace falta insistir de nuevo.
+    let formFollowUpSent = false;
+    if (!dataAlreadyRequested && looksLikePendingFormPromise(finalReply)) {
+      await sleep(randomGap());
+      await sendReply(from, getDataRequestTemplate());
+      formFollowUpSent = true;
+    }
+
     const patch = { lastAssistantText: finalReply };
-    if (!dataAlreadyRequested && looksLikeEmptyDataRequest(reply)) {
+    if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || formFollowUpSent)) {
       patch.orderDataRequested = true;
     }
     const isNewClose = !orderClosed && isClosingMessage(reply);
@@ -802,4 +835,5 @@ module.exports = {
   // que el bot se quedaba "colgado" sin responder, cuando en produccion si
   // se manda el mensaje de seguimiento.
   looksLikePendingAgencyPromise,
+  looksLikePendingFormPromise,
 };
