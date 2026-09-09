@@ -34,6 +34,25 @@ function listImages() {
   return loadIndex();
 }
 
+// FASE 1 (H02): carpetas que NUNCA debe poder ver ni mandar la IA por su
+// cuenta, aunque esten en la misma biblioteca compartida que las fotos de
+// producto. "Guias de envio" son fotos del comprobante de ENVIO DE UN
+// PEDIDO PUNTUAL (se suben una por conversacion, nombradas "Guia de envio -
+// <telefono>", ver web/panel.js), no material de venta: si la IA pudiera
+// ofrecerlas con la herramienta mostrar_foto, un cliente que pida "mandame
+// la guia" podria terminar recibiendo la guia (con datos) de OTRO cliente,
+// porque la busqueda por nombre hace match parcial (ver findImageByName en
+// ai.js). El envio real de la guia de cada pedido ya tiene su propio camino
+// explicito y correcto (shipping.js, disparado desde el panel), asi que la
+// IA no necesita ni debe tocarlas.
+const FOLDERS_OCULTAS_PARA_IA = new Set(['Guias de envio']);
+
+// Subconjunto de listImages() seguro de mostrarle a la IA (y de dejar que
+// mostrar_foto resuelva): todo MENOS las carpetas de FOLDERS_OCULTAS_PARA_IA.
+function listAiVisibleImages() {
+  return loadIndex().filter((i) => !FOLDERS_OCULTAS_PARA_IA.has(i.folder));
+}
+
 function getImage(id) {
   return loadIndex().find((i) => i.id === id) || null;
 }
@@ -104,4 +123,4 @@ function mediaPath(filename) {
   return path.join(MEDIA_DIR, filename);
 }
 
-module.exports = { listImages, getImage, addImage, updateImage, deleteImage, listFolders, mediaPath, MEDIA_DIR };
+module.exports = { listImages, listAiVisibleImages, getImage, addImage, updateImage, deleteImage, listFolders, mediaPath, MEDIA_DIR };
