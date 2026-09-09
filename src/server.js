@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const { handleIncomingMessage, SOLD_STAGES } = require('./flow');
 const { markAsRead } = require('./whatsapp');
@@ -76,10 +77,74 @@ function fixFragmentedProductNames() {
 }
 
 const app = express();
-app.use(express.json());
+// FASE 1 (H01): ademas de parsear el JSON, guardamos el cuerpo crudo
+// (rawBody) porque la verificacion de firma de Meta (X-Hub-Signature-256)
+// se calcula sobre los bytes exactos que llegaron, no sobre el objeto ya
+// parseado (que puede serializarse distinto: orden de claves, espacios).
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || '';
+
+// FASE 1 (H01): antes, CUALQUIERA que conociera (o adivinara) la URL de
+// /webhook podia mandarle un POST fabricado a mano y el bot lo procesaba
+// como si fuera un mensaje real de un cliente de WhatsApp -incluyendo
+// hacer que la IA "conteste" ese contenido fabricado-. Meta firma cada POST
+// real con HMAC-SHA256 (header X-Hub-Signature-256) usando el App Secret de
+// la app de Meta; si configuramos ese mismo secreto aca, podemos verificar
+// que el POST realmente vino de Meta antes de tocar la IA o el historial
+// del cliente.
+//
+// Guardado a proposito para no romper produccion de un dia para el otro:
+// si WHATSAPP_APP_SECRET todavia no esta cargado en Render, la verificacion
+// queda desactivada (deja pasar todo, como antes) pero avisa fuerte en los
+// logs para que se complete la configuracion cuanto antes.
+const APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
+
+if (!APP_SECRET) {
+  console.warn(
+    'AVISO DE SEGURIDAD: WHATSAPP_APP_SECRET no esta configurado. ' +
+      'El webhook /webhook NO esta verificando la firma de Meta, asi que ' +
+      'en teoria cualquiera podria mandarle POSTs fabricados. Configura ' +
+      'WHATSAPP_APP_SECRET en las variables de entorno (Render > ' +
+      'Environment) con el App Secret de la app de Meta en cuanto puedas.'
+  );
+}
+
+// Calcula la firma esperada para un cuerpo crudo dado, en el mismo formato
+// que manda Meta ("sha256=<hex>"). Exportada aparte para poder probarla sin
+// tener que levantar un servidor HTTP de verdad.
+function computeExpectedSignature(rawBody) {
+  const hmac = crypto.createHmac('sha256', APP_SECRET).update(rawBody || Buffer.alloc(0));
+  return 'sha256=' + hmac.digest('hex');
+}
+
+// Middleware que rechaza (403) cualquier POST a /webhook cuya firma no
+// coincida con la esperada, ANTES de que el mensaje llegue a
+// handleIncomingMessage (y por lo tanto antes de que la IA lo vea o de que
+// se guarde nada en el historial del cliente). Si WHATSAPP_APP_SECRET no
+// esta configurado, deja pasar todo (ver aviso de arriba).
+function verifyWebhookSignature(req, res, next) {
+  if (!APP_SECRET) return next();
+
+  const received = req.get('x-hub-signature-256') || '';
+  const expected = computeExpectedSignature(req.rawBody);
+
+  const receivedBuf = Buffer.from(received);
+  const expectedBuf = Buffer.from(expected);
+  const valid =
+    receivedBuf.length === expectedBuf.length && crypto.timingSafeEqual(receivedBuf, expectedBuf);
+
+  if (!valid) {
+    console.warn('Webhook POST rechazado: firma X-Hub-Signature-256 ausente o invalida.');
+    return res.sendStatus(403);
+  }
+  next();
+}
 
 // Meta llama a este GET una sola vez para verificar que el webhook es tuyo.
 app.get('/webhook', (req, res) => {
@@ -95,7 +160,7 @@ app.get('/webhook', (req, res) => {
 });
 
 // Meta envia aqui cada mensaje/evento entrante.
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', verifyWebhookSignature, async (req, res) => {
   // Responder rapido a Meta; procesar despues.
   res.sendStatus(200);
 
@@ -143,9 +208,19 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor escuchando en el puerto ${PORT}`);
-  fixBackfilledSoldAt();
-  fixFragmentedProductNames();
-  remarketing.start();
-});
+// FASE 1: solo arrancamos el servidor de verdad (bind de puerto, timers de
+// remarketing, correcciones retroactivas) cuando este archivo se ejecuta
+// directamente (npm start / node src/server.js), no cuando otro archivo lo
+// require()-ea. Esto permite requerir server.js desde los tests (para
+// probar verifyWebhookSignature / computeExpectedSignature) sin levantar un
+// servidor real ni disparar efectos secundarios de arranque.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Servidor escuchando en el puerto ${PORT}`);
+    fixBackfilledSoldAt();
+    fixFragmentedProductNames();
+    remarketing.start();
+  });
+}
+
+module.exports = { app, verifyWebhookSignature, computeExpectedSignature };
