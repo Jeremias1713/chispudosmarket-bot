@@ -51,6 +51,14 @@ function getPublicKey() {
   return vapidKeys.publicKey;
 }
 
+// FASE 1 (H29): expuesta para que el backup del panel pueda incluir las
+// suscripciones push (antes no habia forma de leerlas desde afuera de este
+// modulo, asi que quedaban fuera del backup y se perdian igual que
+// sessions.json en un reinicio sin disco persistente).
+function listSubscriptions() {
+  return loadSubs();
+}
+
 // Guarda o actualiza una suscripcion (una por dispositivo/navegador). El
 // endpoint de la suscripcion es unico por dispositivo, asi que sirve como
 // identificador para no duplicar.
@@ -169,4 +177,4 @@ function notifySale(phone, session) {
   });
 }
 
-module.exports = { getPublicKey, addSubscription, removeSubscription, sendToAll, notifySale, testSaleNotifyWhatsapp };
+module.exports = { getPublicKey, addSubscription, removeSubscription, sendToAll, notifySale, testSaleNotifyWhatsapp, listSubscriptions };
