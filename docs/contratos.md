@@ -1,4 +1,4 @@
- pedido, mensaje y estados (Fase 0)
+ # Contrato de pedido, mensaje y estados (Fase 0)
 
 Este documento fija el vocabulario y las formas de datos que van a usar las
 fases 1–9 del plan de reparación (basado en la auditoría del 8/9/2026,
