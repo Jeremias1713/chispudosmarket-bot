@@ -144,6 +144,57 @@ function loginPageHtml(errorMsg) {
 
 const router = express.Router();
 
+// FASE 1 (H29): antes /panel/login no tenia ningun limite de intentos, asi
+// que alguien podia probar contraseñas por fuerza bruta sin ninguna
+// friccion (PANEL_USER/PANEL_PASS son las unicas credenciales que protegen
+// todo el panel: conversaciones de clientes, catalogo, configuracion).
+// Limite simple en memoria por IP: MAX_LOGIN_ATTEMPTS intentos fallidos
+// dentro de LOGIN_WINDOW_MS bloquean esa IP por el resto de la ventana.
+// Server unico (Render free/starter, sin multiples instancias detras de un
+// load balancer), asi que memoria alcanza: no hace falta Redis ni nada
+// externo para esto.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const MAX_LOGIN_ATTEMPTS = 5;
+const loginAttemptsByIp = new Map();
+
+function loginRateLimit(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || 'desconocida';
+  const now = Date.now();
+  const entry = loginAttemptsByIp.get(ip);
+  if (entry && now < entry.blockedUntil) {
+    const segundosRestantes = Math.ceil((entry.blockedUntil - now) / 1000);
+    return res
+      .status(429)
+      .type('html')
+      .send(loginPageHtml(`Demasiados intentos fallidos. Esperá ${segundosRestantes} segundos antes de volver a intentar.`));
+  }
+  if (entry && now >= entry.blockedUntil) {
+    loginAttemptsByIp.delete(ip);
+  }
+  next();
+}
+
+function registerFailedLogin(req) {
+  const ip = req.ip || req.socket?.remoteAddress || 'desconocida';
+  const now = Date.now();
+  const entry = loginAttemptsByIp.get(ip) || { count: 0, windowStart: now, blockedUntil: 0 };
+  if (now - entry.windowStart > LOGIN_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count += 1;
+  if (entry.count >= MAX_LOGIN_ATTEMPTS) {
+    entry.blockedUntil = now + LOGIN_WINDOW_MS;
+  }
+  loginAttemptsByIp.set(ip, entry);
+}
+
+function clearFailedLogins(req) {
+  const ip = req.ip || req.socket?.remoteAddress || 'desconocida';
+  loginAttemptsByIp.delete(ip);
+}
+
+
 router.get('/login', (_req, res) => {
   res.type('html').send(loginPageHtml());
 });
@@ -1071,9 +1122,72 @@ router.get('/api/settings', (_req, res) => {
   res.json(settingsStore.getSettings());
 });
 
+// FASE 1 (H13): antes, un valor negativo o invalido en estos campos (por
+// ejemplo escribir "-5" en "palabras por mensaje", o un campo vacio que
+// llega como "" y Number("") = 0, o un typo que llega como texto) se
+// guardaba tal cual en settings.json sin ningun chequeo. Segun el campo,
+// eso rompia el bot de formas confusas y silenciosas: maxWordsPerMessage
+// negativo podia colgar chunkByWords en un loop infinito (ver ai.js),
+// remarketingHourStart/End fuera de 0-23 rompia la comparacion de horario,
+// etc. Ahora se valida ANTES de guardar nada: si algun campo numerico no
+// pasa su chequeo, la respuesta es 400 con un mensaje claro (nombra el
+// campo y por que), y NINGUN campo de la tanda se guarda (todo o nada, para
+// no dejar la configuracion a medio actualizar).
+const NUMERIC_SETTINGS_RULES = {
+  openaiTemperature: { min: 0, max: 2 },
+  openaiHistoryN: { min: 1, integer: true },
+  replyDelayMs: { min: 0, integer: true },
+  maxWordsPerMessage: { min: 1, integer: true },
+  maxWordsHardCap: { min: 1, integer: true },
+  maxMessageParts: { min: 1, integer: true },
+  splitMinWords: { min: 0, integer: true },
+  splitGapMinMs: { min: 0, integer: true },
+  splitGapMaxMs: { min: 0, integer: true },
+  remarketingHourStart: { min: 0, max: 23, integer: true },
+  remarketingHourEnd: { min: 0, max: 23, integer: true },
+};
+
+// Devuelve { patch, errors }: patch trae listos para guardar los campos
+// numericos que pasaron su validacion; errors trae un mensaje claro por
+// cada campo presente en el body que NO paso (fuera de rango, no es un
+// numero, no es entero cuando tiene que serlo). Exportada aparte para poder
+// probarla directo sin tener que armar un request HTTP real.
+function validateNumericSettings(body) {
+  const patch = {};
+  const errors = [];
+  for (const [field, rule] of Object.entries(NUMERIC_SETTINGS_RULES)) {
+    if (body[field] == null || body[field] === '') continue;
+    const n = Number(body[field]);
+    if (!Number.isFinite(n)) {
+      errors.push(`"${field}" tiene que ser un numero (recibido: ${JSON.stringify(body[field])}).`);
+      continue;
+    }
+    if (rule.integer && !Number.isInteger(n)) {
+      errors.push(`"${field}" tiene que ser un numero entero (recibido: ${n}).`);
+      continue;
+    }
+    if (rule.min != null && n < rule.min) {
+      errors.push(`"${field}" no puede ser menor que ${rule.min} (recibido: ${n}).`);
+      continue;
+    }
+    if (rule.max != null && n > rule.max) {
+      errors.push(`"${field}" no puede ser mayor que ${rule.max} (recibido: ${n}).`);
+      continue;
+    }
+    patch[field] = n;
+  }
+  return { patch, errors };
+}
+
 router.post('/api/settings', (req, res) => {
   const body = req.body || {};
-  const patch = {};
+  // FASE 1 (H13): se valida primero; si algo no pasa, se corta aca con 400
+  // y no se toca settings.json (ni siquiera los campos de texto de abajo).
+  const { patch: numericPatch, errors } = validateNumericSettings(body);
+  if (errors.length) {
+    return res.status(400).json({ error: 'Configuracion invalida: ' + errors.join(' ') });
+  }
+  const patch = { ...numericPatch };
   const fields = [
     'businessName',
     'welcomeMessage',
@@ -1092,21 +1206,15 @@ router.post('/api/settings', (req, res) => {
       ? body.welcomeImageIds
       : String(body.welcomeImageIds || '').split(',').map((t) => t.trim()).filter(Boolean);
   }
-  if (body.openaiTemperature != null) patch.openaiTemperature = Number(body.openaiTemperature);
-  if (body.openaiHistoryN != null) patch.openaiHistoryN = Number(body.openaiHistoryN);
+  // FASE 1 (H13): los campos numericos de arriba (openaiTemperature,
+  // openaiHistoryN, replyDelayMs, maxWordsPerMessage, maxWordsHardCap,
+  // maxMessageParts, splitMinWords, splitGapMinMs, splitGapMaxMs,
+  // remarketingHourStart, remarketingHourEnd) ya quedaron en numericPatch,
+  // validados, mas arriba: no se vuelven a asignar aca sin chequeo.
   if (body.botEnabled != null) patch.botEnabled = Boolean(body.botEnabled);
-  if (body.replyDelayMs != null) patch.replyDelayMs = Number(body.replyDelayMs);
-  if (body.maxWordsPerMessage != null) patch.maxWordsPerMessage = Number(body.maxWordsPerMessage);
-  if (body.maxWordsHardCap != null) patch.maxWordsHardCap = Number(body.maxWordsHardCap);
-  if (body.maxMessageParts != null) patch.maxMessageParts = Number(body.maxMessageParts);
   if (body.splitRepliesEnabled != null) patch.splitRepliesEnabled = Boolean(body.splitRepliesEnabled);
-  if (body.splitMinWords != null) patch.splitMinWords = Number(body.splitMinWords);
-  if (body.splitGapMinMs != null) patch.splitGapMinMs = Number(body.splitGapMinMs);
-  if (body.splitGapMaxMs != null) patch.splitGapMaxMs = Number(body.splitGapMaxMs);
   if (body.audioReplyEnabled != null) patch.audioReplyEnabled = Boolean(body.audioReplyEnabled);
   if (body.remarketingEnabled != null) patch.remarketingEnabled = Boolean(body.remarketingEnabled);
-  if (body.remarketingHourStart != null) patch.remarketingHourStart = Number(body.remarketingHourStart);
-  if (body.remarketingHourEnd != null) patch.remarketingHourEnd = Number(body.remarketingHourEnd);
   // BUG YA CORREGIDO: este campo se agrego en el panel (index.html/app.js) y
   // en los defaults (settings.js) pero se quedo afuera de esta lista de
   // campos que esta ruta realmente persiste, asi que el numero JAMAS se
@@ -1236,12 +1344,23 @@ router.post('/api/simulator/location', async (req, res) => {
 // servicio se reinicia sin disco persistente): conversaciones, catalogo,
 // cupones y configuracion. Se descarga como un solo JSON desde el panel.
 router.get('/api/backup', (_req, res) => {
+  const safe = (fn, fallback) => {
+    try {
+      return fn();
+    } catch (err) {
+      return fallback;
+    }
+  };
   const backup = {
     generatedAt: new Date().toISOString(),
     sessions: listSessions(),
     products: catalog.listProducts(),
     coupons: coupons.listCoupons(),
     settings: settingsStore.getSettings(),
+    library: safe(() => library.listImages(), []),
+    agencies: safe(() => agencies.loadAgencies(), []),
+    broadcasts: safe(() => broadcasts.listRuns(), []),
+    pushSubscriptions: safe(() => push.listSubscriptions(), []),
   };
   const filename = `chispudos-backup-${new Date().toISOString().slice(0, 10)}.json`;
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1289,5 +1408,13 @@ router.get('/api/export.csv', (_req, res) => {
   // BOM al inicio para que Excel muestre bien las tildes/eñes.
   res.send('\uFEFF' + csv);
 });
+
+// FASE 1 (H13): expuesta aparte (sin cambiar lo que exporta este modulo
+// para el resto del bot, que sigue siendo el router) para poder probar la
+// validacion de settings numericos directo, sin armar un request HTTP real.
+router.validateNumericSettings = validateNumericSettings;
+// FASE 1 (H29): idem para probar el limite de intentos de /panel/login sin
+// tener que mandarle 5 requests HTTP reales con credenciales falsas.
+router._testLoginRateLimit = { loginRateLimit, registerFailedLogin, clearFailedLogins, loginAttemptsByIp };
 
 module.exports = router;
