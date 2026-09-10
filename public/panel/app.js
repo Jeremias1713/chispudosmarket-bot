@@ -261,7 +261,51 @@ function renderMemory(convo) {
 
 const ROLE_LABEL = { user: 'Cliente', assistant: 'Bot', human: 'Vos' }
 
+// FASE 2/5 (H06/H17/H35): burbuja especial para mensajes de plantilla.
+// Muestra el contenido REAL guardado al momento del envio (m.template.
+// snapshot: header/body/footer/botones), quien origino el envio, y el
+// estado real confirmado por Meta (nunca "entregado"/"leido" inventado: si
+// no hay status guardado, no se muestra ninguno). Para plantillas de antes
+// de esta funcionalidad (sin m.template), se avisa que no se puede
+// reconstruir el contenido exacto en vez de mostrar solo el string crudo
+// "[plantilla] nombre" sin ninguna explicacion.
+//
+// IMPORTANTE: esto es una representacion fiel de los datos que el bot
+// guardo al mandar, NO una captura exacta de como se vio en el WhatsApp del
+// cliente (Meta puede renderizar tipografia/emoji distinto).
+const ORIGEN_LABEL = { manual: 'Enviado a mano desde el panel', bot: 'Enviado automaticamente por el bot', broadcast: 'Enviado en un lote', seguimiento: 'Enviado por seguimiento/recordatorio' }
+const ESTADO_LABEL = { sent: 'Aceptado por Meta', delivered: 'Entregado', read: 'Leído', failed: 'Fallo el envio' }
+
+function templateBubble(m) {
+  const t = m.template
+  if (!t) {
+    // Historial viejo: solo queda el string "[plantilla] nombre" sin nada
+    // estructurado. No se inventa contenido ni estado.
+    return `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
+      `<div class="tpl-unknown-note">No se puede reconstruir el contenido exacto de este envio (es de antes de guardar esta informacion).</div>`
+  }
+  const s = t.snapshot
+  const header = s?.headerImageUrl ? `<div class="bubble-img"><img src="${esc(s.headerImageUrl)}" alt="encabezado"></div>` : ''
+  const headerTxt = s?.headerText ? `<div class="tpl-header-text">${esc(s.headerText)}</div>` : ''
+  const body = s?.bodyText
+    ? `<span class="bubble-text">${esc(s.bodyText).replace(/\n/g, '<br>')}</span>`
+    : `<span class="bubble-text">${esc(m.content)}</span><div class="tpl-unknown-note">No se pudo reconstruir el texto exacto de esta plantilla (no se encontro en Meta al momento de mandarla).</div>`
+  const footer = s?.footerText ? `<div class="tpl-footer">${esc(s.footerText)}</div>` : ''
+  const buttons = Array.isArray(s?.buttons) && s.buttons.length
+    ? `<div class="tpl-buttons">${s.buttons.map((b) => `<span class="tpl-btn">${esc(b.text || '')}</span>`).join('')}</div>`
+    : ''
+  const estado = t.status
+    ? `<span class="tpl-status tpl-status-${esc(t.status)}">${esc(ESTADO_LABEL[t.status] || t.status)}</span>`
+    : ''
+  const motivo = t.status === 'failed' && t.failReason ? `<div class="tpl-fail-reason">Motivo: ${esc(t.failReason)}</div>` : ''
+  const origen = t.origin ? `<div class="tpl-origin">${esc(ORIGEN_LABEL[t.origin] || t.origin)}</div>` : ''
+  return header + headerTxt + body + footer + buttons + motivo + origen +
+    `<div class="tpl-status-row">${estado}</div>` +
+    `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
+}
+
 function bubbleInner(m) {
+  if (typeof m.content === 'string' && m.content.startsWith('[plantilla')) return templateBubble(m)
   // Nota de voz: ademas de la transcripcion (bubble-text), si se guardo el
   // audio original se muestra un reproductor arriba del texto. La
   // transcripcion puede salir mal (ruido, acento, audio cortado) y el
@@ -448,6 +492,69 @@ $('wcSend').addEventListener('click', async () => {
     alert('No se pudo mandar la plantilla: ' + err.message)
   } finally {
     $('wcSend').disabled = false
+  }
+})
+
+// FASE 2 (H06/H17): previsualizar y "probar en mi numero", reusando el
+// MISMO endpoint de armado (POST /templates/:name/preview) que despues usa
+// el envio real -- nunca puede mostrar algo distinto de lo que se termina
+// mandando con "Enviar plantilla" de arriba.
+function renderTplPreview(snapshot) {
+  const box = $('wcPreviewBox')
+  if (!snapshot) {
+    box.hidden = false
+    box.innerHTML = '<div class="tpl-unknown-note">No se pudo encontrar esa plantilla aprobada en Meta para previsualizarla.</div>'
+    return
+  }
+  const header = snapshot.headerImageUrl ? `<div class="bubble-img"><img src="${esc(snapshot.headerImageUrl)}" alt="encabezado"></div>` : ''
+  const headerTxt = snapshot.headerText ? `<div class="tpl-header-text">${esc(snapshot.headerText)}</div>` : ''
+  const body = snapshot.bodyText ? `<span class="bubble-text">${esc(snapshot.bodyText).replace(/\n/g, '<br>')}</span>` : ''
+  const footer = snapshot.footerText ? `<div class="tpl-footer">${esc(snapshot.footerText)}</div>` : ''
+  const buttons = Array.isArray(snapshot.buttons) && snapshot.buttons.length
+    ? `<div class="tpl-buttons">${snapshot.buttons.map((b) => `<span class="tpl-btn">${esc(b.text || '')}</span>`).join('')}</div>`
+    : ''
+  box.hidden = false
+  box.innerHTML = `<div class="bubble bubble-human">${header}${headerTxt}${body}${footer}${buttons}</div>` +
+    '<div class="tpl-unknown-note">Vista previa fiel al contenido: no es una captura exacta del WhatsApp del cliente.</div>'
+}
+
+$('wcPreview').addEventListener('click', async () => {
+  const templateName = $('wcTemplate').value.trim()
+  if (!templateName) return
+  const rawParams = $('wcParams').value.trim()
+  const params = rawParams ? rawParams.split(',').map((s) => s.trim() || '-') : []
+  $('wcPreview').disabled = true
+  try {
+    const { snapshot } = await api('/templates/' + encodeURIComponent(templateName) + '/preview', {
+      method: 'POST',
+      body: JSON.stringify({ values: params }),
+    })
+    renderTplPreview(snapshot)
+  } catch (err) {
+    renderTplPreview(null)
+  } finally {
+    $('wcPreview').disabled = false
+  }
+})
+
+$('wcTestSend').addEventListener('click', async () => {
+  const templateName = $('wcTemplate').value.trim()
+  const phone = $('wcTestPhone').value.trim()
+  if (!templateName || !phone) { alert('Falta el nombre de la plantilla o tu número para la prueba.'); return }
+  const rawParams = $('wcParams').value.trim()
+  const params = rawParams ? rawParams.split(',').map((s) => s.trim() || '-') : []
+  $('wcTestSend').disabled = true
+  try {
+    const { snapshot } = await api('/templates/' + encodeURIComponent(templateName) + '/test-send', {
+      method: 'POST',
+      body: JSON.stringify({ phone, values: params }),
+    })
+    renderTplPreview(snapshot)
+    alert('Prueba mandada a ' + phone + '. Este envío NO queda guardado en ninguna conversación real.')
+  } catch (err) {
+    alert('No se pudo mandar la prueba: ' + err.message)
+  } finally {
+    $('wcTestSend').disabled = false
   }
 })
 
