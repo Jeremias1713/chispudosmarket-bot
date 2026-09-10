@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('./dataDir');
+const { applyStatusUpdate } = require('./messageStatus');
 
 const STATE_PATH = path.join(DATA_DIR, 'sessions.json');
 
@@ -225,6 +226,20 @@ function listSessions() {
   return Object.entries(sessions).map(([phone, data]) => ({ phone, ...data }));
 }
 
+// FASE 5 (H35): aplica un evento de status de WhatsApp (sent/delivered/
+// read/failed, del webhook de Meta) al mensaje de plantilla que corresponda
+// (buscado por wamid), y guarda sessions.json solo si de verdad cambio
+// algo. La logica de "que hacer con el evento" vive en messageStatus.js
+// (pura, sin tocar disco) para poder probarla sin depender de
+// sessions.json; esta funcion es la unica que la conecta con la
+// persistencia real.
+function applyTemplateStatus(statusEvent) {
+  const sessions = loadAll();
+  const resultado = applyStatusUpdate(sessions, statusEvent);
+  if (resultado.updated) saveAll(sessions);
+  return resultado;
+}
+
 module.exports = {
   getSession,
   updateSession,
@@ -235,4 +250,5 @@ module.exports = {
   unlockStage,
   markFollowUp,
   listSessions,
+  applyTemplateStatus,
 };
