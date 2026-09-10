@@ -104,7 +104,16 @@ async function sendPersonalized({ templateName, languageCode, order, rows }) {
       results.push({ fila: row.fila, telefono: row.telefono, ok: false, error: 'Sin telefono' });
       continue;
     }
-    const params = order.map((campo) => row[campo] || '');
+    // FASE 3d: mismo respaldo que ya tienen shipping.js/broadcasts.js/etc --
+    // si una celda del Excel viene vacia para el campo elegido, se manda
+    // como "-" en vez de "": a Meta le alcanza con UN solo parametro vacio
+    // para mandar la plantilla entera sin reemplazar NINGUNA variable (el
+    // cliente ve los {{1}} {{2}} crudos), aunque el resto de los datos
+    // hubieran estado bien cargados en el Excel.
+    const params = order.map((campo) => {
+      const v = String(row[campo] ?? '').trim();
+      return v || '-';
+    });
     try {
       // FASE 2/5 (H06/H35): igual que en broadcasts.js/panel.js -- se usa el
       // armado unico (mismo que preview/prueba) y se guarda el snapshot +
