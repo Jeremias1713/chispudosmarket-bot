@@ -90,3 +90,31 @@ test('entregado sigue excluido (no hace falta seguir cruzando un pedido ya entre
   const resultado = dropanas.matchRow({ guia: 'GU-999', cliente: 'Ana María', ciudad: '', producto: '' });
   assert.equal(resultado.matchType, 'sin_match');
 });
+
+// Nuevo: desplegable manual para filas "sin_match" (a pedido del negocio,
+// para cuando el nombre en Dropanas no se parece en nada al guardado en el
+// bot y ninguna comparacion automatica lo va a encontrar sola).
+test('listAllCandidates() - trae todas las conversaciones no entregadas, ordenadas por nombre', () => {
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    '584120000001': sesion({ stage: 'vendido', card: { nombre: 'Zoraida Perez' } }),
+    '584120000002': sesion({ stage: 'interesado', card: { nombre: 'Ana Maria' } }),
+    '584120000003': sesion({ stage: 'entregado', card: { nombre: 'Beto Gomez' } }),
+  }));
+
+  const lista = dropanas.listAllCandidates();
+  assert.deepEqual(lista.map((c) => c.phone), ['584120000002', '584120000001'], 'BUG si aparece el entregado o el orden no es alfabetico');
+  assert.equal(lista[0].name, 'Ana Maria');
+});
+
+test('listAllCandidates() - una conversacion sin nombre en la ficha ni de whatsapp no rompe el orden', () => {
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    '584120000001': sesion({ stage: 'vendido', card: { nombre: null } }),
+    '584120000002': sesion({ stage: 'vendido', card: { nombre: 'Ana Maria' } }),
+  }));
+
+  const lista = dropanas.listAllCandidates();
+  assert.equal(lista.length, 2);
+  // Nombre vacio ('' al comparar) ordena primero que cualquier nombre real.
+  assert.equal(lista[0].name, null);
+  assert.equal(lista[1].name, 'Ana Maria');
+});
