@@ -149,4 +149,18 @@ function matchExport(buffer) {
   return rows.map((row) => ({ ...row, ...matchRow(row) }));
 }
 
-module.exports = { parseExportBuffer, matchExport, candidateSessions, matchRow };
+// Lista completa de conversaciones "elegibles" (mismo criterio que
+// candidateSessions: cualquiera que no este "entregado"), para que el panel
+// pueda ofrecer un desplegable con TODAS las conversaciones cuando una fila
+// del Excel queda "sin_match" — a veces el nombre que escribio el cliente en
+// Dropanas no se parece en nada al que quedo guardado en el bot (apodo,
+// nombre de otra persona que hizo el pedido, error de tipeo grande), y ahi
+// ninguna comparacion automatica por nombre va a encontrarlo solo: hace
+// falta que el negocio lo busque a mano en la lista completa.
+function listAllCandidates() {
+  return candidateSessions('')
+    .map(candidateInfo)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+module.exports = { parseExportBuffer, matchExport, candidateSessions, matchRow, listAllCandidates };
