@@ -37,6 +37,7 @@ const shipping = require('../shipping');
 const dropanas = require('../dropanas');
 const personalizedBroadcast = require('../personalizedBroadcast');
 const seguimiento = require('../seguimiento');
+const { detectOrderConflict } = require('../orderGuard');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -780,6 +781,18 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
   const guia = String(req.body?.guia ?? '').trim();
 
   const s = getSession(phone);
+
+  // FASE 3 (H08, solucion intermedia): si esta conversacion ya tiene un
+  // pedido con guia distinta YA avisado al cliente, guardar esta guia nueva
+  // encima seria mezclar dos compras del mismo cliente en una sola ficha.
+  // Se corta ANTES de subir ninguna imagen ni tocar la sesion, y se le pide
+  // al operador que confirme explicitamente que es un pedido nuevo
+  // (mandando confirmNewOrder=true) en vez de sobrescribir en silencio.
+  if (req.body?.guia !== undefined && String(req.body?.confirmNewOrder) !== 'true') {
+    const conflicto = detectOrderConflict(s, guia);
+    if (conflicto) return res.status(409).json(conflicto);
+  }
+
   const card = { ...(s.card || {}) };
   if (req.body?.guia !== undefined) card.guia = guia || null;
   // Agencia de destino: se carga a mano aca porque este flujo (guia por
@@ -902,6 +915,21 @@ router.post('/api/dropanas/confirm', async (req, res) => {
     }
     try {
       const s = getSession(phone);
+
+      // FASE 3 (H08, solucion intermedia): mismo chequeo que la carga de
+      // guia una por una — si ya hay un pedido distinto avisado con exito,
+      // no se sobrescribe en silencio. En el lote, un conflicto no frena a
+      // los demas items: se marca ese resultado como conflicto y se sigue
+      // con el resto.
+      if (!item?.confirmNewOrder) {
+        const conflicto = detectOrderConflict(s, guia);
+        if (conflicto) {
+          results.push({ phone, guia, ok: false, ...conflicto });
+          if (items.length > 1) await sleep(BULK_GUIA_DELAY_MS);
+          continue;
+        }
+      }
+
       const card = { ...(s.card || {}), guia };
       // Mismo avance automatico que la carga de guia una por una (ver POST
       // /api/conversations/:phone/guia): si estaba "vendido" o
