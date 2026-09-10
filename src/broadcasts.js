@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { sendTemplate } = require('./whatsapp');
+const { sendTemplateWithSnapshot } = require('./templateSend');
 const { listSessions, appendMessage } = require('./state');
 const { DATA_DIR } = require('./dataDir');
 
@@ -70,13 +70,26 @@ async function startRun({ templateName, languageCode, params, target }) {
     for (const phone of phones) {
       let ok = true;
       let error = null;
+      let wamid = null;
       try {
-        await sendTemplate(phone, templateName, run.languageCode, run.params);
+        // FASE 2/5 (H06/H35): antes se mandaba con sendTemplate directo y en
+        // el historial solo quedaba el string "[plantilla masiva] nombre",
+        // sin el contenido real armado ni el wamid (necesario para saber
+        // despues si se entrego/leyo, via el webhook de status).
+        const resultado = await sendTemplateWithSnapshot({
+          to: phone,
+          templateName,
+          languageCode: run.languageCode,
+          values: run.params,
+        });
+        wamid = resultado.wamid;
         // BUG YA CORREGIDO (mismo que el de seguimiento.js): el envio masivo
         // SI mandaba de verdad la plantilla por WhatsApp, pero nunca quedaba
         // guardado en el historial de la conversacion de cada cliente, asi
         // que en el chat individual no se veia ningun rastro del envio.
-        appendMessage(phone, 'human', `[plantilla masiva] ${templateName}`);
+        appendMessage(phone, 'human', `[plantilla masiva] ${templateName}`, {
+          template: { name: templateName, origin: 'broadcast', params: run.params, snapshot: resultado.snapshot, wamid, status: 'sent' },
+        });
       } catch (err) {
         ok = false;
         error = err.response?.data?.error?.message || err.message;
@@ -85,7 +98,7 @@ async function startRun({ templateName, languageCode, params, target }) {
       const current = loadRuns();
       const r = current.find((x) => x.id === run.id);
       if (!r) break; // el run se borro mientras corria
-      r.results.push({ phone, ok, error, at: new Date().toISOString() });
+      r.results.push({ phone, ok, error, wamid, at: new Date().toISOString() });
       r.sent += ok ? 1 : 0;
       r.failed += ok ? 0 : 1;
       saveRuns(current);
