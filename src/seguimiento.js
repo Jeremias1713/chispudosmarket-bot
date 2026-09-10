@@ -23,32 +23,45 @@ const { listSessions, updateSession, appendMessage } = require('./state');
 const { SOLD_STAGES } = require('./flow');
 const { sendTemplateWithSnapshot } = require('./templateSend');
 const { getSettings } = require('./settings');
-
-function foldName(s) {
-  return String(s || '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// FASE 3 (H05): foldName() y el criterio de "son la misma persona" ahora
+// viven en un solo lugar compartido con dropanas.js (nameMatch.js).
+const { foldName, compareNames } = require('./nameMatch');
 
 // Mismo criterio que dropanas.js: conversaciones ya vendidas y que todavia
 // no estan "entregado" son las candidatas a que este cruce las actualice
-// (una vez entregado, no hace falta seguir tocandolas desde aca).
+// (una vez entregado, no hace falta seguir tocandolas desde aca). Este
+// modulo es especificamente el seguimiento LOGISTICO de pedidos ya vendidos
+// (no el cruce de guias nuevas de H18, que si amplio a otras etapas), asi
+// que se mantiene acotado a SOLD_STAGES a proposito.
 function candidateSessions() {
   return listSessions().filter((s) => SOLD_STAGES.includes(s.stage || 'nuevo') && s.stage !== 'entregado');
 }
 
+// FASE 3 (H05): antes una sola coincidencia parcial (ej. "Ana" contra "Ana
+// Maria") se clasificaba como 'exacto' porque `candidates.length === 1`, sin
+// importar que la evidencia (una sola palabra en comun) fuera debil. Ahora
+// se usa compareNames() (ver nameMatch.js): 'exacto' exige coincidencia
+// total de palabras, o que el nombre mas chico (2+ palabras) este contenido
+// entero en el mas grande. Cualquier otra coincidencia parcial (una sola
+// palabra en comun, como "Ana"/"Ana Maria") nunca se auto-marca: queda como
+// 'ambiguo' para que el negocio confirme a mano en el panel.
 function matchCliente(clienteRaw) {
   const target = foldName(clienteRaw);
   if (!target) return { matchType: 'sin_match', candidates: [] };
-  const candidates = candidateSessions().filter((s) => {
-    const nombre = foldName(s.card?.nombre || s.name || '');
-    return nombre && (nombre === target || nombre.includes(target) || target.includes(nombre));
-  });
-  if (candidates.length === 1) return { matchType: 'exacto', candidates };
-  if (candidates.length > 1) return { matchType: 'ambiguo', candidates };
+
+  const exactas = [];
+  const parciales = [];
+  for (const s of candidateSessions()) {
+    const nombre = s.card?.nombre || s.name || '';
+    if (!foldName(nombre)) continue;
+    const resultado = compareNames(nombre, clienteRaw);
+    if (resultado === 'exacto') exactas.push(s);
+    else if (resultado === 'parcial') parciales.push(s);
+  }
+
+  if (exactas.length === 1) return { matchType: 'exacto', candidates: exactas };
+  if (exactas.length > 1) return { matchType: 'ambiguo', candidates: exactas };
+  if (parciales.length) return { matchType: 'ambiguo', candidates: parciales };
   return { matchType: 'sin_match', candidates: [] };
 }
 
@@ -65,11 +78,48 @@ function firstName(full) {
   return String(full || '').trim().split(/\s+/)[0] || '';
 }
 
+// FASE 3 (H12): antes esto hacia Number(n) directo. Dos problemas
+// confirmados con el Excel real de Dropanas:
+//   1. Un monto vacio ("" o celda vacia) daba Number('') = 0, y el cliente
+//      terminaba recibiendo "0bs" en la plantilla en vez de que el negocio
+//      se entere de que falta cargar el monto.
+//   2. Cuando la celda viene como TEXTO con formato venezolano ("38.900",
+//      punto como separador de miles), Number("38.900") = 38.9 (JS lee el
+//      punto como separador decimal): el cliente veia "38.90bs" en vez de
+//      "38900bs", un monto casi mil veces menor al real.
+// parseMontoBs distingue explicitamente estos dos formatos; si no puede
+// interpretar el valor con confianza, devuelve null (nunca 0).
+function parseMontoBs(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+
+  let texto = String(raw).trim();
+  if (!texto) return null;
+
+  if (texto.includes(',')) {
+    // Formato "1.234.567,89": los puntos son de miles, la coma es decimal.
+    texto = texto.replace(/\./g, '').replace(',', '.');
+  } else if (texto.includes('.')) {
+    // Sin coma: si CADA grupo despues de un punto tiene exactamente 3
+    // digitos (ej. "38.900" o "1.234.567"), son separadores de miles. Si no
+    // (ej. "38.90", dos decimales), se deja como separador decimal normal.
+    const partes = texto.split('.');
+    const pareceMilesVenezolano = partes.length > 1 && partes.slice(1).every((p) => p.length === 3);
+    if (pareceMilesVenezolano) texto = partes.join('');
+  }
+
+  const num = Number(texto);
+  return Number.isFinite(num) ? num : null;
+}
+
 // Ej. 34900 -> "34900bs" (mismo formato que usan las plantillas ya
-// aprobadas). Si el numero tiene decimales reales los conserva.
+// aprobadas). Si el numero tiene decimales reales los conserva. Un monto
+// vacio o no interpretable devuelve '' (no "0bs") para que quien llama
+// pueda mostrar su propio respaldo ('-') y el negocio note que falta el
+// dato, en vez de mandarle un precio inventado al cliente.
 function formatMonto(n) {
-  const num = Number(n);
-  if (!Number.isFinite(num)) return '';
+  const num = parseMontoBs(n);
+  if (num === null) return '';
   const texto = Number.isInteger(num) ? String(num) : num.toFixed(2);
   return texto + 'bs';
 }
@@ -188,4 +238,13 @@ async function testSend(phone, vars) {
   return { sent: true, values, wamid, snapshot };
 }
 
-module.exports = { buildPreview, applyItems, testSend };
+module.exports = {
+  buildPreview,
+  applyItems,
+  testSend,
+  // FASE 3 (H05/H12): exportadas para poder probarlas directo sin tener que
+  // pasar por un Excel/preview completo.
+  matchCliente,
+  formatMonto,
+  parseMontoBs,
+};

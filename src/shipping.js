@@ -49,6 +49,24 @@ function resolveMonto(productoTexto) {
 // vacio ('-'), nunca ''. Esto fue justo lo que paso con un envio en lote de
 // guias donde la agencia habia quedado sin cargar: por esa UNA variable
 // vacia, el mensaje entero le salio roto a todos los clientes de esa tanda.
+// FASE 3 (H12): antes el monto de la plantilla SIEMPRE se recalculaba desde
+// el precio ACTUAL del catalogo segun el texto de producto (resolveMonto),
+// ignorando por completo session.card.monto — el monto real acordado con el
+// cliente, cargado a mano desde el panel (ver POST
+// /api/conversations/:phone/amount). Si el negocio hizo un descuento, o el
+// precio del catalogo cambio despues de la venta, la guia le comunicaba al
+// cliente un monto distinto al que realmente le cobraron. Ahora se prioriza
+// card.monto (numero real cargado) cuando existe; el precio de catalogo
+// queda solo como respaldo para pedidos donde todavia no se cargo el monto
+// real.
+function resolveMontoTexto(session) {
+  const real = session.card?.monto;
+  if (typeof real === 'number' && Number.isFinite(real)) {
+    return `${Math.round(real)}Bs`;
+  }
+  return resolveMonto(session.card?.producto);
+}
+
 function placeholderValues(session) {
   return {
     nombre: session.name || session.card?.nombre || 'cliente',
@@ -58,7 +76,7 @@ function placeholderValues(session) {
     // o se completa sola desde el Excel de Dropanas (columna "Bodega
     // Destino"/"Ciudad") cuando se carga en lote.
     agencia: session.card?.agencia || '-',
-    monto: resolveMonto(session.card?.producto) || '-',
+    monto: resolveMontoTexto(session) || '-',
   };
 }
 
@@ -197,4 +215,11 @@ async function testSend(phone, datos) {
   return { sent: true, values, wamid, snapshot };
 }
 
-module.exports = { maybeNotifyShipping, testSend };
+module.exports = {
+  maybeNotifyShipping,
+  testSend,
+  // FASE 3 (H12): expuestas para poder probar directo que se prioriza el
+  // monto real de la ficha sobre el precio de catalogo.
+  placeholderValues,
+  resolveMonto,
+};
