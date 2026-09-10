@@ -7,7 +7,7 @@
 //
 // No inventa a quien mandarle nada: si falta el telefono en una fila, esa
 // fila se marca como invalida y no se manda (se lo avisa antes de confirmar).
-const { sendTemplate } = require('./whatsapp');
+const { sendTemplateWithSnapshot } = require('./templateSend');
 const { appendMessage } = require('./state');
 
 function foldHeader(s) {
@@ -106,9 +106,19 @@ async function sendPersonalized({ templateName, languageCode, order, rows }) {
     }
     const params = order.map((campo) => row[campo] || '');
     try {
-      await sendTemplate(row.telefono, templateName, languageCode || 'es', params);
-      appendMessage(row.telefono, 'human', `[plantilla masiva personalizada] ${templateName} (${params.join(', ')})`);
-      results.push({ fila: row.fila, telefono: row.telefono, ok: true });
+      // FASE 2/5 (H06/H35): igual que en broadcasts.js/panel.js -- se usa el
+      // armado unico (mismo que preview/prueba) y se guarda el snapshot +
+      // wamid en el historial, ademas del string de siempre.
+      const { wamid, snapshot } = await sendTemplateWithSnapshot({
+        to: row.telefono,
+        templateName,
+        languageCode: languageCode || 'es',
+        values: params,
+      });
+      appendMessage(row.telefono, 'human', `[plantilla masiva personalizada] ${templateName} (${params.join(', ')})`, {
+        template: { name: templateName, origin: 'broadcast', params, snapshot, wamid, status: 'sent' },
+      });
+      results.push({ fila: row.fila, telefono: row.telefono, ok: true, wamid });
     } catch (err) {
       const detail = err.response?.data?.error?.message || err.message;
       results.push({ fila: row.fila, telefono: row.telefono, ok: false, error: detail });
