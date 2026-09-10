@@ -299,12 +299,22 @@ router.get('/api/conversations', (req, res) => {
 router.get('/api/conversations/:phone', (req, res) => {
   const phone = req.params.phone;
   const s = getSession(phone);
+  // FASE 3c: appendMessage (state.js) guarda el snapshot de la plantilla
+  // (nombre, origen, parametros, contenido real ya sustituido, wamid, estado
+  // confirmado por Meta) en el campo `template` de cada mensaje del history
+  // cuando se manda una plantilla (ver broadcasts.js, personalizedBroadcast.js,
+  // seguimiento.js, shipping.js). Pero este endpoint lo descartaba al armar la
+  // respuesta, asi que el panel SIEMPRE mostraba el mensaje de plantilla como
+  // "no se puede reconstruir el contenido" aunque el dato estuviera guardado
+  // perfectamente bien. templateBubble() en app.js ya sabe leer m.template
+  // tal cual esta guardado — solo hacia falta no perderlo aca.
   const messages = (s.history || []).map((m, i) => ({
     id: i,
     role: m.role,
     content: m.content,
     at: m.at || null,
     attachment: m.attachment || null,
+    template: m.template || null,
   }));
   res.json({ conversation: toConvo({ phone, ...s }), messages });
 });
