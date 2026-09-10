@@ -1614,6 +1614,12 @@ $('bc_send').addEventListener('click', async () => {
 // asi la foto se manda exactamente con la misma logica ya probada (imagen +
 // texto/plantilla segun este abierta o no la ventana de 24h).
 let dpRows = []
+// Lista completa de conversaciones elegibles que manda el servidor junto con
+// el preview (ver listAllCandidates en src/dropanas.js), para ofrecer un
+// desplegable manual en las filas "sin_match" — a veces el nombre en
+// Dropanas no se parece en nada al guardado en el bot y ninguna comparacion
+// automatica la va a encontrar sola.
+let dpAllCandidates = []
 const BULK_GUIA_CLIENT_DELAY_MS = 1200
 
 function dpFoldText(s) {
@@ -1690,10 +1696,23 @@ function dpRowHtml(row, idx) {
     )
     picker = `<select class="dp-pick" data-idx="${idx}">${opts.join('')}</select>`
   } else {
-    picker = '<div class="help">No encontré ninguna conversación vendida con ese nombre. Cargala a mano desde el chat de ese cliente.</div>'
+    // "Sin coincidencia": ninguna comparacion automatica por nombre encontro
+    // nada. En vez de obligar a cargarlo a mano desde el chat, se ofrece un
+    // desplegable con TODAS las conversaciones elegibles (dpAllCandidates)
+    // para que el negocio la busque y la elija el mismo — reusa la misma
+    // clase "dp-pick" y el mismo listener de "change" que la fila ambigua.
+    const opts = ['<option value="">-- buscar en todas mis conversaciones --</option>'].concat(
+      dpAllCandidates.map((c) => `<option value="${esc(c.phone)}">${esc(c.phone)} — ${esc(c.name || 'sin nombre')}${c.city ? ' (' + esc(c.city) + ')' : ''}</option>`)
+    )
+    picker = `<select class="dp-pick" data-idx="${idx}">${opts.join('')}</select>
+      <div class="help">No encontré ninguna conversación con ese nombre. Elegí a mano de la lista, o cargala desde el chat de ese cliente.</div>`
   }
 
-  const disabled = row.matchType === 'sin_match' ? 'disabled' : ''
+  // Antes esto dependia de matchType === 'sin_match'; ahora una fila
+  // "sin_match" puede tener telefono si el negocio lo eligio a mano en el
+  // desplegable de arriba, asi que lo que manda es si hay telefono elegido
+  // (row.phone), no el tipo de match original.
+  const disabled = !row.phone ? 'disabled' : ''
   const checked = row.matchType === 'exacto' ? 'checked' : ''
   // El link de "ver" abre un blob local del propio archivo que ya elegiste
   // en tu computadora: no se sube a ningun lado solo por mirarlo, es nada
@@ -1701,7 +1720,7 @@ function dpRowHtml(row, idx) {
   const foto = row.photoName
     ? `<div class="dp-phone">📎 ${esc(row.photoName)} · <a href="#" class="dp-view-photo" data-idx="${idx}">ver</a></div>`
     : ''
-  const testBtn = `<button type="button" class="btn dp-test" data-idx="${idx}" ${row.matchType === 'sin_match' ? 'disabled' : ''}>🧪 Probar</button>`
+  const testBtn = `<button type="button" class="btn dp-test" data-idx="${idx}" ${!row.phone ? 'disabled' : ''}>🧪 Probar</button>`
 
   return `<div class="dp-row" data-idx="${idx}">
     <input type="checkbox" class="dp-check" data-idx="${idx}" ${checked} ${disabled}>
@@ -1745,6 +1764,7 @@ $('dp_analyze').addEventListener('click', async () => {
     }
     const data = await res.json()
     dpRows = data.rows || []
+    dpAllCandidates = data.allCandidates || []
     matchPhotosToRows(dpRows, $('dp_photos').files)
     renderDpResults()
     const exactas = dpRows.filter((r) => r.matchType === 'exacto').length
