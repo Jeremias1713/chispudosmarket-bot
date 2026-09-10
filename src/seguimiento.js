@@ -21,7 +21,7 @@
 // (ver /api/seguimiento/preview y /api/seguimiento/confirm en panel.js).
 const { listSessions, updateSession, appendMessage } = require('./state');
 const { SOLD_STAGES } = require('./flow');
-const { sendTemplate } = require('./whatsapp');
+const { sendTemplateWithSnapshot } = require('./templateSend');
 const { getSettings } = require('./settings');
 
 function foldName(s) {
@@ -134,19 +134,20 @@ async function applyItems(items) {
         updateSession(item.phone, { stage: item.etapaNueva });
       }
       if (item.enviarPlantilla && item.plantillaVars) {
-        await sendTemplate(item.phone, templateName, languageCode, [
-          item.plantillaVars.nombre,
-          item.plantillaVars.producto,
-          item.plantillaVars.guia,
-          item.plantillaVars.monto,
-        ]);
+        const params = [item.plantillaVars.nombre, item.plantillaVars.producto, item.plantillaVars.guia, item.plantillaVars.monto];
+        // FASE 2/5 (H06/H35): mismo armado unico que preview/prueba, y se
+        // guarda el snapshot + wamid (antes solo quedaba el string
+        // "[plantilla] nombre").
+        const { wamid, snapshot } = await sendTemplateWithSnapshot({ to: item.phone, templateName, languageCode, values: params });
         // BUG YA CORREGIDO: esta plantilla SI se mandaba de verdad por
         // WhatsApp (mismo sendTemplate que usa todo el resto del bot, que
         // ya sabemos que entrega bien), pero nunca quedaba guardada en el
         // historial de la conversacion, asi que en el panel no se veia
         // ningun rastro de que se hubiera mandado. Por eso parecia que "no
         // se mando" cuando en realidad si habia salido.
-        appendMessage(item.phone, 'human', `[plantilla] ${templateName}`);
+        appendMessage(item.phone, 'human', `[plantilla] ${templateName}`, {
+          template: { name: templateName, origin: 'seguimiento', params, snapshot, wamid, status: 'sent' },
+        });
       }
       results.push({ phone: item.phone, ok: true });
     } catch (err) {
@@ -172,13 +173,19 @@ async function testSend(phone, vars) {
     guia: String(vars?.guia || '').trim() || '-',
     monto: String(vars?.monto || '').trim() || '-',
   };
+  const params = [values.nombre, values.producto, values.guia, values.monto];
+  let wamid = null;
+  let snapshot = null;
   try {
-    await sendTemplate(phone, templateName, languageCode, [values.nombre, values.producto, values.guia, values.monto]);
+    // FASE 2/5 (H06/H17): mismo armado unico que el envio real y que el
+    // preview generico del panel -- asi la prueba nunca puede mostrar un
+    // resultado distinto del que se va a mandar de verdad despues.
+    ({ wamid, snapshot } = await sendTemplateWithSnapshot({ to: phone, templateName, languageCode, values: params }));
   } catch (err) {
     const metaMsg = err.response?.data?.error?.message;
     throw new Error(metaMsg ? `Meta rechazo el envio: ${metaMsg}` : err.message);
   }
-  return { sent: true, values };
+  return { sent: true, values, wamid, snapshot };
 }
 
 module.exports = { buildPreview, applyItems, testSend };

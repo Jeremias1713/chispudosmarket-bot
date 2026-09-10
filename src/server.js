@@ -4,7 +4,7 @@ const express = require('express');
 const { handleIncomingMessage, SOLD_STAGES } = require('./flow');
 const { markAsRead } = require('./whatsapp');
 const { MEDIA_DIR } = require('./library');
-const { listSessions, updateSession } = require('./state');
+const { listSessions, updateSession, applyTemplateStatus } = require('./state');
 const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
@@ -194,6 +194,24 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
     }
   } catch (err) {
     console.error('Error procesando mensaje entrante:', err);
+  }
+
+  // FASE 5 (H35): eventos de status de un mensaje YA mandado por nosotros
+  // (sent/delivered/read/failed), separados de los mensajes entrantes de
+  // arriba -- antes esto no se leia en absoluto, asi que el panel nunca
+  // podia mostrar "entregado"/"leido" con confirmacion real de Meta. Va en
+  // su propio try/catch para que un problema aca (ej. un formato de evento
+  // inesperado) nunca tumbe el procesamiento de mensajes entrantes de
+  // arriba, que es lo critico para el bot.
+  try {
+    const entry = req.body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const statuses = change?.value?.statuses || [];
+    for (const statusEvent of statuses) {
+      applyTemplateStatus(statusEvent);
+    }
+  } catch (err) {
+    console.error('Error procesando status de WhatsApp:', err);
   }
 });
 

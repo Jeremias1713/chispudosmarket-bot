@@ -100,7 +100,11 @@ async function sendTemplate(to, templateName, languageCode, params, headerImageU
     components.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: headerImageUrl } }] });
   }
 
-await api.post('/messages', {
+// FASE 5 (H35): antes esta funcion no devolvia nada; para poder despues
+// correlacionar los eventos de status del webhook (sent/delivered/read/
+// failed) con este mensaje puntual hace falta el "wamid" que Meta devuelve
+// al aceptar el envio (data.messages[0].id).
+const { data } = await api.post('/messages', {
   messaging_product: 'whatsapp',
   to,
   type: 'template',
@@ -110,6 +114,7 @@ await api.post('/messages', {
     components,
   },
 });
+return { wamid: data?.messages?.[0]?.id || null };
 }
 
 // Descarga un archivo multimedia que mando el cliente (audio, imagen, etc).

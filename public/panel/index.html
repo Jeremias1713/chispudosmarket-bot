@@ -133,8 +133,16 @@
                 <input type="text" list="wcTemplateList" id="wcTemplate" placeholder="Nombre de la plantilla">
                 <datalist id="wcTemplateList"></datalist>
                 <input type="text" id="wcParams" placeholder="Variables (coma)">
+                <button class="btn" id="wcPreview" type="button">Previsualizar</button>
+                <input type="text" id="wcTestPhone" placeholder="Tu número (para probar)">
+                <button class="btn" id="wcTestSend" type="button">Probar en mi número</button>
                 <button class="btn btn-primary" id="wcSend" type="button">Enviar plantilla</button>
               </div>
+              <!-- FASE 2 (H06/H17): misma funcion de armado (buildTemplateContent)
+                   que usa el envio real -- lo que se ve aca es exactamente lo que
+                   se manda, nunca una version distinta. No es una captura del
+                   WhatsApp del cliente, es una representacion fiel del contenido. -->
+              <div class="tpl-preview-box" id="wcPreviewBox" hidden></div>
             </div>
 
             <div class="followup-bar" id="followupBar" hidden>

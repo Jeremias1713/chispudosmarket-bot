@@ -14,7 +14,8 @@
 // un typo en el numero de guia despues de avisado, no se le vuelve a
 // escribir solo por eso.
 const { getSession, updateSession, appendMessage } = require('./state');
-const { sendTemplate, sendImageByLink } = require('./whatsapp');
+const { sendImageByLink } = require('./whatsapp');
+const { sendTemplateWithSnapshot } = require('./templateSend');
 const { sendRawReply } = require('./flow');
 const { getSettings } = require('./settings');
 const { isWindowOpen } = require('./whatsappWindow');
@@ -113,14 +114,21 @@ async function maybeNotifyShipping(phone, session) {
       // ninguna foto para este pedido, Meta va a rechazar el envio, asi que
       // el negocio deberia cargarla en el panel antes de que se cierre la
       // ventana de 24h.
-      await sendTemplate(
-        phone,
-        settings.shippingTemplateName,
-        settings.shippingTemplateLanguage || 'es',
-        [values.nombre, values.producto, values.guia, values.agencia, values.monto],
-        s.card?.guiaImageUrl || null
-      );
-      appendMessage(phone, 'human', `[plantilla automatica] ${settings.shippingTemplateName}`);
+      const paramsPlantilla = [values.nombre, values.producto, values.guia, values.agencia, values.monto];
+      // FASE 2/5 (H06/H35): mismo armado unico que preview/prueba, y se
+      // guarda el snapshot + wamid (antes solo el string
+      // "[plantilla automatica] nombre", sin poder saber despues si Meta
+      // confirmo la entrega).
+      const { wamid, snapshot } = await sendTemplateWithSnapshot({
+        to: phone,
+        templateName: settings.shippingTemplateName,
+        languageCode: settings.shippingTemplateLanguage || 'es',
+        values: paramsPlantilla,
+        headerImageUrl: s.card?.guiaImageUrl || null,
+      });
+      appendMessage(phone, 'human', `[plantilla automatica] ${settings.shippingTemplateName}`, {
+        template: { name: settings.shippingTemplateName, origin: 'bot', params: paramsPlantilla, snapshot, wamid, status: 'sent' },
+      });
     }
   } catch (err) {
     console.error('No se pudo mandar el aviso automatico de guia a', phone, err.response?.data || err.message);
@@ -166,14 +174,19 @@ async function testSend(phone, datos) {
     agencia: String(datos?.agencia || '').trim() || '-',
     monto: String(datos?.monto || '').trim() || resolveMonto(datos?.producto) || '-',
   };
+  let wamid = null;
+  let snapshot = null;
   try {
-    await sendTemplate(
-      phone,
-      settings.shippingTemplateName,
-      settings.shippingTemplateLanguage || 'es',
-      [values.nombre, values.producto, values.guia, values.agencia, values.monto],
-      datos.guiaImageUrl
-    );
+    // FASE 2/5 (H06/H17): mismo armado unico que el envio real
+    // (maybeNotifyShipping) -- la prueba nunca puede mostrar algo distinto
+    // de lo que despues se manda de verdad.
+    ({ wamid, snapshot } = await sendTemplateWithSnapshot({
+      to: phone,
+      templateName: settings.shippingTemplateName,
+      languageCode: settings.shippingTemplateLanguage || 'es',
+      values: [values.nombre, values.producto, values.guia, values.agencia, values.monto],
+      headerImageUrl: datos.guiaImageUrl,
+    }));
   } catch (err) {
     // El axios generico dice solo "Request failed with status code 400", sin
     // decir POR QUE — el motivo real que manda Meta viene adentro de
@@ -181,7 +194,7 @@ async function testSend(phone, datos) {
     const metaMsg = err.response?.data?.error?.message;
     throw new Error(metaMsg ? `Meta rechazo el envio: ${metaMsg}` : err.message);
   }
-  return { sent: true, values };
+  return { sent: true, values, wamid, snapshot };
 }
 
 module.exports = { maybeNotifyShipping, testSend };
