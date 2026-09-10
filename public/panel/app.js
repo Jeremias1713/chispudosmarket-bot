@@ -640,7 +640,13 @@ $('guiaImageFile').addEventListener('change', () => {
   $('guiaImageName').textContent = file ? file.name : ''
 })
 
-async function saveGuia(phone) {
+// FASE 3 (H08, solucion intermedia): si el servidor responde 409 es porque
+// esta conversacion ya tiene un pedido distinto avisado con exito y esta
+// guia nueva parece ser de OTRA compra (ver src/orderGuard.js). Se le
+// muestra al operador el aviso con los datos del pedido anterior y, si
+// confirma que de verdad es un pedido nuevo, se reintenta una sola vez
+// mandando confirmNewOrder=true.
+async function saveGuia(phone, confirmNewOrder) {
   const guia = $('guiaInput').value.trim()
   const agencia = $('guiaAgenciaInput').value.trim()
   const file = $('guiaImageFile').files[0]
@@ -652,6 +658,7 @@ async function saveGuia(phone) {
   form.append('guia', guia)
   form.append('agencia', agencia)
   if (file) form.append('imagen', file)
+  if (confirmNewOrder) form.append('confirmNewOrder', 'true')
 
   let result
   try {
@@ -660,6 +667,19 @@ async function saveGuia(phone) {
       body: form,
     })
     if (res.status === 401) { window.location.href = '/panel/login'; return }
+    if (res.status === 409) {
+      const conflicto = await res.json().catch(() => ({}))
+      $('guiaSaveBtn').disabled = false
+      const anterior = conflicto.pedidoAnterior || {}
+      const detalle = `Guía anterior: ${anterior.guia || '?'}${anterior.producto ? ' — ' + anterior.producto : ''}${anterior.monto != null ? ' — ' + anterior.monto + 'Bs' : ''}.`
+      const confirmar = window.confirm(
+        (conflicto.message || 'Esta conversación ya tiene otro pedido con guía distinta ya avisado.') +
+        '\n' + detalle +
+        '\n\n¿Confirmás que ES un pedido nuevo y querés guardar esta guía igual?'
+      )
+      if (confirmar) return saveGuia(phone, true)
+      return
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error(body.error || res.statusText)
@@ -1614,19 +1634,38 @@ function dpFoldFileName(name) {
   return dpFoldText(cleaned)
 }
 
-// Cruza cada foto subida contra la fila cuyo nombre de cliente calce mejor
-// (exacto primero, contencion parcial despues), sin repetir una fila con
-// dos fotos. Modifica dpRows en el lugar (agrega photoFile/photoName).
+// FASE 3 (H05): mismo criterio que nameMatch.js (backend) para no auto-pegar
+// una foto con evidencia debil. Antes "Ana.jpg" contra las filas "Ana Maria"
+// y "Ana Isabel" hacia match parcial con la PRIMERA que encontraba (una sola
+// palabra en comun no alcanza para decidir sola cual es). Ahora solo se
+// considera "la misma persona" si los nombres son iguales, o si el nombre
+// mas corto (2+ palabras) esta contenido entero en el mas largo (ej. "Jose
+// Velasquez" adentro de "Jose Gregorio Velasquez").
+function tokensMatchStrong(a, b) {
+  const tokensA = dpFoldText(a).split(' ').filter(Boolean)
+  const tokensB = dpFoldText(b).split(' ').filter(Boolean)
+  if (!tokensA.length || !tokensB.length) return false
+  const setA = new Set(tokensA)
+  const setB = new Set(tokensB)
+  const [smaller, bigger] = setA.size <= setB.size ? [setA, setB] : [setB, setA]
+  const interseccion = [...smaller].filter((t) => bigger.has(t))
+  if (interseccion.length !== smaller.size) return false
+  return smaller.size === bigger.size || smaller.size >= 2
+}
+
+// Cruza cada foto subida contra la fila cuyo nombre de cliente calce con
+// evidencia suficiente, sin repetir una fila con dos fotos. Una coincidencia
+// debil (una sola palabra en comun, ej. "Ana" con "Ana Maria") NUNCA se
+// auto-asigna: la fila queda sin foto para que el negocio la suba a mano
+// (mejor pedir de nuevo que mandarle la foto de otro pedido a alguien).
+// Modifica dpRows en el lugar (agrega photoFile/photoName).
 function matchPhotosToRows(rows, files) {
   rows.forEach((row) => { row.photoFile = null; row.photoName = null; })
   const used = new Set()
   Array.from(files || []).forEach((file) => {
     const key = dpFoldFileName(file.name)
     if (!key) return
-    let idx = rows.findIndex((r, i) => !used.has(i) && dpFoldText(r.cliente) === key)
-    if (idx === -1) {
-      idx = rows.findIndex((r, i) => !used.has(i) && dpFoldText(r.cliente) && (dpFoldText(r.cliente).includes(key) || key.includes(dpFoldText(r.cliente))))
-    }
+    const idx = rows.findIndex((r, i) => !used.has(i) && tokensMatchStrong(r.cliente, key))
     if (idx !== -1) {
       rows[idx].photoFile = file
       rows[idx].photoName = file.name
