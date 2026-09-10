@@ -1361,11 +1361,12 @@ router.post('/api/broadcasts', async (req, res) => {
   const params = Array.isArray(req.body?.params) ? req.body.params : [];
   const target = req.body?.target || { scope: 'all' };
   const languageCode = req.body?.languageCode || 'es';
+  const headerImageUrl = req.body?.headerImageUrl || null;
 
   const targets = broadcasts.resolveTargets(target);
   if (!targets.length) return res.status(400).json({ error: 'No hay conversaciones que coincidan con ese filtro' });
 
-  const run = await broadcasts.startRun({ templateName, languageCode, params, target });
+  const run = await broadcasts.startRun({ templateName, languageCode, params, target, headerImageUrl });
   res.json(run);
 });
 
