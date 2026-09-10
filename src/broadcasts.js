@@ -43,15 +43,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// FASE 3d: mismo respaldo de codigo que ya tienen shipping.js, seguimiento.js
+// y POST /api/conversations/:phone/send-template (ver panel.js linea ~354) --
+// a Meta le alcanza con que UN SOLO parametro llegue vacio ("") para mandar
+// la plantilla entera SIN reemplazar NINGUNA variable (el cliente ve
+// literalmente "Hola {{1}}, tu pedido de {{2}}..."). Este envio masivo
+// generico era el UNICO lugar que todavia no tenia este respaldo: si el
+// campo de variables se dejaba vacio ((o con algun campo en blanco entre
+// comas) en el panel, el bug se disparaba de verdad, a TODOS los clientes
+// del filtro elegido a la vez. Ahora, aca tambien, cualquier variable vacia
+// se manda como "-" en vez de "".
+function sanitizeParams(params) {
+  return (Array.isArray(params) ? params : []).map((p) => {
+    const v = String(p ?? '').trim();
+    return v || '-';
+  });
+}
+
 // Corre en el fondo (no bloquea la respuesta HTTP): el panel arranca el run
 // y despues consulta el progreso por polling, como cualquier otro dato.
-async function startRun({ templateName, languageCode, params, target }) {
+async function startRun({ templateName, languageCode, params, target, headerImageUrl }) {
   const phones = resolveTargets(target);
   const run = {
     id: crypto.randomBytes(6).toString('hex'),
     templateName,
     languageCode: languageCode || 'es',
-    params: params || [],
+    params: sanitizeParams(params),
+    // FASE 3d: antes este envio nunca mandaba imagen de encabezado (aunque
+    // la plantilla elegida la necesitara, ej. guia_del_pedido), sin avisar
+    // nada -- Meta manda igual el texto pero sin la foto. Ahora se puede
+    // pasar una URL de imagen, igual que ya se podia en la prueba individual
+    // de una plantilla (ver /api/templates/:name/test-send).
+    headerImageUrl: headerImageUrl || null,
     target,
     total: phones.length,
     sent: 0,
@@ -81,9 +104,10 @@ async function startRun({ templateName, languageCode, params, target }) {
           templateName,
           languageCode: run.languageCode,
           values: run.params,
+          headerImageUrl: run.headerImageUrl,
         });
         wamid = resultado.wamid;
-        // BUG YA CORREGIDO (mismo que el de seguimiento.js): el envio masivo
+        // BUG YA CORREGIDO ((mismo que el de seguimiento.js): el envio masivo
         // SI mandaba de verdad la plantilla por WhatsApp, pero nunca quedaba
         // guardado en el historial de la conversacion de cada cliente, asi
         // que en el chat individual no se veia ningun rastro del envio.

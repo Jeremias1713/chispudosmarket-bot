@@ -1580,7 +1580,15 @@ $('bc_send').addEventListener('click', async () => {
     $('bc_msg').textContent = 'Falta el nombre de la plantilla'
     return
   }
-  const params = $('bc_params').value.split(',').map((s) => s.trim()).filter(Boolean)
+  // FASE 3d: mismo arreglo que ya tiene wcSend (envio individual desde el
+  // chat) -- antes esto hacia .filter(Boolean), que borraba cualquier
+  // variable vacia entre comas y corria todas las siguientes un lugar. Un
+  // campo vacio ahora se manda como "-" en vez de desaparecer, para que la
+  // posicion de cada variable nunca se corra (ver el comentario largo en
+  // wcSend, mas arriba en este archivo, para el detalle completo del bug).
+  const rawParams = $('bc_params').value.trim()
+  const params = rawParams ? rawParams.split(',').map((s) => s.trim() || '-') : []
+  const headerImageUrl = $('bc_headerImage').value.trim() || null
   const target = $('bc_scope').value === 'stage'
     ? { scope: 'stage', stage: $('bc_stage').value }
     : { scope: 'all' }
@@ -1590,7 +1598,7 @@ $('bc_send').addEventListener('click', async () => {
   try {
     await api('/broadcasts', {
       method: 'POST',
-      body: JSON.stringify({ templateName, languageCode: $('bc_lang').value.trim() || 'es', params, target }),
+      body: JSON.stringify({ templateName, languageCode: $('bc_lang').value.trim() || 'es', params, target, headerImageUrl }),
     })
     $('bc_msg').textContent = 'Envío arrancado'
     pollBroadcasts()

@@ -460,6 +460,10 @@
                 <div class="help">
                   Tiene que ser una plantilla ya aprobada por Meta. Si no aparecen en la
                   lista, escribí el nombre exacto a mano.
+                  <br><strong>Ojo:</strong> este envío manda EL MISMO texto a todos los
+                  clientes elegidos. No lo uses para plantillas que necesitan un dato
+                  distinto por cliente (número de guía, agencia, monto a pagar) — para
+                  eso usá "Guías por lote" o cargalo desde el chat de cada cliente.
                 </div>
                 <input type="text" list="bc_templateList" id="bc_template" placeholder="Nombre de la plantilla">
                 <datalist id="bc_templateList"></datalist>
@@ -485,8 +489,14 @@
 
               <div class="field">
                 <label for="bc_params">Variables de la plantilla</label>
-                <div class="help">Separadas por coma, en el orden en que aparecen en la plantilla ({{1}}, {{2}}...).</div>
+                <div class="help">Separadas por coma, en el orden en que aparecen en la plantilla ({{1}}, {{2}}...). Si alguna la dejás vacía, se manda como "-" (nunca en blanco).</div>
                 <input type="text" id="bc_params" placeholder="Juan, 20% OFF">
+              </div>
+
+              <div class="field">
+                <label for="bc_headerImage">Imagen de encabezado (opcional)</label>
+                <div class="help">Solo si la plantilla elegida tiene una imagen en el encabezado. Pegá la URL pública de la imagen.</div>
+                <input type="text" id="bc_headerImage" placeholder="https://...">
               </div>
 
               <div class="settings-actions">
