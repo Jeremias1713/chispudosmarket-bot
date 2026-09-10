@@ -31,6 +31,7 @@ const simulator = require('../simulator');
 const coupons = require('../coupons');
 const { mediaUrl, SOLD_STAGES } = require('../flow');
 const push = require('../push');
+const { previewTemplateContent, sendTemplateWithSnapshot } = require('../templateSend');
 const { WHATSAPP_WINDOW_MS, lastInboundAt, isWindowOpen } = require('../whatsappWindow');
 const shipping = require('../shipping');
 const dropanas = require('../dropanas');
@@ -352,14 +353,23 @@ router.post('/api/conversations/:phone/send-template', async (req, res) => {
     return v || '-';
   });
 
+  let wamid = null;
+  let snapshot = null;
   try {
-    await sendTemplate(phone, templateName, languageCode, params);
+    // FASE 2/5 (H06/H35): antes se mandaba con sendTemplate directo y solo
+    // quedaba guardado el string "[plantilla] nombre" en el historial, sin
+    // el contenido real ni el wamid para poder despues saber si se
+    // entrego/leyo. Ahora se usa el mismo armado que preview/prueba
+    // (templateSend.sendTemplateWithSnapshot) y se guarda el snapshot.
+    ({ wamid, snapshot } = await sendTemplateWithSnapshot({ to: phone, templateName, languageCode, values: params }));
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.message;
     return res.status(502).json({ error: 'No se pudo mandar la plantilla: ' + detail });
   }
 
-  appendMessage(phone, 'human', `[plantilla] ${templateName}`);
+  appendMessage(phone, 'human', `[plantilla] ${templateName}`, {
+    template: { name: templateName, origin: 'manual', params, snapshot, wamid, status: 'sent' },
+  });
   res.json({ ok: true });
 });
 
@@ -1251,10 +1261,51 @@ router.get('/api/templates', async (_req, res) => {
     });
     const templates = (data.data || [])
       .filter((t) => t.status === 'APPROVED')
-      .map((t) => ({ name: t.name, language: t.language, category: t.category }));
+      // FASE 2 (H17): antes se descartaba `components` (header/body/footer/
+      // botones tal cual esta aprobado en Meta), asi que el panel no tenia
+      // forma de mostrar ni previsualizar el contenido real de una
+      // plantilla, solo su nombre. Ahora se manda completo.
+      .map((t) => ({ name: t.name, language: t.language, category: t.category, components: t.components || [] }));
     res.json({ available: true, templates });
   } catch (err) {
     res.json({ available: false, templates: [], error: err.message });
+  }
+});
+
+// FASE 2 (H06/H17): previsualiza el contenido de una plantilla (texto con
+// variables ya reemplazadas, header, footer, botones) SIN mandar nada.
+// Usa exactamente la misma funcion (templateSend.previewTemplateContent)
+// que usa el envio real, para que la vista previa nunca pueda mostrar algo
+// distinto de lo que se termina mandando.
+router.post('/api/templates/:name/preview', async (req, res) => {
+  const templateName = req.params.name;
+  const languageCode = req.body?.languageCode || 'es';
+  const values = Array.isArray(req.body?.values) ? req.body.values.map(String) : [];
+  const headerImageUrl = req.body?.headerImageUrl || null;
+
+  const snapshot = await previewTemplateContent({ templateName, languageCode, values, headerImageUrl });
+  if (!snapshot) {
+    return res.status(404).json({ error: 'No se pudo encontrar/reconstruir esa plantilla aprobada en Meta.' });
+  }
+  res.json({ snapshot });
+});
+
+// FASE 2 (H17): "probar en mi numero" generico para cualquier plantilla,
+// mandandola de verdad a un solo numero (no queda en el historial de
+// ningun cliente ni en ningun run de broadcast, es solo una prueba).
+router.post('/api/templates/:name/test-send', async (req, res) => {
+  const templateName = req.params.name;
+  const languageCode = req.body?.languageCode || 'es';
+  const values = Array.isArray(req.body?.values) ? req.body.values.map(String) : [];
+  const headerImageUrl = req.body?.headerImageUrl || null;
+  const phone = String(req.body?.phone || '').replace(/\D/g, '');
+  if (!phone) return res.status(400).json({ error: 'Falta el numero de telefono de prueba.' });
+
+  try {
+    const { wamid, snapshot } = await sendTemplateWithSnapshot({ to: phone, templateName, languageCode, values, headerImageUrl });
+    res.json({ ok: true, wamid, snapshot });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.response?.data?.error?.message || err.message });
   }
 });
 
