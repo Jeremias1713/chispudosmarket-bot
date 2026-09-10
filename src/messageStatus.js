@@ -3,31 +3,59 @@
 // correspondiente en el historial, buscandolo por `wamid` (el id que Meta
 // devuelve al aceptar un envio de plantilla).
 //
-// Hoy el webhook (server.js) NUNCA lee `value.statuses` -- solo procesa
+// Antes el webhook (server.js) nunca leia `value.statuses` -- solo procesaba
 // `value.messages` y `value.contacts` -- asi que ningun mensaje en el panel
-// puede pasar de "enviado" a "entregado"/"leido"/"fallido" con confirmacion
-// real del proveedor. Esta pieza es la que cierra ese hueco, sin inventar
-// nunca un estado que Meta no confirmo.
-//
-// TODAVIA NO IMPLEMENTADO. Contrato en test/messageStatus.test.js.
+// podia pasar de "enviado" a "entregado"/"leido"/"fallido" con confirmacion
+// real del proveedor. Esta pieza cierra ese hueco, sin inventar nunca un
+// estado que Meta no confirmo: si no llega un evento real, el mensaje se
+// queda en el ultimo estado conocido (o sin estado, para historial viejo).
 
 'use strict';
 
-// sessions: el array/objeto de sesiones tal cual lo maneja state.js
-// (recorre session.history buscando un mensaje con
-// msg.extra.template.wamid === statusEvent.id).
-// statusEvent: { id, status, timestamp, recipient_id, errors } (forma cruda
-// de un elemento de value.statuses).
+// Orden real de progreso de un mensaje de WhatsApp. failed es terminal.
+const ORDEN = { sent: 1, delivered: 2, read: 3, failed: 99 };
+
+function esRetroceso(actual, nuevo) {
+  if (!actual) return false;
+  const ordenActual = ORDEN[actual] || 0;
+  const ordenNuevo = ORDEN[nuevo] || 0;
+  // failed es terminal: si ya esta failed, no lo pisa nada; y un evento
+  // 'sent/delivered/read' atrasado nunca debe bajar un estado ya mas
+  // avanzado (ej. 'read' no vuelve a 'delivered').
+  if (actual === 'failed') return true;
+  if (nuevo === 'failed') return false; // failed siempre se puede aplicar
+  return ordenNuevo < ordenActual;
+}
+
+// sessions: el objeto { telefono: { history: [...] } } tal cual lo maneja
+// state.js. statusEvent: { id, status, timestamp, errors } (forma cruda de
+// un elemento de value.statuses de Meta).
 //
-// Devuelve { updated: boolean, phone, messageIndex } indicando si encontro
-// el mensaje y lo actualizo. Si status es 'failed', ademas debe guardar el
-// motivo (errors[0].title / errors[0].message) en
-// msg.extra.template.failReason. Nunca debe "subir" un estado ya mas
-// avanzado a uno anterior (ej: si ya esta 'read', un evento 'delivered'
-// atrasado no lo debe pisar) -- el orden real es
-// sent < delivered < read, y failed es terminal.
+// Devuelve { updated, phone, messageIndex }. Muta en el lugar el mensaje
+// encontrado (sessions se guarda despues, en state.js).
 function applyStatusUpdate(sessions, statusEvent) {
-  throw new Error('TODO (H35): implementar applyStatusUpdate');
+  const wamid = statusEvent && statusEvent.id;
+  if (!wamid || !sessions) return { updated: false };
+
+  for (const [phone, session] of Object.entries(sessions)) {
+    const history = (session && session.history) || [];
+    for (let i = 0; i < history.length; i++) {
+      const msg = history[i];
+      if (!msg || !msg.template || msg.template.wamid !== wamid) continue;
+
+      if (esRetroceso(msg.template.status, statusEvent.status)) {
+        return { updated: false, phone, messageIndex: i, omitido: 'retroceso' };
+      }
+
+      msg.template.status = statusEvent.status;
+      if (statusEvent.status === 'failed' && Array.isArray(statusEvent.errors) && statusEvent.errors[0]) {
+        const e = statusEvent.errors[0];
+        msg.template.failReason = e.title || e.message || 'Error desconocido de WhatsApp';
+      }
+      return { updated: true, phone, messageIndex: i };
+    }
+  }
+  return { updated: false };
 }
 
 module.exports = { applyStatusUpdate };
