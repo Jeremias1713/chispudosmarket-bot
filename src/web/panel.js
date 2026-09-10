@@ -850,7 +850,10 @@ router.post('/api/dropanas/preview', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
   try {
     const rows = dropanas.matchExport(req.file.buffer);
-    res.json({ ok: true, rows });
+    // Se manda tambien la lista completa de conversaciones elegibles para que
+    // el panel pueda ofrecer un desplegable manual en las filas "sin_match"
+    // (ver listAllCandidates en dropanas.js).
+    res.json({ ok: true, rows, allCandidates: dropanas.listAllCandidates() });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
