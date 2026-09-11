@@ -12,7 +12,12 @@ const { getSettings } = require('./settings');
 // chat real: si el bot promete buscar la agencia (o mandar un "formulario"
 // que no existe) y no lo hace, el simulador tiene que mostrar el mismo
 // mensaje de seguimiento que mandaria de verdad, no quedarse "colgado".
-const { looksLikePendingAgencyPromise, looksLikePendingFormPromise } = require('./flow');
+// looksLikeSaysNotArrivedYet / ALREADY_ARRIVED_CORRECTION: misma red de
+// seguridad que corre en las conversaciones reales (ver flow.js
+// processReply) para la etapa "esperando_retiro" — si el pedido ya llego a
+// la agencia, el simulador tampoco puede mostrar un mensaje diciendo que
+// todavia falta que llegue.
+const { looksLikePendingAgencyPromise, looksLikePendingFormPromise, looksLikeSaysNotArrivedYet, ALREADY_ARRIVED_CORRECTION } = require('./flow');
 
 function randomGap() {
   return 400 + Math.floor(Math.random() * 500);
@@ -69,7 +74,16 @@ async function sendMessage(rawText) {
   const history = state.history.map((m) => ({ role: m.role, content: m.content }));
   const knownCity = state.card?.ciudad || null;
   const knownProduct = state.linkedProductId ? findProduct(state.linkedProductId)?.name || null : null;
-  const { text: reply, images } = await getAssistantReply(history.slice(0, -1), rawText, knownCity, knownProduct);
+  // Etapa real ANTES de este turno (la clasificacion de mas abajo recien la
+  // actualiza despues): es la misma que usa flow.js para decidir si hay que
+  // corregir una respuesta que dice que el pedido todavia no llego.
+  const shippingStage = state.stage || null;
+  let { text: reply, images } = await getAssistantReply(history.slice(0, -1), rawText, knownCity, knownProduct);
+
+  // Ver NOT_ARRIVED_YET_RE en flow.js: misma correccion que en produccion.
+  if (shippingStage === 'esperando_retiro' && looksLikeSaysNotArrivedYet(reply)) {
+    reply = ALREADY_ARRIVED_CORRECTION;
+  }
 
   for (const img of images) {
     push('assistant', `[imagen] ${img.name}`);

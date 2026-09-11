@@ -109,6 +109,29 @@ function looksLikePendingFormPromise(text) {
   return !looksLikeEmptyDataRequest(t);
 }
 
+// Caso real reportado por el negocio: con el pedido ya en la etapa
+// "esperando_retiro" (YA LLEGO a la agencia, ver SHIPPING_STAGE_TEXT en
+// ai.js), el modelo igual le contesto a un cliente que su pedido "todavia
+// esta en camino" / "todavia no ha llegado". El prompt ya le dice al modelo
+// la etapa real, pero como con las otras dos redes de seguridad de arriba,
+// es una instruccion probabilistica que no siempre se respeta. Esto agrega
+// el ultimo filtro posible: si la etapa real es esperando_retiro y la
+// respuesta del bot de todos modos dice que todavia no llego, se DESCARTA
+// esa respuesta entera y se manda la correccion fija en su lugar, para que
+// nunca le llegue al cliente un mensaje que contradice el estado real del
+// pedido (a esta altura, siempre es mentira: si esta en esperando_retiro es
+// porque ya se le aviso que llego, ver maybeNotifyShipping en shipping.js y
+// applyItems en seguimiento.js).
+const NOT_ARRIVED_YET_RE =
+  /todav[ií]a no\s*(?:ha\s*)?lleg|a[uú]n no\s*(?:ha\s*)?lleg|no\s*ha\s*llegado(?:\s*todav[ií]a)?|(?:sigue|todav[ií]a|esta|está)\s*en\s*(?:camino|tr[aá]nsito)|falta\s*(?:que|para que)\s*llegue|cuando\s*llegue\s*te\s*aviso|te\s*aviso\s*(?:cuando|apenas)\s*llegue/i;
+
+function looksLikeSaysNotArrivedYet(text) {
+  return NOT_ARRIVED_YET_RE.test(String(text || ''));
+}
+
+const ALREADY_ARRIVED_CORRECTION =
+  '¡Tu pedido ya llegó a la agencia de destino y está listo para que lo retires! 📦 Recordá que Tealca atiende de lunes a viernes de 9am a 4pm.';
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -690,6 +713,13 @@ async function processReply(from) {
       finalReply = strippedClose === null ? POST_CLOSE_REMINDER : strippedClose;
     }
 
+    // Ver NOT_ARRIVED_YET_RE arriba: ultima red de seguridad antes de mandar,
+    // para que en esperando_retiro nunca salga un mensaje diciendo que
+    // todavia falta que llegue.
+    if (shippingStage === 'esperando_retiro' && looksLikeSaysNotArrivedYet(finalReply)) {
+      finalReply = ALREADY_ARRIVED_CORRECTION;
+    }
+
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, finalReply);
 
@@ -836,4 +866,6 @@ module.exports = {
   // se manda el mensaje de seguimiento.
   looksLikePendingAgencyPromise,
   looksLikePendingFormPromise,
+  looksLikeSaysNotArrivedYet,
+  ALREADY_ARRIVED_CORRECTION,
 };
