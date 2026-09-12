@@ -83,6 +83,7 @@
   --stage-negociando-soft: #FEF3C7;        --stage-negociando-strong: #B45309;
   --stage-vendido-soft: #E7E8FD;           --stage-vendido-strong: #4B4DD6;
   --stage-esperando-guia-soft: #FCE7F3;    --stage-esperando-guia-strong: #BE185D;
+  --stage-tienda-maracaibo-soft: #FFEDD5;  --stage-tienda-maracaibo-strong: #C2410C;
   --stage-en-camino-soft: #CFFAFE;         --stage-en-camino-strong: #0E7490;
   --stage-entregado-soft: #DCFCE7;         --stage-entregado-strong: #15803D;
   --stage-necesita-atencion-soft: #FEE2E2; --stage-necesita-atencion-strong: #B91C1C;
@@ -409,6 +410,7 @@ code {
 .badge[data-stage="negociando"]        { background: var(--stage-negociando-soft);        color: var(--stage-negociando-strong); }
 .badge[data-stage="vendido"]           { background: var(--stage-vendido-soft);           color: var(--stage-vendido-strong); }
 .badge[data-stage="esperando_guia"]    { background: var(--stage-esperando-guia-soft);    color: var(--stage-esperando-guia-strong); }
+.badge[data-stage="tienda_maracaibo"]  { background: var(--stage-tienda-maracaibo-soft);  color: var(--stage-tienda-maracaibo-strong); }
 .badge[data-stage="en_camino"]         { background: var(--stage-en-camino-soft);         color: var(--stage-en-camino-strong); }
 .badge[data-stage="entregado"]         { background: var(--stage-entregado-soft);         color: var(--stage-entregado-strong); }
 .badge[data-stage="necesita_atencion"] { background: var(--stage-necesita-atencion-soft); color: var(--stage-necesita-atencion-strong); }
@@ -1771,6 +1773,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 .kcol[data-stage="negociando"] .kcol-head        { border-bottom-color: var(--stage-negociando-strong); }
 .kcol[data-stage="vendido"] .kcol-head           { border-bottom-color: var(--stage-vendido-strong); }
 .kcol[data-stage="esperando_guia"] .kcol-head    { border-bottom-color: var(--stage-esperando-guia-strong); }
+.kcol[data-stage="tienda_maracaibo"] .kcol-head  { border-bottom-color: var(--stage-tienda-maracaibo-strong); }
 .kcol[data-stage="en_camino"] .kcol-head         { border-bottom-color: var(--stage-en-camino-strong); }
 .kcol[data-stage="entregado"] .kcol-head         { border-bottom-color: var(--stage-entregado-strong); }
 .kcol[data-stage="necesita_atencion"] .kcol-head { border-bottom-color: var(--stage-necesita-atencion-strong); }
