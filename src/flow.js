@@ -52,7 +52,12 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL ||
 // mas alla de "vendido" cuando se detecta el cierre; panel.js usa la misma
 // lista para que las metricas (conversion, ingresos) cuenten cualquiera de
 // estas etapas como una venta real, no solo "vendido" al pie de la letra.
-const SOLD_STAGES = ['vendido', 'esperando_guia', 'esperando_retiro', 'en_camino', 'entregado'];
+// "tienda_maracaibo" cuenta como venta cerrada igual que las demas (entra en
+// metricas de conversion/ingresos, se excluye del remarketing automatico y
+// de las "conversaciones que necesitan seguimiento"): es un pedido cerrado
+// que retira en la tienda propia de Maracaibo en vez de una agencia Tealca,
+// ver classifier.js.
+const SOLD_STAGES = ['vendido', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'entregado'];
 
 // Red de seguridad de codigo: esto paso de verdad una vez (ver
 // buildDirectAgencyMessage en ai.js) — el modelo le prometio a un cliente

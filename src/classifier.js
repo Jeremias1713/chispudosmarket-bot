@@ -30,6 +30,15 @@ const STAGES = [
   // para no repetir el mismo tipo de confusion que ya paso con otras etapas
   // parecidas (ver esperando_retiro vs en_camino).
   'esperando_guia',
+  // "tienda_maracaibo" es para el otro caso de retiro en Maracaibo: el
+  // negocio tiene ahi, ademas de las agencias Tealca, una tienda propia
+  // (Palacio de Eventos, local PBG-16 — ver la nota fija en ai.js). Cuando
+  // el cliente esta en Maracaibo y elige retirar en ESA tienda propia (no
+  // una agencia Tealca), el pedido no pasa por el circuito de guia/Tealca
+  // (esperando_guia -> en_camino -> esperando_retiro): el negocio solo
+  // necesita saber que ese cliente va a pasar por la tienda, para tenerlo
+  // identificado aparte del resto de los pedidos por agencia.
+  'tienda_maracaibo',
   'esperando_retiro',
   'en_camino',
   'entregado',
@@ -78,6 +87,12 @@ con retiro en agencia o entrega a domicilio.
   mensaje de cierre del pedido (resumen + pago contra entrega + que le pasan la guia). Esta es la
   etapa por defecto de un pedido recien cerrado: quedate aca salvo que la conversacion, DESPUES del
   cierre, tenga algo mas concreto que justifique avanzar a una de las tres etapas de abajo.
+  - tienda_maracaibo: lo mismo que "vendido" (pedido cerrado), pero ademas el cliente esta en
+  Maracaibo y explicitamente eligio retirar en la TIENDA PROPIA del negocio (Palacio de Eventos,
+  local PBG-16), no en una agencia Tealca. Marca esta etapa SOLO si de la conversacion queda claro
+  que el retiro va a ser en esa tienda propia puntual, no una agencia. Si el cliente de Maracaibo
+  eligio una agencia Tealca en cambio, seguí con las etapas normales de abajo (vendido,
+  esperando_retiro, en_camino, entregado), no esta.
   - esperando_retiro: lo mismo que "vendido" (pedido cerrado), pero ademas alguien del negocio dijo
   explicitamente, DESPUES del cierre, que ya le esta coordinando o preparando el envio o el retiro
   (por ejemplo le paso el numero de guia real, o le confirmo que ya se despacho). No alcanza con la

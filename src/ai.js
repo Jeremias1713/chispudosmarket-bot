@@ -143,6 +143,11 @@ const SHIPPING_STAGE_TEXT = {
   // "hoy" para el cliente, asi que la regla de PRIORIDAD de mas abajo le
   // prohibe directamente confirmar cualquier dia puntual mientras la etapa
   // no sea esperando_retiro o entregado.
+  // El cliente esta en Maracaibo y eligio la tienda propia (no una agencia
+  // Tealca): no hay guia ni envio de por medio, el pedido queda cerrado
+  // directo esperando que pase a la tienda. Ver la nota fija de la tienda
+  // propia mas abajo (MARACAIBO_TIENDA_PROPIA_NOTE) para la direccion exacta.
+  tienda_maracaibo: 'el pedido esta cerrado y el cliente eligio retirarlo en la TIENDA PROPIA de Maracaibo (Palacio de Eventos, local PBG-16, Maracaibo, estado Zulia), no en una agencia Tealca: no hace falta ninguna guia de envio para este pedido. Si pregunta por su pedido, decile con naturalidad que ya puede pasar a retirarlo por la tienda cuando quiera (mencionale la direccion si no la tiene fresca en la conversacion). NO le hables de guia, agencia Tealca, ni de "en camino": nada de eso aplica aca.',
   esperando_retiro: 'el pedido YA LLEGO a la agencia de destino y esta listo para que el cliente lo retire. Podes decir eso con naturalidad (que ya llego a la agencia y ya puede pasar a buscarlo), pero NO digas que "ya lo tiene en sus manos" ni que "ya lo recibio": eso solo lo confirma el cliente cuando lo retire de verdad. IMPORTANTE: aunque ya este listo para retirar, Tealca solo atiende de lunes a viernes de 9am a 4pm (ver HORARIO DE TEALCA): si el cliente pregunta o propone pasar en un momento fuera de ese horario (un fin de semana, un feriado, o una hora fuera de 9-4), decile con naturalidad que en ese momento la agencia esta cerrada y que puede pasar en el proximo horario habil.',
   entregado: 'el cliente YA CONFIRMO que recibio o retiro su pedido. Si pregunta o menciona algo sobre la entrega, podes hablar de eso con naturalidad como algo ya resuelto.',
 };
