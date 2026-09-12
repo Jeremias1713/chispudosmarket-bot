@@ -46,6 +46,7 @@ const STAGE_LABELS = {
   escribir_mas_tarde: 'Escribir más tarde',
   vendido: 'Vendido',
   esperando_guia: 'Esperando guía',
+  tienda_maracaibo: 'Tienda Maracaibo',
   esperando_retiro: 'Esperando retiro',
   en_camino: 'En camino',
   entregado: 'Entregado',
