@@ -57,6 +57,11 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL ||
 // de las "conversaciones que necesitan seguimiento"): es un pedido cerrado
 // que retira en la tienda propia de Maracaibo en vez de una agencia Tealca,
 // ver classifier.js.
+// "devolucion" a proposito NO esta en esta lista: un pedido que el cliente
+// devolvio deja de contar como venta cerrada en las metricas (ingresos,
+// conversion), aunque haya pasado por "vendido"/"entregado" antes de
+// devolverse. Sigue existiendo como etapa (classifier.js), solo que a partir
+// de ahi las metricas ya no lo suman.
 const SOLD_STAGES = ['vendido', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'entregado'];
 
 // Red de seguridad de codigo: esto paso de verdad una vez (ver

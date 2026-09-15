@@ -42,6 +42,13 @@ const STAGES = [
   'esperando_retiro',
   'en_camino',
   'entregado',
+  // "devolucion" es para un pedido que YA se habia cerrado/entregado pero el
+  // cliente lo devolvio (o el negocio confirmo que se va a devolver/reembolsar).
+  // A proposito NO esta en SOLD_STAGES (ver flow.js): una vez que un pedido
+  // pasa a esta etapa, deja de contar como venta cerrada en ingresos y
+  // conversion (el dinero/producto volvio), aunque haya llegado a "vendido"
+  // o "entregado" antes.
+  'devolucion',
   'necesita_atencion',
   'perdido',
 ];
@@ -110,6 +117,11 @@ con retiro en agencia o entrega a domicilio.
   Ejemplo de error que no hay que repetir: un pedido se cierra y, en la misma conversacion, unos
   minutos despues sin que el cliente haya dicho nada de recibir el producto, se marca como
   "entregado": eso esta mal, en ese caso la etapa sigue siendo "vendido".
+  - devolucion: el CLIENTE dice explicitamente que va a devolver o ya devolvio el producto (ej. "lo
+  quiero devolver", "ya lo mande de vuelta", "no me sirvio, quiero el reembolso"), O el negocio
+  confirma explicitamente que se va a procesar la devolucion/el reembolso de ese pedido. No alcanza
+  con una queja o un reclamo sin mencionar devolucion o reembolso (eso es "necesita_atencion"). Una
+  vez marcada, esta etapa no cuenta como venta cerrada en los reportes del negocio.
   - necesita_atencion: se queja, reclama o pide hablar con una persona.
 - perdido: dijo que no le interesa o abandono claramente la conversacion.
 
