@@ -50,6 +50,7 @@ const STAGE_LABELS = {
   esperando_retiro: 'Esperando retiro',
   en_camino: 'En camino',
   entregado: 'Entregado',
+  devolucion: 'Devolución',
   necesita_atencion: 'Necesita atención',
   perdido: 'Perdido',
 };
