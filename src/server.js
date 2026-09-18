@@ -9,6 +9,7 @@ const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
 const { normalizeProductName } = require('./catalog');
+const dropanasMonitor = require('./dropanasMonitor');
 
 // Correccion de una sola vez (retroactiva): antes, a las conversaciones que
 // ya estaban vendidas de antes de existir el campo soldAt se les rellenaba
@@ -215,6 +216,31 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
   }
 });
 
+// Webhook oficial de Dropanas. Solo sirve como señal para ejecutar una
+// reconciliación GET: el payload nunca cambia conversaciones ni dispara
+// WhatsApp por sí solo. La firma y el timestamp evitan falsificación/replay,
+// y X-DroPanas-Delivery evita procesar dos veces el mismo intento.
+app.post('/dropanas/webhook', (req, res) => {
+  const secret = process.env.DROPANAS_WEBHOOK_SECRET || '';
+  if (!secret) return res.status(503).json({ error: 'Webhook Dropanas no configurado' });
+  const valid = dropanasMonitor.verifyWebhook({
+    rawBody: req.rawBody,
+    signature: req.get('x-dropanas-signature'),
+    timestamp: req.get('x-dropanas-timestamp'),
+    secret,
+  });
+  if (!valid) return res.sendStatus(403);
+  const deliveryId = String(req.get('x-dropanas-delivery') || '').trim();
+  if (!deliveryId) return res.status(400).json({ error: 'Falta X-DroPanas-Delivery' });
+  const fresh = dropanasMonitor.recordWebhook(deliveryId);
+  res.sendStatus(200);
+  if (fresh) {
+    setImmediate(() => dropanasMonitor.sync().catch((error) => {
+      console.error('Reconciliación posterior al webhook Dropanas:', error.message);
+    }));
+  }
+});
+
 // Imagenes de la biblioteca: tienen que ser publicas y sin auth porque las
 // va a buscar WhatsApp (Meta), no un navegador logueado.
 app.use('/media', express.static(MEDIA_DIR));
@@ -223,7 +249,8 @@ app.use('/panel', panelRouter);
 app.use('/', siteRouter);
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, uptime: process.uptime() });
+  const dropanas = dropanasMonitor.status();
+  res.json({ ok: true, uptime: process.uptime(), dropanas: { enabled: dropanas.enabled, mode: dropanas.mode, lastSuccessAt: dropanas.lastSuccessAt, lastError: dropanas.lastError } });
 });
 
 // FASE 1: solo arrancamos el servidor de verdad (bind de puerto, timers de
@@ -238,6 +265,7 @@ if (require.main === module) {
     fixBackfilledSoldAt();
     fixFragmentedProductNames();
     remarketing.start();
+    dropanasMonitor.start();
   });
 }
 

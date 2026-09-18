@@ -11,8 +11,9 @@
 //     producto, numero de guia y monto sacados DIRECTO de esa misma fila.
 //   - "En camino" / "En transito" -> etapa "en_camino", sin mandar nada.
 //   - "Entregado" -> etapa "entregado", sin mandar nada.
+//   - "Devolucion" / "Devuelto" -> etapa "devolucion", sin mandar nada.
 //   - Cualquier otro estado (Pagado, Cancelado, En novedad, Pendiente
-//     devolucion, Devolucion, Generada, Pendiente...) -> no se toca nada
+//     devolucion, Generada, Pendiente...) -> no se toca nada
 //     todavia (no hay una regla confirmada para esos), se lista aparte en
 //     el panel como "sin accion, revisar si queres".
 //
@@ -65,13 +66,15 @@ function matchCliente(clienteRaw) {
   return { matchType: 'sin_match', candidates: [] };
 }
 
-// Mapeo confirmado con el negocio (ver conversacion): solo estos tres
+// Mapeo confirmado con el negocio (ver conversacion): solo estos estados
 // estados tienen una regla clara hoy. Todo lo demas queda sin tocar.
 const ESTADO_A_ETAPA = {
   'en oficina': 'esperando_retiro',
   'en camino': 'en_camino',
   'en transito': 'en_camino', // por si Dropanas lo manda sin tilde
   entregado: 'entregado',
+  devolucion: 'devolucion',
+  devuelto: 'devolucion',
 };
 
 function firstName(full) {
@@ -134,6 +137,7 @@ function buildPreview(rows) {
     const { matchType, candidates } = matchCliente(row.cliente);
 
     return {
+      pendingKey: row._pendingKey || null,
       guia: row.guia,
       cliente: row.cliente,
       ciudad: row.ciudad,

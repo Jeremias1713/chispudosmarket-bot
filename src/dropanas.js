@@ -17,6 +17,7 @@ const { listSessions } = require('./state');
 // viven en un solo lugar compartido (nameMatch.js) en vez de estar copiados
 // en cada archivo con reglas levemente distintas.
 const { foldName, compareNames } = require('./nameMatch');
+const { normalizePhone } = require('./dropanasApi');
 
 // Encuentra el indice de la primera columna del header cuyo nombre (ya
 // normalizado) contenga alguna de las palabras clave dadas. Asi no importa
@@ -111,6 +112,29 @@ function candidateInfo(s) {
 // pero "Ana" adentro de "Ana Maria" NO). Cualquier otra coincidencia parcial
 // cae en 'parcial'/'ambiguo': se sugiere, nunca se auto-marca.
 function matchRow(row) {
+  // La API sí trae teléfono. Es una evidencia mucho más fuerte que comparar
+  // nombres: se usa primero y solo se cae al algoritmo histórico de nombres
+  // cuando el teléfono falta o no corresponde a una conversación única.
+  const apiPhone = normalizePhone(row.telefono);
+  if (apiPhone) {
+    const byPhone = candidateSessions(row.guia).filter((session) => {
+      const sessionPhone = normalizePhone(session.phone || session.card?.telefono);
+      return sessionPhone && sessionPhone === apiPhone;
+    });
+    if (byPhone.length === 1) {
+      const session = byPhone[0];
+      return {
+        matchType: 'exacto',
+        matchEvidence: 'telefono',
+        phone: session.phone,
+        matchedName: session.card?.nombre || session.name,
+        candidates: [candidateInfo(session)],
+      };
+    }
+    if (byPhone.length > 1) {
+      return { matchType: 'ambiguo', matchEvidence: 'telefono_duplicado', candidates: byPhone.map(candidateInfo) };
+    }
+  }
   const target = foldName(row.cliente);
   if (!target) return { matchType: 'sin_match', candidates: [] };
 
@@ -146,7 +170,11 @@ function matchRow(row) {
 
 function matchExport(buffer) {
   const rows = parseExportBuffer(buffer);
-  return rows.map((row) => ({ ...row, ...matchRow(row) }));
+  return matchRows(rows);
+}
+
+function matchRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({ ...row, ...matchRow(row) }));
 }
 
 // Lista completa de conversaciones "elegibles" (mismo criterio que
@@ -163,4 +191,4 @@ function listAllCandidates() {
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 }
 
-module.exports = { parseExportBuffer, matchExport, candidateSessions, matchRow, listAllCandidates };
+module.exports = { parseExportBuffer, matchExport, matchRows, candidateSessions, matchRow, listAllCandidates };
