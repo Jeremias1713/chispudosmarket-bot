@@ -91,6 +91,16 @@ test('entregado sigue excluido (no hace falta seguir cruzando un pedido ya entre
   assert.equal(resultado.matchType, 'sin_match');
 });
 
+test('la API prioriza coincidencia exacta por teléfono sobre nombres distintos', () => {
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    '584120000001': sesion({ card: { nombre: 'Nombre del chat distinto', telefono: '04120000001' } }),
+  }));
+  const resultado = dropanas.matchRow({ guia: 'GU-API', cliente: 'Nombre en Dropanas', telefono: '0412-0000001' });
+  assert.equal(resultado.matchType, 'exacto');
+  assert.equal(resultado.matchEvidence, 'telefono');
+  assert.equal(resultado.phone, '584120000001');
+});
+
 // Nuevo: desplegable manual para filas "sin_match" (a pedido del negocio,
 // para cuando el nombre en Dropanas no se parece en nada al guardado en el
 // bot y ninguna comparacion automatica lo va a encontrar sola).
