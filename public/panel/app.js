@@ -1689,6 +1689,7 @@ function matchPhotosToRows(rows, files) {
 }
 
 function dpRowHtml(row, idx) {
+  const canDownloadOriginal = Boolean(row.dropanasId && row.carrier === 'tealca')
   const badge = row.matchType === 'exacto'
     ? '<span class="badge">Coincide</span>'
     : row.matchType === 'ambiguo'
@@ -1727,8 +1728,10 @@ function dpRowHtml(row, idx) {
   // mas una vista previa antes de mandarlo de verdad.
   const foto = row.photoName
     ? `<div class="dp-phone">📎 ${esc(row.photoName)} · <a href="#" class="dp-view-photo" data-idx="${idx}">ver</a></div>`
-    : ''
-  const testBtn = `<button type="button" class="btn dp-test" data-idx="${idx}" ${!row.phone ? 'disabled' : ''}>🧪 Probar</button>`
+    : canDownloadOriginal
+      ? '<div class="dp-phone">📄 La etiqueta original se descargará de Dropanas al enviar</div>'
+      : ''
+  const testBtn = `<button type="button" class="btn dp-test" data-idx="${idx}" ${(!row.phone && !canDownloadOriginal) ? 'disabled' : ''}>🧪 Probar</button>`
 
   return `<div class="dp-row" data-idx="${idx}">
     <input type="checkbox" class="dp-check" data-idx="${idx}" ${checked} ${disabled}>
@@ -1753,6 +1756,39 @@ function renderDpResults() {
   box.innerHTML = `<div class="card run-table">${dpRows.map(dpRowHtml).join('')}</div>`
   $('dp_confirmWrap').hidden = false
 }
+
+$('dp_apiSync').addEventListener('click', async () => {
+  $('dp_apiSync').disabled = true
+  $('dp_msg').textContent = 'Consultando Dropanas sin modificar nada…'
+  try {
+    const res = await fetch('/panel/api/dropanas-api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    if (res.status === 401) { window.location.href = '/panel/login'; return }
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'No se pudo consultar Dropanas')
+    dpRows = data.guideRows || []
+    dpAllCandidates = data.allCandidates || []
+    sgItems = data.trackingItems || []
+    renderDpResults()
+    renderSgResults()
+    const totals = data.sync?.totals || {}
+    if (data.sync?.baselineCreated) {
+      $('dp_msg').textContent = `Referencia inicial creada: ${totals.orders || 0} pedidos y ${totals.novelties || 0} novedades. No se generó ningún aviso antiguo.`
+    } else {
+      $('dp_msg').textContent = `${data.sync?.changes?.orders || 0} cambio(s) de pedido · ${data.sync?.changes?.novelties || 0} novedad(es) · ${data.sync?.pending || 0} pendiente(s) de revisión`
+    }
+    $('sg_msg').textContent = sgItems.length
+      ? `${sgItems.length} cambio(s) obtenidos desde la API; revisá antes de aplicar`
+      : 'La API no tiene cambios logísticos pendientes'
+  } catch (err) {
+    $('dp_msg').textContent = err.message
+  } finally {
+    $('dp_apiSync').disabled = false
+  }
+})
 
 $('dp_analyze').addEventListener('click', async () => {
   const file = $('dp_file').files?.[0]
@@ -1827,6 +1863,7 @@ $('dp_results').addEventListener('click', async (e) => {
     form.append('producto', row.producto || '')
     form.append('guia', row.guia || '')
     form.append('agencia', row.bodegaDestino || row.ciudad || '')
+    if (row.dropanasId && row.carrier === 'tealca') form.append('dropanasId', row.dropanasId)
     if (row.photoFile) form.append('imagen', row.photoFile)
     try {
       const res = await fetch('/panel/api/dropanas/test-send', { method: 'POST', body: form })
@@ -1858,6 +1895,7 @@ $('dp_confirm').addEventListener('click', async () => {
   let ok = 0
   let fallo = 0
   const errores = []
+  const ackKeys = []
   for (let i = 0; i < idxs.length; i++) {
     const row = dpRows[idxs[i]]
     $('dp_confirmMsg').textContent = `Mandando ${i + 1}/${idxs.length}…`
@@ -1870,6 +1908,10 @@ $('dp_confirm').addEventListener('click', async () => {
     // preciso; si esa columna no vino, se usa la ciudad como respaldo.
     const agencia = String(row.bodegaDestino || row.ciudad || '').trim()
     if (agencia) form.append('agencia', agencia)
+    if (row.dropanasId && row.carrier === 'tealca') {
+      form.append('dropanasId', row.dropanasId)
+      form.append('autoFetchImage', 'true')
+    }
     if (row.photoFile) form.append('imagen', row.photoFile)
     try {
       const res = await fetch('/panel/api/conversations/' + encodeURIComponent(row.phone) + '/guia', { method: 'POST', body: form })
@@ -1878,6 +1920,7 @@ $('dp_confirm').addEventListener('click', async () => {
       const body = await res.json()
       if (body.notice?.sent) {
         ok++
+        if (row._pendingKey) ackKeys.push(row._pendingKey)
       } else {
         fallo++
         errores.push(`${row.cliente || row.phone}: ${body.notice?.error || body.notice?.reason || 'no se pudo mandar'}`)
@@ -1887,6 +1930,13 @@ $('dp_confirm').addEventListener('click', async () => {
       errores.push(`${row.cliente || row.phone}: ${err.message}`)
     }
     if (i < idxs.length - 1) await sleep(BULK_GUIA_CLIENT_DELAY_MS)
+  }
+  if (ackKeys.length) {
+    await fetch('/panel/api/dropanas-api/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: ackKeys }),
+    }).catch(() => {})
   }
   // Antes esto era un texto chiquito ("Listo: X avisadas, Y con problema")
   // facil de pasar por alto — ahora se ve clarito que paso con cada uno que
@@ -1917,6 +1967,7 @@ const SG_ETAPA_LABEL = {
   esperando_retiro: 'Esperando retiro',
   en_camino: 'En camino',
   entregado: 'Entregado',
+  devolucion: 'Devolución',
 }
 
 function sgRowHtml(item, idx) {
@@ -2070,7 +2121,7 @@ $('sg_confirm').addEventListener('click', async () => {
   try {
     const items = idxs.map((i) => {
       const it = sgItems[i]
-      return { phone: it.phone, etapaNueva: it.etapaNueva, enviarPlantilla: it.enviarPlantilla, plantillaVars: it.plantillaVars }
+      return { phone: it.phone, etapaNueva: it.etapaNueva, enviarPlantilla: it.enviarPlantilla, plantillaVars: it.plantillaVars, pendingKey: it.pendingKey }
     })
     const res = await fetch('/panel/api/seguimiento/confirm', {
       method: 'POST',
