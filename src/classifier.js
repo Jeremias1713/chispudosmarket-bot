@@ -100,23 +100,33 @@ con retiro en agencia o entrega a domicilio.
   que el retiro va a ser en esa tienda propia puntual, no una agencia. Si el cliente de Maracaibo
   eligio una agencia Tealca en cambio, seguí con las etapas normales de abajo (vendido,
   esperando_retiro, en_camino, entregado), no esta.
-  - esperando_retiro: lo mismo que "vendido" (pedido cerrado), pero ademas alguien del negocio dijo
-  explicitamente, DESPUES del cierre, que ya le esta coordinando o preparando el envio o el retiro
-  (por ejemplo le paso el numero de guia real, o le confirmo que ya se despacho). No alcanza con la
-  frase generica del mensaje de cierre tipo "en cuanto tengamos la guia te la pasamos" o "te avisamos
-  cuando llegue": eso es una PROMESA a futuro que ya viene siempre en el cierre, no una confirmacion
-  de que ya paso. Si lo unico que hay despues del cierre es silencio, un "gracias" del cliente, o
-  charla suelta sobre el producto, la etapa sigue siendo "vendido", no "esperando_retiro".
   - en_camino: alguien (negocio o cliente) confirma EXPLICITAMENTE, en un mensaje concreto despues
-  del cierre, que el pedido ya salio/esta en camino o que ya llego a la agencia y esta listo para
-  retirar ahora. De nuevo, la frase generica del mensaje de cierre NO alcanza para esto.
+  del cierre, que el pedido YA SALIO/YA SE DESPACHO (por ejemplo le paso el numero de guia real, o le
+  confirmo que ya se envio), pero TODAVIA NO llego a la agencia de destino: sigue en transito. No
+  alcanza con la frase generica del mensaje de cierre tipo "en cuanto tengamos la guia te la pasamos"
+  o "te avisamos cuando llegue": eso es una PROMESA a futuro que ya viene siempre en el cierre, no una
+  confirmacion de que ya paso. Si lo unico que hay despues del cierre es silencio, un "gracias" del
+  cliente, o charla suelta sobre el producto, la etapa sigue siendo "vendido", no "en_camino". OJO,
+  MUY IMPORTANTE: que se haya generado o mandado un numero de guia SOLO confirma que el pedido salio
+  de despacho (esta etapa, "en_camino"); JAMAS uses eso para inferir que el pedido YA LLEGO a la
+  agencia (esa es la etapa de abajo, "esperando_retiro") — son dos eventos distintos y separados en
+  el tiempo, uno no implica el otro.
+  - esperando_retiro: alguien (negocio o cliente) confirma EXPLICITAMENTE, en un mensaje concreto
+  despues del cierre, que el pedido YA LLEGO a la agencia de destino y esta listo para que el cliente
+  lo retire ahora (por ejemplo "ya llego a la agencia", "ya esta en la oficina de Tealca", "ya lo
+  podes retirar"). De nuevo, la frase generica del mensaje de cierre NO alcanza para esto, y tampoco
+  alcanza con que el pedido ya este "en_camino": sin una confirmacion EXPLICITA de que llego a la
+  agencia (nunca por el solo paso del tiempo desde que salio de despacho), la etapa mas alta posible
+  es "en_camino".
 - entregado: el CLIENTE en persona confirma en sus propias palabras que ya recibio o ya retiro el
   producto (ej. "ya me llego", "ya lo retire", "llego todo bien"). NUNCA marques "entregado" solo
-  porque el negocio prometio avisar cuando llegue, ni porque paso tiempo desde el cierre: sin un
-  mensaje del cliente confirmando la entrega real, la etapa mas alta posible es "esperando_retiro".
-  Ejemplo de error que no hay que repetir: un pedido se cierra y, en la misma conversacion, unos
-  minutos despues sin que el cliente haya dicho nada de recibir el producto, se marca como
-  "entregado": eso esta mal, en ese caso la etapa sigue siendo "vendido".
+  porque el negocio prometio avisar cuando llegue, ni porque paso tiempo desde el cierre, el
+  despacho o la llegada a la agencia: sin un mensaje del cliente confirmando la entrega/retiro real,
+  la etapa mas alta posible es "esperando_retiro". Ejemplo de error que no hay que repetir: un pedido
+  se cierra (o se despacha, o llega a la agencia) y, en la misma conversacion, unos minutos despues
+  sin que el cliente haya dicho nada de recibir el producto, se marca como "entregado": eso esta mal,
+  en ese caso la etapa se queda en la que estaba antes (vendido, en_camino o esperando_retiro segun
+  corresponda), nunca "entregado" por el solo paso del tiempo.
   - devolucion: el CLIENTE dice explicitamente que va a devolver o ya devolvio el producto (ej. "lo
   quiero devolver", "ya lo mande de vuelta", "no me sirvio, quiero el reembolso"), O el negocio
   confirma explicitamente que se va a procesar la devolucion/el reembolso de ese pedido. No alcanza

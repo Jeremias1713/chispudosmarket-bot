@@ -20,6 +20,8 @@
 // Si no se cumplen las dos condiciones, no hay conflicto: es la carga
 // normal de la guia de ESE mismo pedido (corregir un typo, cargarla por
 // primera vez, etc.).
+const { canAdvanceToEnCaminoOnGuia } = require('./stageRules');
+
 function detectOrderConflict(session, nuevaGuia) {
   const guiaAnterior = session?.card?.guia ? String(session.card.guia).trim() : '';
   const guiaNueva = String(nuevaGuia || '').trim();
@@ -43,4 +45,57 @@ function detectOrderConflict(session, nuevaGuia) {
   };
 }
 
-module.exports = { detectOrderConflict };
+// FASE (correccion H-nuevo-pedido): arma el patch de sesion para registrar
+// una guia de despacho (a mano desde el chat, o confirmada en el lote de
+// Dropanas) -- UN SOLO lugar para esta logica, usado por los dos caminos del
+// panel (POST /api/conversations/:phone/guia y POST /api/dropanas/confirm),
+// que antes tenian cada uno su propia copia con reglas levemente distintas.
+//
+// isNewOrder=true (el operador ya confirmo el conflicto de detectOrderConflict
+// con confirmNewOrder) significa que esta guia es de OTRA compra del mismo
+// cliente, no una correccion del mismo pedido. En ese caso:
+//   - se reinician los datos TECNICOS del pedido anterior (foto de la guia,
+//     agencia de destino, monto) porque son propios de esa compra vieja, no
+//     del cliente: mantenerlos mezclaria los dos pedidos.
+//   - se reinician las marcas de aviso (shippingNotifiedAt/arrivalNotifiedAt)
+//     para que el aviso de la guia NUEVA se pueda mandar de verdad, en vez de
+//     quedar creyendo que "ya se aviso" por el pedido anterior.
+//   - se reinicia soldAt a ahora, para que las metricas por fecha cuenten
+//     esta venta el dia de hoy, no el dia del pedido viejo.
+//   - se fuerza el avance a "en_camino" aunque la etapa actual ya estuviera
+//     mas adelante (esperando_retiro/entregado del pedido anterior): no
+//     tiene sentido dejar un pedido recien confirmado colgado en la etapa
+//     vieja.
+// Los datos PERSONALES del cliente (nombre, ciudad, telefono, cedula,
+// notas) y todo el historial de mensajes NUNCA se tocan aca: siguen siendo
+// los mismos, son del cliente, no del pedido puntual.
+function buildGuiaPatch({ session, guia, agencia, guiaImageUrl, isNewOrder }) {
+  const card = { ...(session.card || {}) };
+
+  if (isNewOrder) {
+    card.guiaImageUrl = null;
+    card.agencia = null;
+    card.monto = null;
+  }
+  if (guia !== undefined) card.guia = String(guia ?? '').trim() || null;
+  if (agencia !== undefined) {
+    const a = String(agencia ?? '').trim();
+    card.agencia = a || null;
+  }
+  if (guiaImageUrl) card.guiaImageUrl = guiaImageUrl;
+
+  const patch = { card };
+  if (card.guia && canAdvanceToEnCaminoOnGuia(session.stage, isNewOrder)) {
+    patch.stage = 'en_camino';
+    patch.stageReason = isNewOrder ? 'Guia cargada (pedido nuevo)' : 'Guia cargada (avance automatico)';
+  }
+  if (isNewOrder) {
+    patch.shippingNotifiedAt = null;
+    patch.arrivalNotifiedAt = null;
+    patch.soldAt = new Date().toISOString();
+    patch.orderClosed = false;
+  }
+  return patch;
+}
+
+module.exports = { detectOrderConflict, buildGuiaPatch };

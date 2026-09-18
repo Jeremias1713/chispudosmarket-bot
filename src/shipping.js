@@ -1,7 +1,14 @@
-// Aviso automatico de guia de envio: cuando se carga el numero de guia de un
-// pedido (o el pedido pasa a "en camino"/"esperando retiro" y la guia ya
-// estaba cargada de antes), el bot le avisa SOLO al cliente, sin que el
-// negocio tenga que entrar al chat a escribirle a mano.
+// Avisos automaticos de logistica: el bot le avisa SOLO al cliente cuando
+// pasa algo con su pedido, sin que el negocio tenga que entrar al chat a
+// escribirle a mano. Dos eventos distintos, dos funciones separadas (no
+// deben mezclarse ni compartir marca de "ya avisado"):
+//   - maybeNotifyShipping: se cargo el numero de guia de DESPACHO (o el
+//     pedido pasa a "en_camino" con la guia ya cargada de antes). El pedido
+//     SALIO pero todavia no llego a la agencia.
+//   - maybeNotifyArrival: el pedido pasa a "esperando_retiro" (llego a la
+//     agencia, disponible para retirar). Nunca reusa el texto/plantilla de
+//     despacho: decir "ya esta en camino" cuando en realidad ya llego seria
+//     un aviso que contradice el estado real del pedido.
 //
 // - Si la ventana de 24h de WhatsApp todavia esta abierta (el cliente
 //   escribio hace menos de 24h), se manda un mensaje de texto libre normal
@@ -166,6 +173,63 @@ async function maybeNotifyShipping(phone, session) {
   };
 }
 
+// Texto libre por defecto para avisar la LLEGADA a la agencia (pedido
+// disponible para retiro) -- a proposito distinto del de despacho de arriba
+// (DEFAULT_FREE_TEXT dice "ya esta en camino", que seria mentira aca: si ya
+// llego, ya no esta "en camino").
+const DEFAULT_ARRIVAL_FREE_TEXT =
+  'Hola {{nombre}}! Tu pedido de {{producto}} ya llego a la agencia y esta listo para que lo retires. Numero de guia: {{guia}}.';
+
+// Aviso de LLEGADA a la agencia (pedido disponible para retiro), separado a
+// proposito de maybeNotifyShipping (aviso de DESPACHO). Bug real que esto
+// corrige: marcar un pedido como "esperando_retiro" desde el panel llamaba
+// al mismo maybeNotifyShipping de arriba, que le mandaba al cliente el texto
+// de despacho ("ya esta en camino") o la plantilla "guia_del_pedido" -- un
+// mensaje que contradice lo que en realidad paso (el pedido YA LLEGO, no
+// "salio"). Usa su propia marca (arrivalNotifiedAt, separada de
+// shippingNotifiedAt) para poder avisar despacho Y llegada como dos eventos
+// distintos de la misma conversacion, sin duplicar ninguno de los dos ni
+// mezclarlos.
+async function maybeNotifyArrival(phone, session) {
+  const s = session || getSession(phone);
+  if (s.arrivalNotifiedAt) return { sent: false, reason: 'ya_avisado' };
+
+  const settings = getSettings();
+  const abierta = isWindowOpen(s);
+  const values = placeholderValues(s);
+
+  try {
+    if (abierta) {
+      const texto = fillPlaceholders(settings.arrivalFreeText || DEFAULT_ARRIVAL_FREE_TEXT, values);
+      await sendRawReply(phone, texto);
+    } else {
+      // Misma plantilla de "ya llego, ya lo podes retirar" que usa el
+      // seguimiento diario de Dropanas (ver seguimiento.js): nombre,
+      // producto, guia y monto, SIN agencia y sin encabezado de imagen
+      // obligatorio (a diferencia de "guia_del_pedido", la de despacho).
+      const templateName = settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca';
+      const languageCode = settings.pickupTemplateLanguage || 'es';
+      if (!templateName) return { sent: false, reason: 'sin_plantilla' };
+      const paramsPlantilla = [values.nombre, values.producto, values.guia, values.monto];
+      const { wamid, snapshot } = await sendTemplateWithSnapshot({
+        to: phone,
+        templateName,
+        languageCode,
+        values: paramsPlantilla,
+      });
+      appendMessage(phone, 'human', `[plantilla automatica] ${templateName}`, {
+        template: { name: templateName, origin: 'bot', params: paramsPlantilla, snapshot, wamid, status: 'sent' },
+      });
+    }
+  } catch (err) {
+    console.error('No se pudo mandar el aviso automatico de llegada a', phone, err.response?.data || err.message);
+    return { sent: false, reason: 'error', error: err.message };
+  }
+
+  updateSession(phone, { arrivalNotifiedAt: new Date().toISOString() });
+  return { sent: true, viaTemplate: !abierta };
+}
+
 // Manda una prueba REAL de la plantilla (siempre la plantilla, no el texto
 // libre, porque es la que tiene mas variables y mas riesgo de salir mal si
 // falta un dato) a CUALQUIER numero que se le pase — sin leer ni tocar
@@ -217,6 +281,7 @@ async function testSend(phone, datos) {
 
 module.exports = {
   maybeNotifyShipping,
+  maybeNotifyArrival,
   testSend,
   // FASE 3 (H12): expuestas para poder probar directo que se prioriza el
   // monto real de la ficha sobre el precio de catalogo.

@@ -39,6 +39,7 @@ const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
+const { SOLD_STAGES, isAllowedAutoTransition } = require('./stageRules');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -46,23 +47,13 @@ const DEFAULT_REPLY_DELAY_MS = 8000;
 // Render define RENDER_EXTERNAL_URL solo automaticamente; PUBLIC_URL es el
 // override manual por si se corre en otro lado.
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
-// Etapas que representan un pedido YA cerrado, en cualquier momento
-// posterior del despacho (recien cerrado, coordinando retiro, en camino, o
-// ya entregado). Se usa para no "retroceder" una conversacion que ya avanzo
-// mas alla de "vendido" cuando se detecta el cierre; panel.js usa la misma
-// lista para que las metricas (conversion, ingresos) cuenten cualquiera de
-// estas etapas como una venta real, no solo "vendido" al pie de la letra.
-// "tienda_maracaibo" cuenta como venta cerrada igual que las demas (entra en
-// metricas de conversion/ingresos, se excluye del remarketing automatico y
-// de las "conversaciones que necesitan seguimiento"): es un pedido cerrado
-// que retira en la tienda propia de Maracaibo en vez de una agencia Tealca,
-// ver classifier.js.
-// "devolucion" a proposito NO esta en esta lista: un pedido que el cliente
-// devolvio deja de contar como venta cerrada en las metricas (ingresos,
-// conversion), aunque haya pasado por "vendido"/"entregado" antes de
-// devolverse. Sigue existiendo como etapa (classifier.js), solo que a partir
-// de ahi las metricas ya no lo suman.
-const SOLD_STAGES = ['vendido', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'entregado'];
+// SOLD_STAGES (que etapas cuentan como venta cerrada) e
+// isAllowedAutoTransition (que reclasificaciones automaticas se pueden
+// aplicar sin retroceder/pisar un avance logistico ya confirmado) ahora
+// viven en stageRules.js, compartido con panel.js y shipping.js -- ver ese
+// archivo para el detalle de cada regla. Se reexporta SOLD_STAGES aca abajo
+// (module.exports) para no romper a quienes ya lo importan desde './flow'
+// (server.js, remarketing.js, seguimiento.js, panel.js).
 
 // Red de seguridad de codigo: esto paso de verdad una vez (ver
 // buildDirectAgencyMessage en ai.js) — el modelo le prometio a un cliente
@@ -132,11 +123,31 @@ function looksLikePendingFormPromise(text) {
 // pedido (a esta altura, siempre es mentira: si esta en esperando_retiro es
 // porque ya se le aviso que llego, ver maybeNotifyShipping en shipping.js y
 // applyItems en seguimiento.js).
-const NOT_ARRIVED_YET_RE =
-  /todav[ií]a no\s*(?:ha\s*)?lleg|a[uú]n no\s*(?:ha\s*)?lleg|no\s*ha\s*llegado(?:\s*todav[ií]a)?|(?:sigue|todav[ií]a|esta|está)\s*en\s*(?:camino|tr[aá]nsito)|falta\s*(?:que|para que)\s*llegue|cuando\s*llegue\s*te\s*aviso|te\s*aviso\s*(?:cuando|apenas)\s*llegue/i;
+// FASE (correccion H-esperando_retiro): la lista original solo cubria un
+// puñado de frases armadas a mano ("todavia no ha llegado", "esta en
+// camino"...), y quedaron afuera casos reales reportados por el negocio como
+// "recuerda que tu pedido tiene que llegar primero" o "debes esperar a que
+// llegue para retirarlo" -- ninguna de esas dos tiene "todavia"/"aun" ni la
+// palabra "camino"/"transito", asi que el regex viejo no las agarraba. Se
+// generaliza a CUALQUIER frase que afirme que el pedido sigue en transito, o
+// que el cliente tiene que ESPERAR A QUE LLEGUE para algo (retirarlo,
+// recibirlo, etc), venga con la forma que venga.
+const NOT_ARRIVED_CLAIM_RE =
+  /(?:todav[ií]a|a[uú]n)\s*no\s*(?:ha\s*)?lleg|no\s*ha\s*llegado(?:\s*todav[ií]a)?|(?:sigue|todav[ií]a|esta|está)\s*en\s*(?:camino|tr[aá]nsito)|(?:tiene[s]?|ten[eé]s|hay)\s*que\s*llegar\s*primero|(?:(?:tiene[s]?|ten[eé]s|hay)\s*que|deb[eé]s)\s*esperar\s*(?:a\s*)?que\s*llegue|falta\s*(?:que|para que)\s*llegue|cuando\s*llegue\s*te\s*aviso|te\s*aviso\s*(?:cuando|apenas)\s*llegue/i;
+
+// Si en la MISMA frase aparece una negacion clara de esa idea (por ejemplo
+// "no tenes que esperar a que llegue: ya esta disponible", o "ya no hace
+// falta que llegue"), NO es una contradiccion -- es al reves, le esta
+// confirmando que ya llego. Sin este chequeo, una respuesta correcta como
+// esa quedaria bloqueada y reemplazada por el texto fijo, mostrandole al
+// cliente una respuesta peor que la que el modelo ya habia armado bien.
+const ARRIVED_NEGATION_RE =
+  /no\s*(?:tienes|ten[eé]s|hace falta|hay que|debes|deb[eé]s)\s*(?:que\s*)?esperar|ya\s*(?:no\s*)?(?:esta|está)\s*(?:disponible|list[oa](?:\s*para\s*retirar(?:lo|la)?)?)|ya\s*lleg[oó]|ya\s*pod[eé]s?\s*(?:pasar|retirarlo|retirarla)/i;
 
 function looksLikeSaysNotArrivedYet(text) {
-  return NOT_ARRIVED_YET_RE.test(String(text || ''));
+  const t = String(text || '');
+  if (!NOT_ARRIVED_CLAIM_RE.test(t)) return false;
+  return !ARRIVED_NEGATION_RE.test(t);
 }
 
 const ALREADY_ARRIVED_CORRECTION =
@@ -723,10 +734,17 @@ async function processReply(from) {
       finalReply = strippedClose === null ? POST_CLOSE_REMINDER : strippedClose;
     }
 
-    // Ver NOT_ARRIVED_YET_RE arriba: ultima red de seguridad antes de mandar,
-    // para que en esperando_retiro nunca salga un mensaje diciendo que
-    // todavia falta que llegue.
-    if (shippingStage === 'esperando_retiro' && looksLikeSaysNotArrivedYet(finalReply)) {
+    // Ver NOT_ARRIVED_CLAIM_RE arriba: ultima red de seguridad antes de
+    // mandar, para que un pedido que ya llego (o ya se entrego) nunca salga
+    // diciendo que todavia falta que llegue. OJO: se vuelve a leer la etapa
+    // FRESCA aca (no la que se capturo como shippingStage al arrancar este
+    // turno, varios segundos/una llamada a la IA atras): la etapa pudo haber
+    // cambiado MIENTRAS se generaba esta respuesta (por ejemplo, alguien en
+    // el panel acaba de marcar la llegada, o de cargar la guia y avanzar el
+    // pedido), y el estado logistico vigente en el momento de MANDAR el
+    // mensaje es el que tiene que prevalecer, no el que habia al empezar.
+    const stageAtSendTime = getSession(from).stage || null;
+    if (['esperando_retiro', 'entregado'].includes(stageAtSendTime) && looksLikeSaysNotArrivedYet(finalReply)) {
       finalReply = ALREADY_ARRIVED_CORRECTION;
     }
 
@@ -826,23 +844,42 @@ async function processReply(from) {
             mergedCard[key] = value;
           }
         }
-        const classPatch = { stage: classification.stage, stageReason: classification.razon || null, card: mergedCard };
-        // Mismo motivo que en el cierre deterministico de mas arriba: el
-        // clasificador por IA es OTRO camino por el que una conversacion
-        // puede pasar a una etapa de SOLD_STAGES (vendido, esperando_retiro,
-        // en_camino, entregado) directamente, sin pasar nunca por el bloque
-        // de isNewClose de arriba (de hecho, en la practica, la mayoria de
-        // las ventas se detectan ACA, no ahi: el clasificador suele saltar
-        // directo a "esperando_retiro" en vez de marcar "vendido" primero).
-        // Sin esto, soldAt quedaba sin guardar para casi todas las ventas
-        // reales, y las metricas por rango de fechas (Metricas > por dia)
-        // las mostraba como "sin fecha" en vez de contarlas el dia que
-        // pasaron de verdad.
-        if (SOLD_STAGES.includes(classification.stage) && !current.soldAt) {
-          classPatch.soldAt = new Date().toISOString();
+        const classPatch = { card: mergedCard };
+        // Ver isAllowedAutoTransition en stageRules.js: el clasificador
+        // relee TODA la conversacion en cada turno, asi que un mensaje
+        // informal suelto (un "gracias", un sticker, charla que no tiene
+        // nada que ver con el pedido) puede hacerle "perder de vista" un
+        // avance logistico que ya estaba confirmado por una fuente mas
+        // fuerte (guia cargada, marcado manual desde el panel, un turno
+        // anterior del propio clasificador) y proponer retroceder la etapa,
+        // o hasta "desvenderla" a una etapa puramente conversacional. Eso ya
+        // paso de verdad. Ahora esa reclasificacion NUNCA se aplica si
+        // implicaria retroceder un rango logistico ya alcanzado; "devolucion"
+        // es la unica excepcion (ver esa funcion), porque es evidencia nueva
+        // legitima sin importar en que etapa logistica estaba el pedido.
+        const stageChangeAllowed = isAllowedAutoTransition(current.stage, classification.stage);
+        if (stageChangeAllowed) {
+          classPatch.stage = classification.stage;
+          classPatch.stageReason = classification.razon || null;
+          // Mismo motivo que en el cierre deterministico de mas arriba: el
+          // clasificador por IA es OTRO camino por el que una conversacion
+          // puede pasar a una etapa de SOLD_STAGES (vendido, esperando_retiro,
+          // en_camino, entregado) directamente, sin pasar nunca por el bloque
+          // de isNewClose de arriba (de hecho, en la practica, la mayoria de
+          // las ventas se detectan ACA, no ahi: el clasificador suele saltar
+          // directo a "esperando_retiro" en vez de marcar "vendido" primero).
+          // Sin esto, soldAt quedaba sin guardar para casi todas las ventas
+          // reales, y las metricas por rango de fechas (Metricas > por dia)
+          // las mostraba como "sin fecha" en vez de contarlas el dia que
+          // pasaron de verdad.
+          if (SOLD_STAGES.includes(classification.stage) && !current.soldAt) {
+            classPatch.soldAt = new Date().toISOString();
+          }
         }
         const updated = updateSession(from, classPatch);
-        if (classification.stage === 'vendido' && current.stage !== 'vendido') push.notifySale(from, updated);
+        if (stageChangeAllowed && classification.stage === 'vendido' && current.stage !== 'vendido') {
+          push.notifySale(from, updated);
+        }
       }
     }
   } catch (err) {
