@@ -37,7 +37,7 @@ const shipping = require('../shipping');
 const dropanas = require('../dropanas');
 const personalizedBroadcast = require('../personalizedBroadcast');
 const seguimiento = require('../seguimiento');
-const { detectOrderConflict } = require('../orderGuard');
+const { detectOrderConflict, buildGuiaPatch } = require('../orderGuard');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -456,14 +456,25 @@ router.post('/api/conversations/:phone/stage', (req, res) => {
     updated = updateSession(phone, { soldAt: new Date().toISOString() });
   }
   if (stage === 'vendido' && before.stage !== 'vendido') push.notifySale(phone, updated);
-  // Si el pedido pasa a "en camino" o "esperando retiro" y la guia ya
-  // estaba cargada de antes (se cargo mientras estaba en otra etapa), este
-  // es el momento de avisarle al cliente solo, sin esperar a que alguien
-  // entre al chat. No se espera la respuesta (fire-and-forget): es un aviso
-  // best-effort, nunca debe trabar la respuesta de este endpoint.
-  if (['en_camino', 'esperando_retiro'].includes(stage)) {
+  // Si el pedido pasa a "en camino" (despacho) o "esperando retiro"
+  // (llegada) y la guia ya estaba cargada de antes (se cargo mientras
+  // estaba en otra etapa), este es el momento de avisarle al cliente solo,
+  // sin esperar a que alguien entre al chat. No se espera la respuesta
+  // (fire-and-forget): es un aviso best-effort, nunca debe trabar la
+  // respuesta de este endpoint. IMPORTANTE: son dos avisos DISTINTOS (ver
+  // shipping.js) -- "en_camino" es el aviso de despacho ("ya salio"),
+  // "esperando_retiro" es el aviso de llegada ("ya podes retirarlo"). Antes
+  // los dos disparaban el mismo maybeNotifyShipping, asi que marcar la
+  // llegada de un pedido terminaba mandandole al cliente el texto de
+  // despacho ("tu pedido ya esta en camino"), contradiciendo lo que en
+  // realidad acababa de pasar.
+  if (stage === 'en_camino') {
     shipping.maybeNotifyShipping(phone, updated).catch((err) => {
-      console.error('Error avisando la guia automaticamente al cambiar de etapa:', err.message);
+      console.error('Error avisando el despacho automaticamente al cambiar de etapa:', err.message);
+    });
+  } else if (stage === 'esperando_retiro') {
+    shipping.maybeNotifyArrival(phone, updated).catch((err) => {
+      console.error('Error avisando la llegada automaticamente al cambiar de etapa:', err.message);
     });
   }
   res.json({ ok: true, locked: true, stage });
@@ -805,17 +816,11 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
     if (conflicto) return res.status(409).json(conflicto);
   }
 
-  const card = { ...(s.card || {}) };
-  if (req.body?.guia !== undefined) card.guia = guia || null;
   // Agencia de destino: se carga a mano aca porque este flujo (guia por
   // chat, una por una) no tiene un Excel del que sacarla sola, a diferencia
   // del seguimiento diario de Dropanas. Se usa como variable de la plantilla
   // "guia_del_pedido" cuando la ventana de 24h ya esta cerrada.
-  if (req.body?.agencia !== undefined) {
-    const agencia = String(req.body.agencia ?? '').trim();
-    card.agencia = agencia || null;
-  }
-
+  let uploadedGuiaImageUrl;
   if (req.file) {
     let item;
     try {
@@ -828,20 +833,28 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
-    card.guiaImageUrl = mediaUrl(item.filename);
+    uploadedGuiaImageUrl = mediaUrl(item.filename);
   }
 
-  const patch = { card };
-  // Si el pedido estaba en "vendido" o "esperando_guia" (vendido pero
-  // todavia sin numero de guia) y recien se cargo un numero de guia real,
-  // pasa directo a "en_camino": ya no tiene sentido dejarlo atras
-  // "esperando" la guia si la guia ya esta cargada. No se toca si alguien
-  // ya fijo la etapa a mano desde el panel (stageLocked, ver setStage en
-  // state.js), ni si ya esta en una etapa mas avanzada.
-  if (card.guia && !s.stageLocked && ['vendido', 'esperando_guia'].includes(s.stage)) {
-    patch.stage = 'en_camino';
-    patch.stageReason = 'Guia cargada (avance automatico)';
-  }
+  // Registrar una guia valida es una accion logistica explicita (despacho
+  // real, no una reclasificacion de IA): ver buildGuiaPatch en orderGuard.js
+  // -- decide si corresponde avanzar a "en_camino" (avanza aunque la etapa
+  // se haya fijado a mano, esto es lo que antes quedaba bloqueado por
+  // stageLocked; nunca retrocede esperando_retiro/entregado salvo que sea un
+  // pedido nuevo confirmado) y, si isNewOrder=true, reinicia los datos y
+  // marcas TECNICOS del pedido anterior (foto, agencia, monto, avisos ya
+  // mandados) sin tocar los datos personales del cliente ni el historial.
+  // Mismo helper que usa la confirmacion en lote de Dropanas mas abajo, para
+  // no tener dos reglas distintas para el mismo comportamiento.
+  const isNewOrder = req.body?.guia !== undefined && String(req.body?.confirmNewOrder) === 'true';
+  const patch = buildGuiaPatch({
+    session: s,
+    guia: req.body?.guia !== undefined ? guia : undefined,
+    agencia: req.body?.agencia !== undefined ? req.body.agencia : undefined,
+    guiaImageUrl: uploadedGuiaImageUrl,
+    isNewOrder,
+  });
+  const card = patch.card;
   const updated = updateSession(phone, patch);
 
   let notice = { sent: false, reason: 'sin_guia' };
@@ -945,16 +958,13 @@ router.post('/api/dropanas/confirm', async (req, res) => {
         }
       }
 
-      const card = { ...(s.card || {}), guia };
-      // Mismo avance automatico que la carga de guia una por una (ver POST
-      // /api/conversations/:phone/guia): si estaba "vendido" o
-      // "esperando_guia", con la guia ya cargada pasa directo a
-      // "en_camino", salvo que la etapa este fijada a mano.
-      const patch = { card };
-      if (!s.stageLocked && ['vendido', 'esperando_guia'].includes(s.stage)) {
-        patch.stage = 'en_camino';
-        patch.stageReason = 'Guia cargada (avance automatico)';
-      }
+      // Mismo helper que la carga de guia una por una (ver POST
+      // /api/conversations/:phone/guia y buildGuiaPatch en orderGuard.js):
+      // avanza a "en_camino" aunque la etapa se haya fijado a mano, y con
+      // confirmNewOrder reinicia los datos/marcas tecnicos del pedido
+      // anterior en vez de arrastrarlos en silencio.
+      const isNewOrder = Boolean(item?.confirmNewOrder);
+      const patch = buildGuiaPatch({ session: s, guia, isNewOrder });
       const updated = updateSession(phone, patch);
       const notice = await shipping.maybeNotifyShipping(phone, updated);
       results.push({ phone, guia, ok: true, notice });
