@@ -3,6 +3,10 @@ node_modules/
 data/sessions.json
 data/products.json
 data/settings.json
+data/dropanas-api-state.json
+data/dropanas-browser-session/
+data/media/guias/
+.npm-cache/
 data/library.json
 data/broadcasts.json
 data/coupons.json
@@ -11,3 +15,5 @@ data/push-subscriptions.json
 data/media/*
 !data/media/.gitkeep
 npm-debug.log*
+__pycache__/
+*.pyc
