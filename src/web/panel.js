@@ -38,6 +38,7 @@ const dropanas = require('../dropanas');
 const personalizedBroadcast = require('../personalizedBroadcast');
 const seguimiento = require('../seguimiento');
 const { detectOrderConflict, buildGuiaPatch } = require('../orderGuard');
+const { matchesConversation } = require('../conversationSearch');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -282,18 +283,14 @@ router.get('/api/stages', (_req, res) => {
 });
 
 router.get('/api/conversations', (req, res) => {
-  const search = String(req.query.search || '').trim().toLowerCase();
-  let list = listSessions().map(toConvo);
+  const search = String(req.query.search || '').trim();
+  let sessions = listSessions();
 
   if (search) {
-    list = list.filter(
-      (c) =>
-        c.phone.includes(search) ||
-        (c.name || '').toLowerCase().includes(search) ||
-        (c.lastMessage || '').toLowerCase().includes(search)
-    );
+    sessions = sessions.filter((session) => matchesConversation(session, search));
   }
 
+  const list = sessions.map(toConvo);
   list.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
   res.json(list);
 });
