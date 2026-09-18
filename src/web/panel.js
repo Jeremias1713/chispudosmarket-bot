@@ -39,6 +39,9 @@ const personalizedBroadcast = require('../personalizedBroadcast');
 const seguimiento = require('../seguimiento');
 const { detectOrderConflict, buildGuiaPatch } = require('../orderGuard');
 const { matchesConversation } = require('../conversationSearch');
+const dropanasMonitor = require('../dropanasMonitor');
+const dropanasGuide = require('../dropanasGuide');
+const dropanasAuto = require('../dropanasAuto');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -831,6 +834,17 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
       return res.status(400).json({ error: err.message });
     }
     uploadedGuiaImageUrl = mediaUrl(item.filename);
+  } else if (String(req.body?.autoFetchImage) === 'true' && req.body?.dropanasId && guia) {
+    try {
+      const captured = await dropanasGuide.capture({
+        orderId: req.body.dropanasId,
+        expectedTracking: guia,
+      });
+      uploadedGuiaImageUrl = mediaUrl(captured.filename);
+      if (!uploadedGuiaImageUrl) throw new Error('Falta configurar PUBLIC_URL para que WhatsApp pueda leer la imagen de la guia');
+    } catch (err) {
+      return res.status(400).json({ error: `No se pudo descargar la etiqueta original de Dropanas: ${err.message}` });
+    }
   }
 
   // Registrar una guia valida es una accion logistica explicita (despacho
@@ -862,6 +876,50 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
 });
 
 /* ---------- guias por lote (export de Dropanas) ---------- */
+
+// Integración oficial de solo lectura. La primera consulta crea una
+// referencia y devuelve cero acciones, aunque haya cientos de pedidos: así
+// nunca se avisa en bloque a clientes antiguos al activar la función.
+router.get('/api/dropanas-api/status', (_req, res) => {
+  res.json({
+    ...dropanasMonitor.status(),
+    guideDownload: dropanasGuide.status(),
+    automaticSend: dropanasAuto.status(),
+  });
+});
+
+router.post('/api/dropanas-api/sync', async (_req, res) => {
+  try {
+    const sync = await dropanasMonitor.sync();
+    const pending = dropanasMonitor.listPending();
+    const orderRows = pending
+      .filter((change) => change.order)
+      .map((change) => ({ ...change.order, _pendingKey: change.key, _changeKind: change.kind }));
+    res.json({
+      ok: true,
+      sync,
+      guideRows: dropanas.matchRows(orderRows.filter((row) => row.guia)),
+      trackingItems: seguimiento.buildPreview(orderRows),
+      novelties: pending.filter((change) => change.novelty).map((change) => ({
+        key: change.key,
+        kind: change.kind,
+        id: change.novelty.id,
+        orderId: change.novelty.orderId,
+        status: change.novelty.status,
+        type: change.novelty.type,
+        detectedAt: change.detectedAt,
+      })),
+      allCandidates: dropanas.listAllCandidates(),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message, status: dropanasMonitor.status() });
+  }
+});
+
+router.post('/api/dropanas-api/ack', (req, res) => {
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys : [];
+  res.json({ ok: true, ...dropanasMonitor.acknowledge(keys) });
+});
 
 // Analiza el Excel que se exporta desde Dropanas (con los numeros de guia ya
 // generados) y propone a que conversacion corresponde cada uno, cruzando por
@@ -904,6 +962,13 @@ router.post('/api/dropanas/test-send', upload.single('imagen'), async (req, res)
         folder: 'Guias de envio',
       });
       datos.guiaImageUrl = mediaUrl(item.filename);
+    } else if (req.body?.dropanasId && datos.guia) {
+      const captured = await dropanasGuide.capture({
+        orderId: req.body.dropanasId,
+        expectedTracking: datos.guia,
+      });
+      datos.guiaImageUrl = mediaUrl(captured.filename);
+      if (!datos.guiaImageUrl) throw new Error('Falta configurar PUBLIC_URL para que WhatsApp pueda leer la imagen de la guia');
     }
     const result = await shipping.testSend(testPhone, datos);
     res.json({ ok: true, ...result });
@@ -965,6 +1030,9 @@ router.post('/api/dropanas/confirm', async (req, res) => {
       const updated = updateSession(phone, patch);
       const notice = await shipping.maybeNotifyShipping(phone, updated);
       results.push({ phone, guia, ok: true, notice });
+      // Una lectura pendiente solo se confirma cuando WhatsApp aceptó el
+      // mensaje. Si Meta lo rechaza, queda visible para poder reintentarlo.
+      if (item?.pendingKey && notice?.sent) dropanasMonitor.acknowledge([item.pendingKey]);
     } catch (err) {
       results.push({ phone, guia, ok: false, error: err.message });
     }
@@ -999,6 +1067,10 @@ router.post('/api/seguimiento/confirm', async (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!items.length) return res.status(400).json({ error: 'No hay nada para confirmar' });
   const results = await seguimiento.applyItems(items);
+  const acknowledged = items
+    .filter((item, index) => results[index]?.ok && item?.pendingKey)
+    .map((item) => item.pendingKey);
+  if (acknowledged.length) dropanasMonitor.acknowledge(acknowledged);
   res.json({ ok: true, results });
 });
 
