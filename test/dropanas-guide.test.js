@@ -33,10 +33,15 @@ function onePagePdf(text) {
   return Buffer.from(output);
 }
 
-test('extrae el CSRF aunque cambie el orden de los atributos HTML', () => {
-  assert.equal(guide.extractCsrf('<input type="hidden" name="_token" value="abc123">'), 'abc123');
-  assert.equal(guide.extractCsrf('<input value="xyz789" class="x" name="_token">'), 'xyz789');
-});
+const sandboxConfig = {
+  enabled: true,
+  readOnlyAck: true,
+  token: 'test_sk_fake_for_tests',
+  tokenMode: 'sandbox',
+  baseUrl: 'https://app.dropanas.com/api/v1',
+  guideEnabled: true,
+  guideTimeoutMs: 1000,
+};
 
 test('rechaza un PDF que no contiene la guia esperada', async () => {
   await assert.rejects(
@@ -47,17 +52,49 @@ test('rechaza un PDF que no contiene la guia esperada', async () => {
 
 test('descarga, verifica y convierte la etiqueta PDF en PNG', async () => {
   const fakeClient = {
-    get: async () => ({
+    get: async (url, options) => ({
       data: onePagePdf('GUIA 84804888'),
-      headers: { 'content-type': 'application/pdf' },
-      config: { url: 'https://app.dropanas.com/pedido/tracking-tealca-oficial/34622' },
+      headers: {
+        'content-type': 'application/pdf',
+        'x-dropanas-mode': 'sandbox',
+        'x-guia-transportadora': 'dropanas',
+        'x-guia-origen': 'dropanas',
+      },
+      config: { url },
+      requestOptions: options,
     }),
   };
-  const result = await guide.capture({ orderId: '34622', expectedTracking: '84804888', client: fakeClient });
+  const result = await guide.capture({
+    orderId: '34622', expectedTracking: '84804888', config: sandboxConfig, client: fakeClient,
+  });
   const fullPath = path.join(guide.OUTPUT_DIR, path.basename(result.filename));
   const image = fs.readFileSync(fullPath);
   assert.equal(image.subarray(1, 4).toString(), 'PNG');
   assert.ok(image.length > 1000);
+  assert.equal(result.mode, 'sandbox');
+  assert.equal(result.origin, 'dropanas');
+});
+
+test('en live espera la etiqueta oficial y no envía la guía de respaldo', async () => {
+  const client = { get: async () => ({
+    data: onePagePdf('GUIA 84804888'),
+    headers: {
+      'content-type': 'application/pdf',
+      'x-dropanas-mode': 'live',
+      'x-guia-transportadora': 'dropanas',
+      'x-guia-origen': 'dropanas',
+    },
+  }) };
+  await assert.rejects(
+    guide.capture({
+      orderId: '34622',
+      expectedTracking: '84804888',
+      expectedCarrier: 'tealca',
+      config: { ...sandboxConfig, token: 'live_sk_fake', tokenMode: 'live' },
+      client,
+    }),
+    /oficial de la transportadora todavía no está disponible/
+  );
 });
 
 test('el envio totalmente automatico queda apagado por defecto', async () => {
