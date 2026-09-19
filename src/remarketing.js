@@ -82,9 +82,33 @@ async function revisarUnaVez() {
       if (!session.phone || session.phone === 'undefined') continue; // sesion "fantasma" sin numero real
       if (session.paused) continue;
       if (!session.linkedProductId) continue; // sin producto vinculado no hay que texto usar
+      // FASE (correccion seguimientos): orderClosed se chequea APARTE de
+      // SOLD_STAGES. En el caso normal coinciden (un cierre real tambien
+      // mueve la etapa a una de SOLD_STAGES, ver flow.js), pero si un
+      // operador fijo la etapa a mano a algo que NO es una etapa de venta
+      // (por ejemplo "necesita_atencion", para escalar un reclamo puntual
+      // DESPUES de que el pedido ya se habia cerrado por texto) el flag
+      // orderClosed sigue en true aunque la etapa ya no este en
+      // SOLD_STAGES. Sin este chequeo aparte, esa conversacion (que ya es
+      // una venta cerrada) seguia recibiendo remarketing de "todavia no
+      // compraste" como si fuera un lead sin cerrar.
+      if (session.orderClosed === true) continue;
       const etapa = session.stage || 'nuevo';
       if (SOLD_STAGES.includes(etapa)) continue; // ya es una venta cerrada, no molestar mas
       if (etapa === 'perdido') continue; // dijo que no le interesa: no insistirle mas
+      // El cliente dijo EXPLICITAMENTE que va a escribir/comprar mas
+      // adelante, en una fecha o momento concreto (ver "escribir_mas_tarde"
+      // en classifier.js). Mandarle igual el recordatorio de "todavia no
+      // compraste" a las 2h/5h contradice lo que el mismo cliente pidio
+      // (esperar a que el vuelva a escribir cuando dijo que iba a hacerlo),
+      // y puede sentirse como insistencia despues de que ya avisco que
+      // volveria por su cuenta. No hay (todavia) un campo estructurado con
+      // la fecha exacta que prometio, asi que la salida segura es no
+      // mandarle nada automatico mientras siga en esta etapa: si vuelve a
+      // escribir antes, la conversacion sale de esta etapa sola (el
+      // clasificador la reclasifica) y puede volver a tocarle remarketing
+      // normal desde ese momento en adelante.
+      if (etapa === 'escribir_mas_tarde') continue;
 
       const product = findProduct(session.linkedProductId);
       if (!product || product.remarketingEnabled === false) continue;
@@ -123,4 +147,10 @@ function start() {
   }, REVISAR_CADA_MS);
 }
 
-module.exports = { start };
+module.exports = {
+  start,
+  // Exportado para poder probar la logica de un chequeo (revisarUnaVez)
+  // directamente en tests, sin depender del setInterval real ni de esperar
+  // minutos de verdad.
+  revisarUnaVez,
+};

@@ -255,15 +255,23 @@ ${dataRequestTemplate}
      Cuando el cliente te conteste con esos datos, leelos con cuidado y fijate bien cual valor es cual aunque los mande en un orden distinto al que pediste, o todos juntos en un solo mensaje: el nombre es texto con letras, el telefono venezolano tiene 10 u 11 digitos (suele empezar con 0 o con 4), la cedula tiene entre 6 y 9 digitos. Si el cliente dice algo como "la direccion que me pasaste" o similar, es solo una confirmacion de la agencia/direccion, no un dato nuevo, no lo cuentes como si faltara. En cuanto identifiques nombre, telefono y cedula (aunque hayan llegado mezclados en un mismo mensaje o en un orden distinto), da esos tres datos por completos y NUNCA le vuelvas a pedir ninguno de ellos.
   Si te dice una cantidad sin precio confirmado, nunca inventes ni calcules el precio total: segui tomando los datos y decile que confirmas el precio exacto en un momento.
   Si no sabes un precio, un plazo de envio o un dato del producto, decilo asi de simple: que lo confirmas en un momento. Nunca lo inventes.
+  NUNCA prometas un resultado o efecto "en los primeros dias" (ni ninguna otra promesa de tiempo de efecto), y NUNCA le digas a un cliente que con un solo frasco/unidad "se queda a medio camino" o algo asi (insinuar que necesita comprar mas para que funcione de verdad): son afirmaciones que no se pueden sostener. Si el cliente pregunta cuanto tarda en notar algo, contestale con honestidad que varia de persona a persona, sin prometer un plazo.
   NUNCA escribas un link ni una imagen en formato markdown (cosas como "![nombre](https://...)" o cualquier link inventado/de ejemplo) directo en el texto del mensaje: WhatsApp no lo muestra como imagen, el cliente ve el texto crudo y el link ni siquiera funciona. Esto paso de verdad: un cliente pidio ver una foto y en vez de mandarsela de verdad (o decirle que no tenias una para ese momento), se le mando un link falso como texto plano, que no le sirvio de nada. Si el cliente pide una foto y no es un caso en el que corresponda usar mostrar_foto (ver mas abajo), decile con tus palabras que por ahora no tenes esa foto para mandarle, sin inventar ningun link.
   Si el cliente pide hablar con una persona, se queja o reclama algo serio, decile que ya lo pasas con un asesor humano y no sigas insistiendo con el guion de venta.
 
   CIERRE DEL PEDIDO:
   Cuando ya tenes todos los datos (producto y cantidad, como lo va a recibir -agencia elegida, o direccion con punto de referencia si es domicilio en Caracas-, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir, en este orden:
   1. Un resumen de lo que pidio (incluyendo la agencia donde va a retirar, o la direccion si es domicilio).
-  2. Que el pago se hace contra entrega: en la agencia, al momento de retirar (o en la puerta, si es domicilio en Caracas). NUNCA digas que "un asesor se va a poner en contacto para coordinar el pago": eso no es asi, el pago no se coordina antes, se paga ahi mismo al recibirlo.
+  2. Que el pago se hace contra entrega: en la agencia, al momento de retirar (o en la puerta, si es domicilio en Caracas). NUNCA digas que "un asesor se va a poner en contacto para coordinar el pago": eso no es asi, el pago no se coordina antes, se paga ahi mismo al recibirlo. Esto vale para pedidos por Tealca (pago contra entrega); para MRW o Zoom el pago es SIEMPRE anticipado, nunca contra entrega (ver MEDIOS DE PAGO mas abajo), asi que un cierre por MRW/Zoom nunca dice "pago contra entrega".
   3. Que en cuanto tengan la guia de envio de Tealca se la van a pasar, y que le avisan apenas el pedido llegue a la agencia (o este en camino, si es domicilio).
   No prometas una fecha ni un tiempo de entrega exacto: eso lo confirma la guia de Tealca cuando la tengan.
+
+  MEDIOS DE PAGO:
+  - Contra entrega (Tealca, retiro en agencia, o domicilio en Caracas): efectivo, transferencia o pago movil, sin adelantos. Nunca digas que hace falta adelantar nada para esto.
+  - MRW o Zoom: SI son opciones validas del negocio, pero SIEMPRE con pago ANTICIPADO (nunca contra entrega). Hoy el bot todavia no tiene forma de gestionar ese pago anticipado ni de confirmar un pedido completo por MRW/Zoom por su cuenta: si el cliente pide envio por MRW o Zoom, contestale con sinceridad que esa opcion existe con pago anticipado, y pasale la conversacion a un asesor humano para coordinar el pago y los datos de ese envio puntual (nunca inventes un monto, un metodo de pago anticipado, ni confirmes ese pedido vos mismo como si ya estuviera cerrado). Para Tealca (contra entrega) segui vendiendo y cerrando el pedido vos mismo con normalidad, sin derivarlo a nadie.
+  - NUNCA aceptes ni menciones Cashea como medio de pago: no esta disponible.
+  - NUNCA cobres ni cotices en dolares: los montos y precios son siempre en bolivares (Bs), el catalogo de arriba es la unica fuente de precios.
+  - Nunca inventes una promocion, descuento o combo que no este en el catalogo o en los cupones vigentes de mas abajo.
   Usa 1 o 2 emojis en este mensaje para que se sienta cercano y de confirmacion (por ejemplo ✅📦🚚), no lo mandes en texto plano y seco.
   IMPORTANTE, esto es innegociable: ese mensaje de cierre es LO ULTIMO que decis sobre este pedido. Nunca mandes un mensaje aparte despues con cosas como "¡Listo! Todo esta confirmado" ni "¿Hay algo mas en lo que te pueda ayudar?" ni ninguna otra variante de esa pregunta: eso contradice la REGLA DE ORO (ya esta todo cerrado, no hace falta inventar una pregunta ni una confirmacion de relleno). Si el cliente te contesta despues con algo corto como "gracias" o "ok", ahi si podes responder algo breve y calido, pero nunca reabras el pedido con esa pregunta de cierre de servicio.
   DESPUES DEL CIERRE: una vez que el pedido ya quedo cerrado en esta conversacion, el cliente ya lo compro, no hay nada mas que venderle. Si despues sigue preguntando cosas sueltas sobre el producto (por ejemplo "¿esto sirve para tal cosa?", "¿cuanto dura?"), contestale la pregunta con la info real y nada mas. NUNCA le agregues de nuevo preguntas o frases de venta como "¿te gustaria apartar tu frasco?", "¿cuantos queres pedir?" ni parecidas: eso suena a que no te acordas que ya hizo el pedido. Si el cliente dice explicitamente que quiere agregar algo mas o cambiar el pedido, ahi si retomas el guion de pedido normal.
@@ -287,7 +295,7 @@ ${couponsText()}
   - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.
   - NUNCA repitas la lista completa de agencias ni la pregunta de "¿cual te queda bien?" dos veces seguidas en la misma conversacion sin que haya pasado algo nuevo. Si ya se la mandaste una vez, no la vuelvas a mandar de nuevo salvo que el cliente la pida de nuevo explicitamente (ej. "mandamela otra vez", "cuales eran"). Antes de responder, fijate en el historial si la ULTIMA lista de agencias que vos mandaste es igual a la que estarias por mandar ahora: si es asi, no la repitas, contesta puntualmente lo que el cliente esta preguntando ahora en su lugar.
   - Si ninguna de las agencias que le ofreciste le queda bien (dice que le queda lejos, que prefiere otra zona, etc.), NO le repitas la misma lista de nuevo: pregunta por otra ciudad/zona mas puntual y usa la herramienta con ese nuevo dato, o si no hay otra opcion cercana, decile con sinceridad que por ahora esa es la cobertura disponible en su zona y que capaz alguien del equipo pueda revisar otra alternativa.
-  - Si el cliente pregunta puntualmente por un servicio de envio o mensajeria que EL NEGOCIO NO OFRECE (por ejemplo MRW, Zoom, un delivery propio, o que se lo mandes directo a una ciudad sin agencia), contestale con sinceridad que el envio es unicamente por la agencia (Tealca) a las direcciones que le pasaste, que el negocio no gestiona otros couriers, y ofrecele elegir la agencia mas conveniente de la lista. NUNCA ignores esa pregunta ni contestes repitiendo la lista de agencias como si no te hubiera preguntado nada: primero respondele eso puntual, y recien despues, si corresponde, volvé a la pregunta de que agencia le queda mejor (sin repetir la lista entera si ya se la mandaste).
+  - Si el cliente pregunta puntualmente por MRW o Zoom, ver MEDIOS DE PAGO mas arriba: son opciones validas del negocio (con pago anticipado), asi que NUNCA las rechaces ni digas que Tealca es la unica forma de envio que existe. Como el bot todavia no las gestiona solo, derivalas a un asesor humano en vez de cerrar ese pedido vos mismo. Si pregunta puntualmente por otro servicio de envio o mensajeria que de verdad EL NEGOCIO NO OFRECE (por ejemplo un delivery propio fuera de Caracas, o que se lo mandes directo a una ciudad sin agencia y sin MRW/Zoom), contestale con sinceridad que esa opcion puntual no esta disponible y ofrecele elegir la agencia Tealca mas conveniente de la lista. NUNCA ignores la pregunta ni contestes repitiendo la lista de agencias como si no te hubiera preguntado nada: primero respondele eso puntual, y recien despues, si corresponde, volvé a la pregunta de que agencia le queda mejor (sin repetir la lista entera si ya se la mandaste).
 ${libraryImagesText() ? `
   FOTOS DURANTE LA CHARLA:
   Estas son las imagenes cargadas en la biblioteca del negocio:
@@ -777,16 +785,402 @@ function runTool(call) {
 // como "vendido": eso demostro ser poco confiable en la practica (el cliente
 // seguia recibiendo la pregunta de venta despues del cierre porque la etapa
 // nunca se marcaba). En cambio, miramos el propio texto que el bot ya
-// generó: el mensaje de cierre siempre tiene que mencionar el pago contra
+// genero: el mensaje de cierre siempre tiene que mencionar el pago contra
 // entrega y la guia de Tealca (instrucciones de arriba), asi que buscamos
-// esas señales directamente, sin acentos y en minuscula para no fallar por
+// esas senales directamente, sin acentos y en minuscula para no fallar por
 // mayusculas/tildes.
-function isClosingMessage(text) {
-  const norm = String(text || '')
+//
+// FASE (correccion cierre-flexible, v2): el solo texto NO alcanza, y
+// tampoco alcanza con revisar UN solo dato. La v1 de esta correccion exigia
+// solo nombre+cedula+telefono ya confirmados en la ficha (knownCustomer),
+// pero eso tiene un agujero real: un CLIENTE ANTIGUO que ya compro antes
+// tiene esos tres datos guardados en la ficha PARA SIEMPRE, asi que una
+// pregunta suya de pura cobertura ("hacen envios a Barinas?", sin ningun
+// interes de compra nuevo) igual pasaba la validacion vieja si el texto del
+// bot mencionaba tealca/pago/guia. Ahora se exige, ademas del texto, que
+// esten presentes las senales de un pedido armado DE VERDAD en ESTA
+// conversacion (no solo datos historicos del cliente):
+//   1. identidad del cliente (nombre+cedula+telefono, en la ficha O recien
+//      escritos por el cliente en esta conversacion),
+//   2. producto identificado (catalogo vinculado a la conversacion, o ya en
+//      la ficha),
+//   3. cantidad mencionada por el CLIENTE (no alcanza con que el bot la
+//      repita en el resumen),
+//   4. modalidad/destino resuelto (ciudad ya conocida, agencia ya cargada
+//      en la ficha, o mencion explicita de agencia/domicilio/tienda en la
+//      conversacion reciente),
+//   5. algo mas que un "si"/sticker suelto en los mensajes recientes del
+//      cliente (aceptacion no ambigua: tiene que haber escrito algo de
+//      sustancia en esta conversacion, no solo una afirmacion vacia).
+// Ver evaluateOrderCompleteness mas abajo para el detalle de cada chequeo.
+//
+// LIMITACION HONESTA (no se resuelve sin rehacer el modelo de datos, ver
+// H08 en docs/contratos.md): esto sigue sin ser un objeto de "pedido"
+// estructurado con su propio total en Bs confirmado explicitamente turno a
+// turno por el cliente; se infiere sobre una ventana de los ULTIMOS
+// mensajes del cliente (recentUserText) mas lo que ya haya en la ficha, no
+// sobre un pedido completo persistido campo por campo. En conversaciones
+// normales (el cierre llega pocos turnos despues de cada dato) esto cubre
+// el caso real reportado; en conversaciones MUY largas donde la cantidad o
+// la ciudad se dijeron muy al principio y quedaron fuera de esa ventana,
+// podria no reconocerlas (falso NEGATIVO: el pedido no cierra solo y
+// necesitaria intervencion humana) -- nunca al reves (nunca cierra de mas
+// por este motivo).
+// FASE (correccion validacion-cierre): la version anterior solo reconocia
+// digitos CONSECUTIVOS ("\d{6,11}"), asi que un telefono escrito como la
+// gente realmente lo escribe -- con "+58" adelante, o con espacios/guiones/
+// puntos separando grupos ("+58 412-123-4567", "0412 123 4567",
+// "12.345.678") -- no matcheaba nada y quedaba sin detectar. Ahora se
+// permite un separador razonable (espacio, guion, punto, parentesis) DENTRO
+// de un mismo numero, y se limpia antes de contar digitos. El limite de
+// longitud del "medio" (13 caracteres) evita, en la practica, que dos
+// numeros distintos separados solo por un espacio (sin ninguna palabra
+// entre medio) se fusionen en un solo token larguisimo -- ese caso puntual
+// (cedula y telefono pegados con un solo espacio, sin "y"/"telefono"/coma
+// entre medio) sigue siendo una limitacion conocida, no cubierta, pero es
+// un formato que casi nunca aparece en una conversacion real (la gente
+// suele separar esos datos con la palabra que los identifica, o con una
+// coma/salto de linea de por medio).
+function looksLikeCustomerDataProvided(text) {
+  const tokens = (String(text || '').match(/\+?\d[\d\s.\-()]{4,13}\d/g) || [])
+    .map((m) => m.replace(/\D/g, ''))
+    // +58 delante de un numero de 11+ digitos es el codigo de pais de
+    // Venezuela (ej. "+584121234567"): se descarta para que el resto se
+    // siga midiendo igual que el formato local (0412..., 10-11 digitos).
+    .map((d) => (d.startsWith('58') && d.length > 10 ? d.slice(2) : d));
+  const hasCedula = tokens.some((d) => d.length >= 6 && d.length <= 9);
+  const hasTelefono = tokens.some((d) => d.length >= 10 && d.length <= 11);
+  return hasCedula && hasTelefono;
+}
+
+const QUANTITY_WORD_RE = /\b(un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/i;
+// Cantidad: el cliente la puede dar como numero junto a la unidad ("2
+// frascos", "3 potes"), como palabra ("dos frascos"), o como un numero
+// SOLO en su propio mensaje (respuesta tipica a "cuantos queres?": el
+// cliente contesta nada mas que "2"). Este ultimo caso se restringe a un
+// mensaje corto (nada mas que el numero, sin texto alrededor) para no
+// confundirlo con un fragmento de telefono o de cedula sueltos en medio de
+// un mensaje mas largo.
+function looksLikeQuantityMentioned(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/^\d{1,2}$/.test(t) && Number(t) >= 1 && Number(t) <= 30) return true;
+  if (/\b([1-9]|1\d|2\d|30)\b\s*(frasco|unidad|pote|combo|caja)/i.test(t)) return true;
+  if (QUANTITY_WORD_RE.test(t) && /(frasco|unidad|pote|combo|caja)/i.test(t)) return true;
+  // Ademas: un numero SUELTO (1 o 2 digitos, con limite de palabra a los dos
+  // lados) en cualquier parte del mensaje -- cubre el caso muy comun de
+  // "quiero 2", "dale, 2", "mejor 3", sin la palabra "frasco"/"unidad" al
+  // lado. Antes de buscarlo se sacan del texto los tramos con forma de
+  // cedula/telefono (mismo patron que looksLikeCustomerDataProvided), para
+  // no confundir los primeros digitos de una cedula ("12.345.678" -> "12")
+  // con una cantidad. Tambien se saca una referencia a una AGENCIA por
+  // numero ("la agencia 1", "la 1", "opcion 2"): eso es una seleccion de
+  // destino (ver looksLikeAgencySelected), no una cantidad de producto -- sin
+  // esto, "la agencia 1 me sirve" contaba erroneamente como "cantidad: 1".
+  const sinIdentidad = t
+    .replace(/\+?\d[\d\s.\-()]{4,13}\d/g, ' ')
+    .replace(/\b(la\s+)?agencia\s*(numero\s*)?\d+\b/gi, ' ')
+    .replace(/\b(la|opcion|opci[oó]n)\s*(numero\s*)?\d+\b/gi, ' ');
+  if (/\b([1-9]|1\d|2\d|30)\b/.test(sinIdentidad)) return true;
+  return false;
+}
+
+// FASE (correccion validacion-cierre v3, punto 1 del pedido): saber la
+// CIUDAD del cliente (knownCity) NO es lo mismo que tener el DESTINO
+// resuelto. La v2 de esta validacion trataba knownCity solo como prueba
+// suficiente de "modalidad/destino resuelto", pero eso deja un agujero
+// real: el bot puede saber la ciudad (viene de la ficha, o del primer
+// mensaje) sin que el cliente haya elegido TODAVIA una agencia puntual (si
+// retira en agencia) ni haya dado una direccion de verdad (si es domicilio
+// en Caracas). Ahora "destino resuelto" exige evidencia mas especifica:
+//   - Agencia: una agencia YA CARGADA en la ficha (cardAgencia, que solo se
+//     llena cuando el cliente confirma cual le queda bien -- ver "COMO SE
+//     ARMA EL PEDIDO" paso 3 en el prompt), o una seleccion inequivoca de
+//     una agencia concreta en el texto reciente del cliente (por numero de
+//     lista, por nombre/zona puntual, o "esa me sirve"/"la de tal sector").
+//   - Domicilio: una direccion con datos reales (calle/avenida, sector,
+//     numero, punto de referencia), no solo la palabra "domicilio" suelta.
+// Simplemente decir "estoy en Caracas" o que knownCity ya este cargada NO
+// alcanza mas por si solo.
+function looksLikeAgencySelected(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return false;
+  // Referencia a una agencia de la lista numerada que el bot ya mando antes
+  // (ver AGENCIAS Y COBERTURA en el prompt: "la 1", "la segunda", "opcion 2").
+  if (/\b(la|opcion|opci[oó]n)\s*(numero\s*)?\d+\b/.test(t)) return true;
+  if (/\bagencia\s*(numero\s*)?\d+\b/.test(t)) return true;
+  if (/\bla\s+(primera|segunda|tercera|cuarta|quinta|sexta)\b/.test(t)) return true;
+  // Confirmacion directa de una agencia puntual por nombre/zona (ej. "la
+  // agencia de La Candelaria", "la de El Junquito me queda bien").
+  if (/\bagencia\s+(de|en)\s+\S+/.test(t)) return true;
+  if (/\b(esa|esta)\s+(agencia\s+)?(me\s+(queda|sirve|conviene)|est[aá]\s+bien)\b/.test(t)) return true;
+  return false;
+}
+
+const ADDRESS_DETAIL_RE = /\b(avenida|av\.|calle|carrera|urbanizaci[oó]n|urb\.|sector|edificio|edif\.|apto|apartamento|casa\s*(n[uú]mero|#|\d)|residencia|torre|manzana|vereda|punto de referencia|frente a|al lado de|cerca de|entre\s+\S+\s+y\s+\S+)/i;
+function looksLikeDeliveryAddressGiven(text) {
+  return ADDRESS_DETAIL_RE.test(String(text || ''));
+}
+
+// Chequeo laxo de TEXTO usado solo para casos donde ni cardAgencia ni una
+// direccion detallada estan presentes todavia, pero el cliente al menos
+// nombro la modalidad (agencia/domicilio/retiro/tienda propia): esto ya no
+// alcanza por si solo para marcar el destino como "resuelto" (ver arriba),
+// pero se mantiene exportado porque otras partes del codigo/tests lo usan
+// para detectar que el cliente esta hablando de la logistica del pedido.
+function looksLikeDeliveryModalityMentioned(text) {
+  return /\bagencia\b|\bdomicilio\b|tienda propia|\bretiro\b|direccion exacta|punto de referencia/i.test(String(text || ''));
+}
+
+// Aceptacion no ambigua: el pedido original de esta revision es "no
+// interpretar... un 'si' ambiguo como confirmacion del pedido". La v2 de
+// esta validacion solo rechazaba un "si"/"ok"/"dale" SUELTO (un solo
+// token), pero eso deja pasar otros dos casos reales que el negocio pidio
+// cubrir explicitamente (punto 2 de la segunda revision):
+//   1. Un mensaje con VARIAS palabras que sigue sin ser una aceptacion de
+//      compra: una pregunta de precio ("cuanto cuestan dos?"), o cualquier
+//      pregunta suelta que no confirma nada todavia.
+//   2. Un rechazo o retractacion EXPLICITA ("no me lo envies todavia",
+//      "antes queria dos, ahora solo estoy consultando"): esto tiene que
+//      bloquear el cierre aunque haya datos de un pedido mas atras en la
+//      misma ventana de mensajes recientes (ver evaluateOrderCompleteness).
+// Ninguno de los dos casos es "mas de un token", que era el unico criterio
+// de la v2; hace falta buscarlos explicitamente.
+const AMBIGUOUS_TOKENS = new Set(['si', 'ok', 'okay', 'dale', 'listo', 'bueno', 'vale', 'bien', 'sip']);
+
+function normalizeForMatch(text) {
+  return String(text || '')
+    .trim()
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  return norm.includes('tealca') && norm.includes('pago') && norm.includes('guia');
+    .replace(/[\u0300-\u036f]/g, '')
+    // El "\u00bf" de apertura no aporta nada para estos regex (todos anclan en el
+    // contenido, no en el signo de apertura) y si se deja, un regex anclado
+    // con ^ nunca matchea una pregunta real ("\u00bfcuanto cuesta...?"). Se saca
+    // aca, en un solo lugar, en vez de tener que acordarse de permitirlo en
+    // cada regex nuevo.
+    .replace(/\u00bf/g, '');
+}
+
+// Rechazo o retractacion explicita: si aparece en la ventana de mensajes
+// recientes del cliente, bloquea la aceptacion no ambigua sin importar que
+// otra cosa haya dicho antes en esa misma ventana. Se prefiere este falso
+// NEGATIVO (el pedido no cierra solo, hace falta que un humano lo revise)
+// antes que cerrar un pedido que el cliente acaba de frenar o retractar.
+const HOLD_OR_RETRACT_RE =
+  /\bno\s+(me\s+lo\s+)?(mandes|env[i\u00ed]es|proces[a-z]*|confirmes|cierres|pidas)\b|\btodav[i\u00ed]a\s+no\b|\ba[u\u00fa]n\s+no\b|\bespera(te)?\b|\bsolo\s+(estoy\s+)?consultando\b|\bsolo\s+(quiero|queria)\s+(saber|preguntar)\b|\bsolo\s+(era|estoy)\s+pregunt\w*|\bcancela(r|lo|me)?\b/i;
+
+// Pregunta pura sobre precio/costo, sin ninguna se\u00f1al de aceptacion: "y
+// cuanto cuestan dos?", "cuanto sale el combo?". Si el UNICO mensaje
+// reciente del cliente es esto, no hay aceptacion todavia, solo consulta.
+const PURE_PRICE_QUESTION_RE = /^(y\s+)?(cuanto|cu\u00e1nto)\s+(cuesta|cuestan|vale|valen|sale|salen|es|son)\b.*\?\s*$/i;
+
+function looksLikeHoldOrRetraction(text) {
+  return HOLD_OR_RETRACT_RE.test(normalizeForMatch(text));
+}
+
+function looksLikeUnambiguousEngagement(text) {
+  const norm = normalizeForMatch(text);
+  if (!norm || norm === '[sticker]') return false;
+  if (looksLikeHoldOrRetraction(text)) return false;
+  const tokens = norm.replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1 && AMBIGUOUS_TOKENS.has(tokens[0])) return false;
+  if (PURE_PRICE_QUESTION_RE.test(norm.trim())) return false;
+  return true;
+}
+
+// FASE (correccion validacion-cierre v3, punto 2): un "si"/"dale" SUELTO
+// (un solo token ambiguo) SI cuenta como aceptacion cuando responde
+// DIRECTAMENTE a una pregunta de confirmacion explicita que el bot acaba de
+// hacer (el resumen del pedido, preguntando "\u00bfconfirmas?", "\u00bfasi queda
+// bien?", etc). Ahi el "si" no es ambiguo en contexto, aunque en aislamiento
+// lo sea. Esto es lo que el negocio pidio probar como "aceptacion valida
+// contextual despues del resumen".
+const CONFIRMATION_REQUEST_RE =
+  /\bconfirmas\b|\bconfirmame\b|\bconfirmamos\b|\bconfirmemos\b|\bte\s+parece\b|\bas[i\u00ed]\s+(qued(a|amos)|est[a\u00e1]\s+bien|te\s+lo\s+dejo)\b|\bcerramos\s+as[i\u00ed]\b|\bproced(o|emos)\s+(con|as[i\u00ed])\b|\bser[i\u00ed]a\s+(tu\s+pedido|entonces)\b|\bqued(a|arias)\s+as[i\u00ed]\b/i;
+
+function looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage) {
+  if (!CONFIRMATION_REQUEST_RE.test(normalizeForMatch(lastAssistantText))) return false;
+  const norm = normalizeForMatch(lastUserMessage);
+  if (!norm || norm === '[sticker]') return false;
+  if (looksLikeHoldOrRetraction(lastUserMessage)) return false;
+  if (PURE_PRICE_QUESTION_RE.test(norm.trim())) return false;
+  const tokens = norm.replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
+  return tokens.length >= 1;
+}
+
+// FASE (correccion validacion-cierre v3, punto 4): saber el PRODUCTO
+// vinculado y la CANTIDAD no alcanza cuando ese mismo producto "base" tiene
+// mas de una presentacion activa en el catalogo (ej. "Shilajit Gomitas" y
+// "Shilajit Resina", o dos tama\u00f1os distintos). Si hay mas de una
+// presentacion posible con esa misma palabra base y el cliente nunca
+// escribio ninguna palabra distintiva de alguna de ellas, la presentacion
+// se trata como NO confirmada (pudo haber quedado vinculada por un trigger
+// generico, no por una eleccion real del cliente).
+function normalizeProductWords(name) {
+  return normalizeForMatch(name).split(/\s+/).filter(Boolean);
+}
+
+function findProductPresentationSiblings(knownProductName) {
+  const target = String(knownProductName || '').trim();
+  if (!target) return [];
+  let products = [];
+  try {
+    products = loadProducts().filter((p) => p.active !== false);
+  } catch (err) {
+    products = [];
+  }
+  const targetBase = normalizeProductWords(target)[0];
+  if (!targetBase) return [];
+  return products.filter((p) => normalizeProductWords(p.name)[0] === targetBase);
+}
+
+function looksLikePresentationConfirmed(knownProductName, recentUserText) {
+  const siblings = findProductPresentationSiblings(knownProductName);
+  if (siblings.length <= 1) return true; // sin ambiguedad: una sola presentacion con esa base
+  const textNorm = normalizeForMatch(recentUserText);
+  return siblings.some((p) => {
+    const distintivas = normalizeProductWords(p.name).slice(1);
+    return distintivas.some((w) => w.length > 2 && textNorm.includes(w));
+  });
+}
+
+// FASE (correccion validacion-cierre v3, punto 4): "producto vinculado +
+// cantidad" tampoco alcanza si el mensaje de cierre no le dice al cliente un
+// TOTAL real en bolivares. El prompt actual (ver "Si te dice una cantidad
+// sin precio confirmado, nunca inventes ni calcules el precio total") NO
+// tiene un paso previo de "cotizar" antes del cierre: el total recien
+// aparece, si aparece, en el propio mensaje de cierre (el resumen final).
+// Por eso este chequeo mira el TEXTO DE CIERRE que se esta por mandar (no
+// una ventana de mensajes anteriores, que en el flujo real de este bot
+// normalmente no tiene ningun monto): si ese texto no menciona ningun monto
+// en Bs, el cierre se bloquea -- un pedido nunca se cierra sin que el
+// cliente sepa cuanto va a pagar. No intenta verificar que el numero sea
+// matematicamente exacto (precio x cantidad): eso requeriria un objeto de
+// pedido estructurado que hoy no existe (ver H08 en docs/contratos.md); esto
+// prueba que ALGUN monto real se puso sobre la mesa en el cierre, no que sea
+// el correcto -- limitacion documentada, no silenciosa. La "aceptacion" del
+// total queda cubierta por el chequeo de aceptacion_no_ambigua (el cliente
+// ya dio su ok DESPUES de conocer el producto/cantidad/destino que ese
+// mismo total describe); una confirmacion puntual del MONTO en si, turno a
+// turno, necesitaria el mismo objeto de pedido estructurado de H08.
+const MONEY_MENTION_RE = /\b\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?\s*(bs\.?|bol[i\u00ed]vares)\b|\bbs\.?\s*\d/i;
+function looksLikeTotalCommunicated(closingText) {
+  return MONEY_MENTION_RE.test(String(closingText || ''));
+}
+
+// Junta los chequeos de arriba. Devuelve {complete, missing}: missing lista,
+// en espanol, que le falta (util para logs/depuracion y para los tests,
+// nunca se le muestra al cliente asi tal cual -- ver
+// buildIncompleteOrderNotice mas abajo para la version que si se manda).
+function evaluateOrderCompleteness({
+  text,
+  knownCustomer,
+  recentUserText,
+  knownProduct,
+  knownCity,
+  cardAgencia,
+  lastAssistantText,
+  lastUserMessage,
+} = {}) {
+  const missing = [];
+  const nombre = String(knownCustomer && knownCustomer.nombre || '').trim();
+  const cedula = String(knownCustomer && knownCustomer.cedula || '').trim();
+  const telefono = String(knownCustomer && knownCustomer.telefono || '').trim();
+  const identidadPorFicha = Boolean(nombre && cedula && telefono);
+  const identidadPorTexto = looksLikeCustomerDataProvided(recentUserText);
+  if (!identidadPorFicha && !identidadPorTexto) missing.push('identidad_cliente');
+
+  if (!String(knownProduct || '').trim()) {
+    missing.push('producto');
+  } else if (!looksLikePresentationConfirmed(knownProduct, recentUserText)) {
+    missing.push('presentacion');
+  }
+
+  // OJO: la cantidad y la modalidad/destino se buscan SOLO en lo que
+  // escribio el CLIENTE (recentUserText), nunca en "text" (la respuesta que
+  // el propio bot esta por mandar). El resumen de cierre casi siempre
+  // repite la cantidad y menciona la agencia/domicilio por su cuenta -- si
+  // se aceptara eso como prueba, el bot podria "inventar" un pedido
+  // completo con solo escribir un resumen convincente, exactamente el
+  // problema que esta validacion tiene que evitar.
+  if (!looksLikeQuantityMentioned(recentUserText)) missing.push('cantidad');
+
+  // Ver looksLikeAgencySelected/looksLikeDeliveryAddressGiven arriba: ya no
+  // alcanza con knownCity sola (punto 1 de la segunda revision).
+  const destinoYaResuelto =
+    Boolean(String(cardAgencia || '').trim()) ||
+    looksLikeAgencySelected(recentUserText) ||
+    looksLikeDeliveryAddressGiven(recentUserText);
+  if (!destinoYaResuelto) missing.push('modalidad_destino');
+
+  const aceptacionOk =
+    looksLikeUnambiguousEngagement(recentUserText) ||
+    looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage);
+  if (!aceptacionOk) missing.push('aceptacion_no_ambigua');
+
+  if (!looksLikeTotalCommunicated(text)) missing.push('total_comunicado');
+
+  return { complete: missing.length === 0, missing };
+}
+
+// FASE (correccion validacion-cierre v3, punto 3): antes, el UNICO gatillo
+// para siquiera evaluar un cierre era que el texto trajera literalmente las
+// tres palabras "tealca"+"pago"+"guia" -- eso es fragil y depende 100% de
+// como este redactado el prompt (ya senalado como problema en la primera
+// revision). Un pedido de DELIVERY (domicilio en Caracas) puede cerrarse
+// con un texto que nunca menciona Tealca/agencia/guia (el mensajero no pasa
+// por una agencia), y ese cierre real quedaria sin detectar. Ahora el
+// gatillo es ESTRUCTURAL: el texto tiene que (a) no ser una pregunta (el
+// prompt dice que el mensaje de cierre nunca termina en pregunta), y (b)
+// mencionar tanto una forma de pago como un resumen de pedido o una senal
+// de seguimiento/entrega -- sin exigir palabras puntuales como "Tealca" o
+// "guia", que son de UN solo canal de entrega.
+function looksLikeClosingSummaryText(text) {
+  const raw = String(text || '');
+  if (raw.includes('?') || raw.includes('\u00bf')) return false;
+  const norm = normalizeForMatch(raw);
+  const mentionsPayment = /contra entrega|pago (movil|anticipado)|\befectivo\b|\btransferencia\b/.test(norm);
+  if (!mentionsPayment) return false;
+  const mentionsOrderRecap =
+    /tu pedido|el pedido|pedido de \d|pedido queda|te lo (llevamos|enviamos|mandamos|entregamos)|va (a|para|camino)/.test(norm);
+  const mentionsTrackingOrPickup =
+    /\bguia\b|\btealca\b|\bagencia\b|en camino|te aviso cuando|cuando (llegue|este listo)|mensajero/.test(norm);
+  return mentionsOrderRecap || mentionsTrackingOrPickup;
+}
+
+function isClosingMessage(text, ctx) {
+  if (!looksLikeClosingSummaryText(text)) return false;
+  return evaluateOrderCompleteness(Object.assign({ text: text }, ctx || {})).complete;
+}
+
+// Traduce la lista tecnica de "missing" de evaluateOrderCompleteness a un
+// mensaje que SI se le puede mandar al cliente (ver punto 6 de la segunda
+// revision: nunca decirle "confirmado"/cerrar el pedido si el sistema no lo
+// va a guardar como tal). Nunca se usa como sustituto de una respuesta real
+// del modelo: solo se manda cuando el propio texto del modelo YA sonaba a
+// cierre (ver looksLikeClosingSummaryText) pero la validacion estructural
+// dice que en realidad falta algo.
+const MISSING_LABELS = {
+  identidad_cliente: 'confirmar tu nombre, cedula y telefono',
+  producto: 'confirmar que producto queres',
+  presentacion: 'confirmar que presentacion queres',
+  cantidad: 'confirmar cuantos queres',
+  modalidad_destino: 'confirmar como lo vas a recibir (agencia puntual o direccion)',
+  aceptacion_no_ambigua: 'que me confirmes el pedido',
+  total_comunicado: 'confirmarte el monto total',
+};
+
+function buildIncompleteOrderNotice(missing) {
+  const labels = (missing || []).map((k) => MISSING_LABELS[k]).filter(Boolean);
+  if (!labels.length) {
+    return 'Todavia me falta confirmar un par de cosas antes de dejar tu pedido armado, ya te aviso cuales. \ud83d\ude4f';
+  }
+  const lista =
+    labels.length === 1
+      ? labels[0]
+      : `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
+  return `Vamos bien, pero antes de dejar tu pedido armado del todo me falta ${lista}. \ud83d\ude4f`;
 }
 
 // Red de seguridad igual en espiritu a isClosingMessage: el prompt le pide al
@@ -925,6 +1319,58 @@ function scrubGenial(text) {
   });
 }
 
+// Red de seguridad de codigo: el negocio reporto encontrar, en las
+// plantillas/prompts de PRODUCTO configurados a mano en el panel (que viven
+// en products.json en el disco de produccion, fuera de este repositorio: no
+// hay forma de leerlos ni editarlos desde el codigo), frases como "la
+// energia se siente en los primeros dias" o "con uno solo te quedas a medio
+// camino" -- promesas de resultado / insinuaciones de que hace falta
+// comprar mas que no se pueden sostener (ver el pedido: "no prometas
+// resultados en los primeros dias ni afirmes que un frasco te deja a medio
+// camino"). Como esas plantillas de producto no estan en este repo (viven
+// en la config del panel), esto se corrige con un FILTRO DE CODIGO que
+// corre sobre CUALQUIER respuesta final, sin importar si la frase vino del
+// prompt de producto, de la base de conocimiento, o de que el modelo la
+// haya improvisado por su cuenta: si aparece, se saca la oracion completa
+// que la contiene (nunca se manda a medias ni se reemplaza por otra
+// afirmacion inventada).
+const UNVERIFIED_RESULT_CLAIM_RE =
+  /en\s+los?\s+primeros?\s+d[ií]as?\b.{0,40}\b(sient|not|efect|energ|result)|(?:sient|not|efect|energ|result).{0,40}\ben\s+los?\s+primeros?\s+d[ií]as?\b|a\s+medio\s+camino|te\s+deja\s+a\s+medias|resultados?\b.{0,25}\bdesde\s+el\s+primer\s+d[ií]a|desde\s+el\s+primer\s+d[ií]a\b.{0,25}\bresultados?/i;
+
+// Mensaje de repuesto SOLO para el caso limite de que la respuesta entera
+// (todas las oraciones/clausulas) fuera la promesa no sostenible: nunca se
+// puede volver a mostrar el texto original en ese caso (seria mandar
+// exactamente lo que se queria evitar), asi que se manda esto en su lugar.
+const UNVERIFIED_RESULT_CLAIM_FALLBACK = 'Eso varia de persona a persona, asi que no te puedo prometer un tiempo exacto 🙏';
+
+function scrubUnverifiedResultClaims(text) {
+  if (!text) return text;
+  // Primero se intenta sacar solo la CLAUSULA puntual (separada por comas),
+  // para no perder el resto de una oracion mas larga que si tiene contenido
+  // valido (ej. "Con uno solo te quedas a medio camino, mejor llevate dos"
+  // -> "mejor llevate dos"). Si una oracion entera es una sola clausula
+  // (no tiene coma) y matchea, se saca la oracion completa.
+  const sentences = String(text).split(/(?<=[.!?])\s+/);
+  const keptSentences = [];
+  let removedAlgo = false;
+  for (const sentence of sentences) {
+    if (!UNVERIFIED_RESULT_CLAIM_RE.test(sentence)) {
+      keptSentences.push(sentence);
+      continue;
+    }
+    removedAlgo = true;
+    const clauses = sentence.split(/,\s*/);
+    const keptClauses = clauses.filter((c) => !UNVERIFIED_RESULT_CLAIM_RE.test(c));
+    if (keptClauses.length) keptSentences.push(keptClauses.join(', '));
+  }
+  if (!removedAlgo) return text; // no habia nada que sacar
+  const result = keptSentences.join(' ').trim();
+  // Si no queda NADA (la respuesta entera era, clausula por clausula, la
+  // promesa no sostenible), se manda el mensaje de repuesto: nunca se puede
+  // volver al texto original aca, seria mandar justo lo que se queria evitar.
+  return result || UNVERIFIED_RESULT_CLAIM_FALLBACK;
+}
+
 // Red de seguridad de codigo: si el modelo NO llamo a buscar_agencias_por_zona
 // en este turno (por eso se usa desde la rama donde no hubo tool_calls) pero
 // igual escribio algo con forma de lista de agencias (numerada, mencionando
@@ -996,7 +1442,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
 
   if (!toolCalls || !toolCalls.length) {
     console.log('[agency-guard] el modelo NO llamo ninguna herramienta este turno. userText=', userText, 'knownCity=', knownCity);
-    const text = guardAgainstUnverifiedAgencyList(scrubFakeImageLinks(scrubGenial(responseMessage.content.trim())), knownCity, userText);
+    const text = guardAgainstUnverifiedAgencyList(scrubUnverifiedResultClaims(scrubFakeImageLinks(scrubGenial(responseMessage.content.trim()))), knownCity, userText);
     return { text, images: [] };
   }
   console.log('[agency-guard] el modelo SI llamo herramienta(s):', toolCalls.map((c) => c.function.name).join(', '));
@@ -1026,7 +1472,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
     tools: TOOLS,
   });
 
-  let text = scrubFakeImageLinks(scrubGenial(followUp.choices[0].message.content.trim()));
+  let text = scrubUnverifiedResultClaims(scrubFakeImageLinks(scrubGenial(followUp.choices[0].message.content.trim())));
 
   // Red de seguridad de codigo: si en este turno se busco una lista de
   // agencias por ciudad/estado y la herramienta encontro mas de una, pero el
@@ -1071,6 +1517,20 @@ module.exports = {
   buildSystemPrompt,
   catalogText,
   isClosingMessage,
+  looksLikeClosingSummaryText,
+  buildIncompleteOrderNotice,
+  scrubUnverifiedResultClaims,
+  evaluateOrderCompleteness,
+  looksLikeCustomerDataProvided,
+  looksLikeQuantityMentioned,
+  looksLikeDeliveryModalityMentioned,
+  looksLikeAgencySelected,
+  looksLikeDeliveryAddressGiven,
+  looksLikeUnambiguousEngagement,
+  looksLikeHoldOrRetraction,
+  looksLikeContextualShortAcceptance,
+  looksLikePresentationConfirmed,
+  looksLikeTotalCommunicated,
   looksLikeEmptyDataRequest,
   mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,

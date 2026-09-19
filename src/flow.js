@@ -24,6 +24,9 @@ const {
   getAssistantReply,
   applySplitPolicy,
   isClosingMessage,
+  looksLikeClosingSummaryText,
+  evaluateOrderCompleteness,
+  buildIncompleteOrderNotice,
   looksLikeEmptyDataRequest,
   mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,
@@ -734,6 +737,75 @@ async function processReply(from) {
       finalReply = strippedClose === null ? POST_CLOSE_REMINDER : strippedClose;
     }
 
+    // FASE (correccion validacion-cierre v3, punto 5): la version anterior
+    // usaba una ventana FIJA de los ultimos 6 mensajes del cliente para
+    // decidir si un cierre era real. Eso tenia un problema real en las dos
+    // direcciones: (a) en una conversacion mas larga, un dato real del
+    // pedido actual (la cantidad, la ciudad) dicho hace mas de 6 mensajes se
+    // "perdia" solo y el cierre valido no se reconocia (falso negativo
+    // silencioso, que el negocio dijo explicitamente que no acepta como
+    // solucion); y (b) si simplemente se agrandara la ventana a lo bruto, un
+    // pedido NUEVO podria heredar la cantidad o la aceptacion de una compra
+    // YA CERRADA anterior en la misma conversacion (reutilizar datos de una
+    // compra vieja para "inflar" una nueva, el error contrario).
+    //
+    // La solucion: en vez de un numero fijo de mensajes, se busca el ULTIMO
+    // mensaje del bot que funciona como resumen de cierre de una compra
+    // anterior (ver looksLikeClosingSummaryText en ai.js) y se toma TODO lo
+    // que el cliente escribio DESPUES de ese punto -- sin tope arbitrario de
+    // mensajes, pero nunca cruzando para atras del cierre anterior. Si
+    // todavia no hubo ningun cierre en esta conversacion, se toma desde el
+    // principio (es la primera compra, no hay nada que excluir).
+    let cierreAnteriorIdx = -1;
+    for (let i = fullHistory.length - 1; i >= 0; i--) {
+      const m = fullHistory[i];
+      if (m.role === 'assistant' && looksLikeClosingSummaryText(m.content)) {
+        cierreAnteriorIdx = i;
+        break;
+      }
+    }
+    const segmentoPedidoActual = fullHistory.slice(cierreAnteriorIdx + 1);
+    const recentUserText = segmentoPedidoActual
+      .filter((m) => m.role === 'user')
+      .map((m) => m.content)
+      .join(' ');
+    const closingCtx = {
+      knownCustomer,
+      recentUserText,
+      // El producto puede venir del catalogo (gatillo de intro, linkedProductId)
+      // O de la ficha (el clasificador lo detecto en la charla libre, sin que
+      // haya un gatillo de producto formal): cualquiera de los dos cuenta
+      // como "producto identificado" para la validacion de cierre.
+      knownProduct: knownProduct || session.card?.producto || null,
+      knownCity,
+      cardAgencia: session.card?.agencia || null,
+      // Para reconocer una aceptacion corta ("si"/"dale") como valida SOLO
+      // cuando responde de verdad a una pregunta de confirmacion del bot
+      // (ver looksLikeContextualShortAcceptance en ai.js): lastAssistantText
+      // es el mensaje que el bot mando ANTES de este turno (el que el
+      // cliente esta contestando ahora con userText).
+      lastAssistantText: session.lastAssistantText || null,
+      lastUserMessage: userText,
+    };
+    const isNewClose = !orderClosed && isClosingMessage(reply, closingCtx);
+
+    // FASE (correccion validacion-cierre v3, punto 6): si el propio texto
+    // del modelo YA suena a un cierre de pedido (resumen + pago + entrega,
+    // ver looksLikeClosingSummaryText) pero la validacion estructural de
+    // arriba dice que en realidad todavia falta algo real, NUNCA se le
+    // manda ese texto al cliente tal cual: quedaria diciendole "confirmado"
+    // mientras el sistema NO lo guarda como pedido cerrado, una
+    // inconsistencia bot-dice-cerrado / sistema-sigue-abierto que el
+    // negocio pidio explicitamente evitar. Se reemplaza por un aviso
+    // honesto de que falta confirmar tal o cual dato, ANTES de mandarlo
+    // (esta red de seguridad no sirve de nada si corre despues del envio).
+    if (!orderClosed && looksLikeClosingSummaryText(finalReply)) {
+      const completeness = evaluateOrderCompleteness({ ...closingCtx, text: finalReply });
+      if (!completeness.complete) {
+        finalReply = buildIncompleteOrderNotice(completeness.missing);
+      }
+    }
+
     // Ver NOT_ARRIVED_CLAIM_RE arriba: ultima red de seguridad antes de
     // mandar, para que un pedido que ya llego (o ya se entrego) nunca salga
     // diciendo que todavia falta que llegue. OJO: se vuelve a leer la etapa
@@ -786,7 +858,6 @@ async function processReply(from) {
     if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || formFollowUpSent)) {
       patch.orderDataRequested = true;
     }
-    const isNewClose = !orderClosed && isClosingMessage(reply);
     if (isNewClose) {
       patch.orderClosed = true;
       // El cierre del pedido ES la venta: la marcamos como "vendido" en el
