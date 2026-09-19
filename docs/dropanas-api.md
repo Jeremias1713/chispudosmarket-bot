@@ -10,8 +10,8 @@ La integración implementada en este repositorio es deliberadamente de solo lect
 - Detecta después pedidos nuevos y cambios relevantes, sin duplicarlos.
 - Cruza primero por teléfono exacto y conserva como revisión manual los casos ambiguos.
 - Propone guías y cambios de seguimiento en el panel antes de enviar mensajes.
-- Descarga la etiqueta PDF original de Tealca desde Dropanas, comprueba que
-  contenga el número de guía esperado y la convierte en PNG para WhatsApp.
+- Descarga la etiqueta oficial desde `GET /ordenes/{id}/guia.pdf`, comprueba
+  que contenga la guía esperada y la convierte en PNG para WhatsApp.
 - Permite probar esa plantilla completa en el número del negocio sin tocar la
   conversación del cliente.
 - Incluye un modo de envío completamente automático, apagado por defecto, que
@@ -27,10 +27,8 @@ La integración implementada en este repositorio es deliberadamente de solo lect
 3. Cargue el token nuevo en `DROPANAS_API_TOKEN`.
 4. Active `DROPANAS_API_ENABLED=true` y `DROPANAS_API_READ_ONLY_ACK=true`.
 5. Deje `DROPANAS_API_POLL_ENABLED=false` al principio.
-6. Cree una cuenta web de Dropanas dedicada y de permisos mínimos para leer
-   pedidos/etiquetas. Guarde su correo y clave únicamente en los secretos de
-   Render (`DROPANAS_GUIDE_EMAIL` y `DROPANAS_GUIDE_PASSWORD`) y active
-   `DROPANAS_GUIDE_ENABLED=true`.
+6. Active `DROPANAS_GUIDE_ENABLED=true`. La etiqueta usa el mismo
+   `DROPANAS_API_TOKEN`; ya no necesita credenciales del panel web.
 7. Abra el panel y pulse **Consultar API (solo lectura)**. La primera consulta
    debe indicar que creó la línea base y debe proponer cero avisos.
 8. Después de que aparezca una guía Tealca nueva, use **Probar** para enviarla
