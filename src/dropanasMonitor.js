@@ -19,6 +19,7 @@ function blankState() {
     lastSyncAt: null,
     lastSuccessAt: null,
     lastError: null,
+    lastWarning: null,
     mode: null,
     snapshots: { orders: {}, novelties: {} },
     pending: [],
@@ -126,9 +127,19 @@ async function sync(options = {}) {
     try {
       const [orderResult, noveltyResult] = await Promise.all([
         api.fetchOrders(options),
-        api.fetchNovelties(options),
+        api.fetchNovelties(options).catch((error) => {
+          if (Number(error?.response?.status) !== 403) throw error;
+          return {
+            rows: [],
+            novelties: [],
+            total: 0,
+            pages: 0,
+            mode: null,
+            warning: 'DroPanas no autorizó la lectura de novedades; pedidos y guías siguen activos',
+          };
+        }),
       ]);
-      if (orderResult.mode !== noveltyResult.mode) throw new Error('Los endpoints Dropanas respondieron en modos distintos');
+      if (noveltyResult.mode && orderResult.mode !== noveltyResult.mode) throw new Error('Los endpoints Dropanas respondieron en modos distintos');
       // Se vuelve a leer después de la espera de red. Así una confirmación
       // hecha desde el panel o un delivery registrado mientras llegaban las
       // páginas no se pierde al guardar esta sincronización.
@@ -138,6 +149,7 @@ async function sync(options = {}) {
       state.mode = orderResult.mode;
       state.lastSuccessAt = now;
       state.lastError = null;
+      state.lastWarning = noveltyResult.warning || null;
       saveState(state);
       let automatic = null;
       if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true') {
@@ -180,6 +192,7 @@ function status() {
     lastSyncAt: state.lastSyncAt,
     lastSuccessAt: state.lastSuccessAt,
     lastError: state.lastError,
+    lastWarning: state.lastWarning,
     mode: state.mode,
     pending: (state.pending || []).length,
     lastWebhookAt: state.lastWebhookAt,

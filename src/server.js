@@ -250,7 +250,7 @@ app.use('/', siteRouter);
 
 app.get('/health', (_req, res) => {
   const dropanas = dropanasMonitor.status();
-  res.json({ ok: true, uptime: process.uptime(), dropanas: { enabled: dropanas.enabled, mode: dropanas.mode, lastSuccessAt: dropanas.lastSuccessAt, lastError: dropanas.lastError } });
+  res.json({ ok: true, uptime: process.uptime(), dropanas: { enabled: dropanas.enabled, mode: dropanas.mode, lastSuccessAt: dropanas.lastSuccessAt, lastError: dropanas.lastError, lastWarning: dropanas.lastWarning } });
 });
 
 // FASE 1: solo arrancamos el servidor de verdad (bind de puerto, timers de
