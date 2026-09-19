@@ -15,8 +15,11 @@ function bool(value) {
   return String(value || '').toLowerCase() === 'true';
 }
 
-function configFromEnv(env = process.env) {
-  const token = String(env.DROPANAS_API_TOKEN || '').trim();
+function configFromEnv(env = process.env, mode = 'live') {
+  // El token de produccion nunca se reutiliza para un evento sandbox.  Mantener
+  // ambos separados permite probar webhooks sin pausar la operacion real.
+  const isSandbox = mode === 'sandbox';
+  const token = String(isSandbox ? env.DROPANAS_TEST_API_TOKEN : env.DROPANAS_API_TOKEN || '').trim();
   const tokenMode = token.startsWith('live_sk_') ? 'live' : token.startsWith('test_sk_') ? 'sandbox' : null;
   return {
     enabled: bool(env.DROPANAS_API_ENABLED),

@@ -292,9 +292,9 @@ async function processWebhook(payload, options = {}) {
   if (payload?.evento !== 'order.guide_generated') {
     return { ok: true, ignored: true, event: payload?.evento || null };
   }
-  const config = options.config || api.configFromEnv();
   const announced = webhookOrder(payload);
   const payloadMode = payload?.sandbox === true ? 'sandbox' : payload?.sandbox === false ? 'live' : null;
+  const config = options.config || api.configFromEnv(process.env, payloadMode || 'live');
   if (payloadMode && payloadMode !== config.tokenMode) {
     throw new Error(`Webhook Dropanas en modo ${payloadMode}, pero el token es ${config.tokenMode || 'invalido'}`);
   }
