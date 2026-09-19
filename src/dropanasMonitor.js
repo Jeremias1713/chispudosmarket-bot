@@ -233,6 +233,98 @@ function recordWebhook(deliveryId) {
   return true;
 }
 
+function webhookOrder(payload) {
+  const data = payload?.datos || {};
+  const summary = data.pedido || {};
+  const orderId = data.orden_id ?? summary.numero_dropanas;
+  const guide = summary.numero_guia ?? data.numero_guia;
+  if (!/^\d+$/.test(String(orderId || ''))) throw new Error('Webhook Dropanas sin orden_id valido');
+  if (!String(guide || '').trim()) throw new Error('Webhook de guia Dropanas sin numero_guia');
+  const client = data.cliente || {};
+  const carrierName = String(summary.transportadora || data.transportadora || '').trim().toLowerCase();
+  const carrier = carrierName.includes('tealca') ? 'tealca'
+    : carrierName.includes('zoom') ? 'zoom'
+      : carrierName.includes('mrw') || carrierName.includes('menssajero') ? 'mrw'
+        : 'desconocida';
+  return {
+    dropanasId: String(orderId),
+    guia: String(guide).trim(),
+    cliente: String(client.nombre || '').trim(),
+    telefono: api.normalizePhone(client.telefono),
+    ciudad: '',
+    producto: '',
+    estadoPedido: String(summary.estado || data.status_nuevo || data.status || '').trim(),
+    totalVentaBs: '',
+    bodegaDestino: '',
+    carrier,
+    tipoEntrega: '',
+    oficinaId: null,
+    estadoAprobacion: '',
+    externalReference: String(summary.numero_externo || '').trim(),
+    updatedAt: payload?.timestamp || null,
+    _source: 'dropanas-webhook',
+  };
+}
+
+function queueWebhookOrder(order, now = new Date().toISOString()) {
+  const state = loadState();
+  const hash = api.fingerprint(orderComparable(order));
+  const change = {
+    key: pendingKey('order', order.dropanasId, hash),
+    kind: 'order_guide_generated',
+    detectedAt: now,
+    order,
+  };
+  state.pending = state.pending.filter((item) => item?.order?.dropanasId !== order.dropanasId);
+  state.pending.push(change);
+  state.pending = state.pending.slice(-MAX_PENDING);
+  state.snapshots.orders[order.dropanasId] = hash;
+  state.lastSuccessAt = now;
+  state.lastError = null;
+  saveState(state);
+  return change;
+}
+
+// Procesa solo la orden anunciada por el webhook. Esto evita depender del
+// listado GET /ordenes, que algunas cuentas no tienen autorizado, y sigue
+// descargando el PDF oficial: nunca abre una pagina ni toma capturas.
+async function processWebhook(payload, options = {}) {
+  if (payload?.evento !== 'order.guide_generated') {
+    return { ok: true, ignored: true, event: payload?.evento || null };
+  }
+  const config = options.config || api.configFromEnv();
+  const announced = webhookOrder(payload);
+  const payloadMode = payload?.sandbox === true ? 'sandbox' : payload?.sandbox === false ? 'live' : null;
+  if (payloadMode && payloadMode !== config.tokenMode) {
+    throw new Error(`Webhook Dropanas en modo ${payloadMode}, pero el token es ${config.tokenMode || 'invalido'}`);
+  }
+
+  let order = announced;
+  let detailWarning = null;
+  try {
+    const detail = await api.fetchOrder(announced.dropanasId, { ...options, config });
+    order = detail.order;
+    if (!order.guia) order.guia = announced.guia;
+    if (announced.guia && order.guia !== announced.guia) {
+      throw new Error('La guia del detalle no coincide con la anunciada por el webhook');
+    }
+  } catch (error) {
+    // El webhook firmado sigue siendo evidencia valida. Si el detalle puntual
+    // falla, se conserva como pendiente para revision, pero nunca se envia a
+    // ciegas sin un telefono exacto.
+    detailWarning = error.message;
+  }
+
+  const now = new Date().toISOString();
+  const change = queueWebhookOrder(order, now);
+  let automatic = null;
+  if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true') {
+    automatic = await require('./dropanasAuto').processChanges([change]);
+    if (automatic.acknowledged?.length) acknowledge(automatic.acknowledged);
+  }
+  return { ok: true, event: payload.evento, orderId: order.dropanasId, pending: loadState().pending.length, detailWarning, automatic };
+}
+
 function start() {
   if (timer || String(process.env.DROPANAS_API_POLL_ENABLED || '').toLowerCase() !== 'true') return false;
   const minutes = Math.max(5, Number(process.env.DROPANAS_API_POLL_MINUTES || 15));
@@ -274,6 +366,9 @@ module.exports = {
   listPending,
   acknowledge,
   recordWebhook,
+  webhookOrder,
+  queueWebhookOrder,
+  processWebhook,
   start,
   stop,
   webhookSignature,

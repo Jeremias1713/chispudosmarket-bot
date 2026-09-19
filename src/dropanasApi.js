@@ -165,6 +165,20 @@ async function fetchOrders(options = {}) {
   return { ...result, orders: result.rows.map(mapOrder) };
 }
 
+async function fetchOrder(orderId, { config = configFromEnv(), client = axios } = {}) {
+  assertReadOnlyEnabled(config);
+  if (!/^\d+$/.test(String(orderId))) throw new Error('ID de orden Dropanas invalido');
+  const response = await client.get(`${config.baseUrl}/ordenes/${orderId}`, {
+    headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' },
+    timeout: config.timeoutMs,
+    validateStatus: (status) => status >= 200 && status < 300,
+  });
+  const responseMode = headerValue(response.headers, 'x-dropanas-mode');
+  if (responseMode !== config.tokenMode) throw new Error('Modo Dropanas inesperado en detalle de orden');
+  if (!response.data?.data) throw new Error('Contrato Dropanas inesperado en detalle de orden');
+  return { order: mapOrder(response.data.data), mode: responseMode };
+}
+
 async function fetchNovelties(options = {}) {
   const result = await fetchAll('novedades', options);
   return { ...result, novelties: result.rows.map(mapNovelty) };
@@ -195,6 +209,7 @@ module.exports = {
   validatePage,
   fetchAll,
   fetchOrders,
+  fetchOrder,
   fetchNovelties,
   fetchTracking,
 };

@@ -18,7 +18,9 @@ La integración implementada en este repositorio es deliberadamente de solo lect
   solo acepta coincidencias únicas por teléfono. Los cruces por nombre nunca
   se envían solos.
 - Mantiene pendientes los avisos que WhatsApp no aceptó, para permitir reintentos.
-- Acepta webhooks firmados y siempre reconcilia con una nueva lectura GET; nunca confía en el contenido del webhook para cambiar una conversación.
+- Acepta webhooks firmados. Para `order.guide_generated` consulta únicamente
+  `GET /ordenes/{id}` y luego descarga el PDF oficial; no depende del listado
+  `/ordenes`, no abre el panel web y no toma capturas.
 
 ## Activación segura
 
@@ -36,7 +38,8 @@ La integración implementada en este repositorio es deliberadamente de solo lect
    hace falta subir una captura manual.
 9. Confirme una sola fila real desde el panel y verifique imagen, variables y
    entrega en WhatsApp.
-10. Active `DROPANAS_API_POLL_ENABLED=true` para consultar cada 15 minutos.
+10. Mantenga `DROPANAS_API_POLL_ENABLED=false` si usará el webhook. El sondeo
+    completo queda solo como respaldo manual.
 11. Solo después de esas pruebas, active `DROPANAS_AUTO_SEND_ENABLED=true`.
     El modo automático no procesa transportistas sin descarga implementada ni
     coincidencias ambiguas; quedan pendientes en el panel.

@@ -216,10 +216,10 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
   }
 });
 
-// Webhook oficial de Dropanas. Solo sirve como señal para ejecutar una
-// reconciliación GET: el payload nunca cambia conversaciones ni dispara
-// WhatsApp por sí solo. La firma y el timestamp evitan falsificación/replay,
-// y X-DroPanas-Delivery evita procesar dos veces el mismo intento.
+// Webhook oficial de Dropanas. La firma y el timestamp evitan
+// falsificación/replay, y X-DroPanas-Delivery evita procesar dos veces el
+// mismo intento. Una guía nueva consulta solamente esa orden; no lista todos
+// los pedidos y no usa capturas de pantalla.
 app.post('/dropanas/webhook', (req, res) => {
   const secret = process.env.DROPANAS_WEBHOOK_SECRET || '';
   if (!secret) return res.status(503).json({ error: 'Webhook Dropanas no configurado' });
@@ -235,8 +235,8 @@ app.post('/dropanas/webhook', (req, res) => {
   const fresh = dropanasMonitor.recordWebhook(deliveryId);
   res.sendStatus(200);
   if (fresh) {
-    setImmediate(() => dropanasMonitor.sync().catch((error) => {
-      console.error('Reconciliación posterior al webhook Dropanas:', error.message);
+    setImmediate(() => dropanasMonitor.processWebhook(req.body).catch((error) => {
+      console.error('Procesamiento del webhook Dropanas:', error.message);
     }));
   }
 });

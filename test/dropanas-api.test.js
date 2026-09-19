@@ -119,6 +119,30 @@ test('webhook exige HMAC válido y timestamp reciente', () => {
   assert.equal(monitor.verifyWebhook({ rawBody, signature, timestamp, secret, now: timestamp * 1000 + 301000 }), false);
 });
 
+test('consulta una sola orden por id sin depender del listado', async () => {
+  let requestedUrl = '';
+  const client = { get: async (url, options) => {
+    requestedUrl = url;
+    assert.equal(options.params, undefined);
+    return {
+      headers: { 'x-dropanas-mode': 'live' },
+      data: {
+        data: {
+          id: 34622,
+          tipo_entrega: 'oficina',
+          cliente: { nombre: 'Juan', apellido: 'Branger', telefono: '04125550123' },
+          productos: [],
+          tracking: { numero_guia: '84804888', status: 'En camino' },
+        },
+      },
+    };
+  } };
+  const result = await api.fetchOrder('34622', { config, client });
+  assert.equal(requestedUrl, `${api.DEFAULT_BASE_URL}/ordenes/34622`);
+  assert.equal(result.order.guia, '84804888');
+  assert.equal(result.order.telefono, '584125550123');
+});
+
 test('un 403 en novedades no bloquea la sincronización de pedidos y guías', async () => {
   const client = { get: async (url, options) => {
     if (url.endsWith('/novedades')) {
@@ -141,4 +165,55 @@ test('un 403 en novedades no bloquea la sincronización de pedidos y guías', as
   assert.equal(result.totals.orders, 1);
   assert.equal(result.totals.novelties, 0);
   assert.match(monitor.status().lastWarning, /no autorizó la lectura de novedades/);
+});
+
+test('webhook de guía consulta solo la orden anunciada y la deja pendiente', async () => {
+  delete process.env.DROPANAS_AUTO_SEND_ENABLED;
+  const calls = [];
+  const client = { get: async (url) => {
+    calls.push(url);
+    return {
+      headers: { 'x-dropanas-mode': 'live' },
+      data: {
+        data: {
+          id: 777,
+          tipo_entrega: 'oficina',
+          cliente: { nombre: 'Ana', apellido: 'Abreu', telefono: '04125550999' },
+          productos: [],
+          tracking: { numero_guia: 'GUIA-777', status: 'En camino' },
+        },
+      },
+    };
+  } };
+  const result = await monitor.processWebhook({
+    evento: 'order.guide_generated',
+    sandbox: false,
+    datos: {
+      orden_id: 777,
+      pedido: { numero_dropanas: 777, numero_guia: 'GUIA-777', transportadora: 'Tealca' },
+    },
+  }, { config, client });
+  assert.deepEqual(calls, [`${api.DEFAULT_BASE_URL}/ordenes/777`]);
+  assert.equal(result.ok, true);
+  assert.equal(result.detailWarning, null);
+  const pending = monitor.listPending().find((item) => item.order?.dropanasId === '777');
+  assert.equal(pending.order.telefono, '584125550999');
+  assert.equal(pending.order.guia, 'GUIA-777');
+});
+
+test('si falla el detalle, el webhook firmado conserva la guía sin enviarla a ciegas', async () => {
+  delete process.env.DROPANAS_AUTO_SEND_ENABLED;
+  const client = { get: async () => { throw new Error('Forbidden 403'); } };
+  const result = await monitor.processWebhook({
+    evento: 'order.guide_generated',
+    sandbox: false,
+    datos: {
+      orden_id: 778,
+      pedido: { numero_dropanas: 778, numero_guia: 'GUIA-778', transportadora: 'ZOOM' },
+    },
+  }, { config, client });
+  assert.match(result.detailWarning, /403/);
+  const pending = monitor.listPending().find((item) => item.order?.dropanasId === '778');
+  assert.equal(pending.order.carrier, 'zoom');
+  assert.equal(pending.order.telefono, '');
 });

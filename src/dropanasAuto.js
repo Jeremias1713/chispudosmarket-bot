@@ -46,7 +46,7 @@ async function processChanges(changes, overrides = {}) {
       .map((change) => ({ ...change.order, _pendingKey: change.key }));
 
     for (const row of deps.matchRows(rows)) {
-      if (row.carrier !== 'tealca') {
+      if (!['tealca', 'zoom', 'mrw'].includes(row.carrier)) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'transportista_sin_descarga_automatica' });
         continue;
       }
