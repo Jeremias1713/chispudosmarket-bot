@@ -127,7 +127,10 @@ async function sync(options = {}) {
     try {
       const [orderResult, noveltyResult] = await Promise.all([
         api.fetchOrders(options).catch((error) => {
-          error.message = `Pedidos: ${error.message}`;
+          const apiDetail = error?.response?.data?.error?.message
+            || error?.response?.data?.message
+            || error?.response?.data?.error;
+          error.message = `Pedidos: ${error.message}${apiDetail ? ` (${String(apiDetail).slice(0, 160)})` : ''}`;
           throw error;
         }),
         api.fetchNovelties(options).catch((error) => {
