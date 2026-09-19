@@ -126,9 +126,16 @@ async function sync(options = {}) {
     const now = new Date().toISOString();
     try {
       const [orderResult, noveltyResult] = await Promise.all([
-        api.fetchOrders(options),
+        api.fetchOrders(options).catch((error) => {
+          error.message = `Pedidos: ${error.message}`;
+          throw error;
+        }),
         api.fetchNovelties(options).catch((error) => {
-          if (Number(error?.response?.status) !== 403) throw error;
+          const status = Number(error?.response?.status || error?.status);
+          if (status !== 403) {
+            error.message = `Novedades: ${error.message}`;
+            throw error;
+          }
           return {
             rows: [],
             novelties: [],
