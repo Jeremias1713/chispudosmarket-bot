@@ -118,3 +118,27 @@ test('webhook exige HMAC válido y timestamp reciente', () => {
   assert.equal(monitor.verifyWebhook({ rawBody, signature: '00', timestamp, secret, now: timestamp * 1000 }), false);
   assert.equal(monitor.verifyWebhook({ rawBody, signature, timestamp, secret, now: timestamp * 1000 + 301000 }), false);
 });
+
+test('un 403 en novedades no bloquea la sincronización de pedidos y guías', async () => {
+  const client = { get: async (url, options) => {
+    if (url.endsWith('/novedades')) {
+      const error = new Error('Forbidden');
+      error.response = { status: 403 };
+      throw error;
+    }
+    return {
+      headers: { 'x-dropanas-mode': 'live' },
+      data: {
+        data: [{ id: 99, status: '1', cliente: {}, productos: [], tracking: {} }],
+        links: { next: null },
+        meta: { current_page: options.params.page, last_page: 1, per_page: 100, total: 1 },
+      },
+    };
+  } };
+  const result = await monitor.sync({ config, client });
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, 'live');
+  assert.equal(result.totals.orders, 1);
+  assert.equal(result.totals.novelties, 0);
+  assert.match(monitor.status().lastWarning, /no autorizó la lectura de novedades/);
+});
