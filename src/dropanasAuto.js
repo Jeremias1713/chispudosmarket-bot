@@ -66,6 +66,7 @@ async function processChanges(changes, overrides = {}) {
         const captured = await deps.capture({
           orderId: row.dropanasId,
           expectedTracking: row.guia,
+          expectedCarrier: row.carrier,
         });
         const guiaImageUrl = deps.mediaUrl(captured.filename);
         if (!guiaImageUrl) throw new Error('Falta configurar PUBLIC_URL');
