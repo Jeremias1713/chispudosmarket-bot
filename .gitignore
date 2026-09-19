@@ -17,3 +17,6 @@ data/media/*
 npm-debug.log*
 __pycache__/
 *.pyc
+# Catalogo REAL para eval/model-eval.js (punto 7 de la segunda revision):
+# nunca se commitea, es donde el negocio pega su prompt de producto real.
+eval/real-products.local.json
