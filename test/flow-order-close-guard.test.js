@@ -73,9 +73,10 @@ function leerSessionsDesdeDisco() {
   return JSON.parse(raw);
 }
 
-test('false-close: consulta de pura cobertura, sin ningun dato de pedido, NO cierra', async () => {
+test('false-close: consulta de pura cobertura, sin ningun dato de pedido, NO cierra, Y el cliente recibe la respuesta REAL a su pregunta (no el aviso generico de datos incompletos)', async () => {
   const phone = '584120000901';
   writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: sesionBase() }));
+  textosEnviados.length = 0;
 
   replyToReturn = {
     text: 'Con Tealca el pago se hace contra entrega, y en cuanto tengamos la guia de tu pedido te aviso.',
@@ -88,6 +89,20 @@ test('false-close: consulta de pura cobertura, sin ningun dato de pedido, NO cie
   const session = getSession(phone);
   assert.notEqual(session.orderClosed, true, 'BUG si esto es true: una consulta de cobertura/pago no puede cerrar un pedido sin datos del cliente');
   assert.notEqual(session.stage, 'vendido', 'BUG si esto paso a vendido: no hay pedido real que cerrar');
+
+  // FASE (correccion regresion cierre secuencial, punto 6, tercera parte):
+  // bug real reproducido con este mismo texto exacto -- por mencionar "tu
+  // pedido" a secas (sin ningun dato puntual), la respuesta CORRECTA a la
+  // pregunta del cliente se descartaba entera y se reemplazaba por el aviso
+  // generico de "me falta confirmar tu nombre, cedula...", dejando la
+  // pregunta real sin contestar.
+  const enviado = textosEnviados.find((m) => m.to === phone);
+  assert.ok(enviado, 'tiene que haberse mandado algun mensaje');
+  assert.equal(
+    enviado.text,
+    replyToReturn.text,
+    'BUG si esto no coincide: la respuesta real a la consulta de pago/cobertura se sustituyo por otra cosa (el aviso generico de datos incompletos), en vez de contestarle de verdad al cliente'
+  );
 });
 
 // --- El caso central pedido explicitamente: cliente antiguo ---
@@ -205,10 +220,15 @@ test('sticker solo (sin nada mas de sustancia) NO alcanza para cerrar, aunque el
   assert.notEqual(session.orderClosed, true, 'BUG si esto es true: un sticker solo no es una aceptacion inequivoca ni trae una cantidad nueva');
 });
 
-test('delivery a domicilio en Caracas (sin mencionar "agencia"/"Tealca"/"guia" en ningun lado, ni siquiera en la respuesta del bot) SI cierra con una direccion real', async () => {
+test('delivery a domicilio en Caracas (cualquier zona, sin mencionar "agencia"/"Tealca"/"guia" en ningun lado) SI cierra con una direccion real', async () => {
   const phone = '584120000906';
+  // REVERTIDO a pedido explicito del negocio (20260920): hubo una version
+  // intermedia que exigia una lista de zonas puntuales de Caracas
+  // confirmadas una por una. El negocio confirmo explicitamente que da
+  // domicilio a TODA Caracas, sin excepcion de zona -- no hace falta
+  // ninguna lista (ver resolveDeliveryCoverage en ai.js).
   writeRaw(dataDir, 'sessions.json', JSON.stringify({
-    [phone]: sesionBase({ card: { producto: 'Shilajit' } }),
+    [phone]: sesionBase({ card: { producto: 'Shilajit', ciudad: 'caracas' } }),
   }));
 
   // Punto 3 de la segunda revision: un cierre de domicilio real NUNCA tiene
@@ -228,7 +248,7 @@ test('delivery a domicilio en Caracas (sin mencionar "agencia"/"Tealca"/"guia" e
   await esperarProcesamiento();
 
   const session = getSession(phone);
-  assert.equal(session.orderClosed, true, 'un pedido a domicilio con una direccion real (no solo la palabra "domicilio") tiene que poder cerrar, aunque el texto de cierre no mencione Tealca/agencia/guia');
+  assert.equal(session.orderClosed, true, 'un pedido a domicilio con una direccion real en Caracas tiene que poder cerrar (el negocio da domicilio a toda la ciudad), aunque el texto de cierre no mencione Tealca/agencia/guia');
   assert.equal(session.stage, 'vendido');
 });
 

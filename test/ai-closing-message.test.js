@@ -93,15 +93,32 @@ test('looksLikeClosingSummaryText: false si el texto es una pregunta (el prompt 
   assert.equal(looksLikeClosingSummaryText('¿Confirmas tu pedido de 2 Shilajit contra entrega?'), false);
 });
 
-// OJO: una frase puramente informativa ("con Tealca el pago es contra
-// entrega, y en cuanto tengamos la guia de tu pedido te aviso") tambien
-// puede activar esta señal ESTRUCTURAL por si sola (menciona pago + pedido +
-// guia), a proposito: es el mismo tipo de lenguaje que un cierre real de
-// domicilio (que no puede exigir "tealca"/"agencia"/"guia" especificamente,
-// ver el test de abajo). Por eso looksLikeClosingSummaryText NUNCA se usa
-// sola para decidir un cierre -- isClosingMessage la combina siempre con
-// evaluateOrderCompleteness (ver el test "NO marca cierre solo por sonar a
-// cierre" mas abajo, que es el que de verdad prueba ese caso).
+// NOTA (actualizado en la correccion regresion-cierre-secuencial): antes,
+// una frase puramente informativa ("con Tealca el pago es contra entrega, y
+// en cuanto tengamos la guia de tu pedido te aviso") SI activaba esta señal
+// estructural por si sola con solo mencionar "tu pedido" a secas, sin
+// ningun dato puntual -- eso hacia que isClosingMessage tuviera que
+// depender de evaluateOrderCompleteness como unica red de seguridad, pero
+// esa red de seguridad reemplaza la respuesta por el aviso generico de "me
+// falta confirmar...", dejando la pregunta real del cliente sin contestar
+// (bug real, ver el test PUNTO 6 de test/ai-regresion-cierre-secuencial.
+// test.js y flow-order-close-guard.test.js: "consulta de pura cobertura
+// (...) recibe su propia respuesta, no el aviso de incompleto"). Ahora
+// looksLikeClosingSummaryText YA NO considera "tu pedido"/"el pedido" a
+// secas como señal de cierre (solo cuenta con un dato puntual pegado, como
+// "pedido de 2" o "pedido queda listo", o una accion de entrega concreta):
+// el texto de este comentario ya da false directo (ver el test de abajo).
+// isClosingMessage sigue combinando ambas señales de todos modos, como
+// defensa en profundidad para el resto de los casos (ej. cierre de
+// domicilio, ver el test de abajo).
+
+test('looksLikeClosingSummaryText: false para una explicacion puramente informativa que solo menciona "tu pedido" a secas (sin cantidad/monto/accion de entrega)', () => {
+  assert.equal(
+    looksLikeClosingSummaryText('Con Tealca el pago es contra entrega, y apenas tengamos la guia de tu pedido te aviso.'),
+    false,
+    'BUG si esto es true: "tu pedido" sin ningun dato puntual pegado no puede ser, por si solo, la señal de un cierre real'
+  );
+});
 
 test('looksLikeClosingSummaryText: SI reconoce un cierre de DOMICILIO que nunca menciona "Tealca", "agencia" ni "guia"', () => {
   const cierreDomicilio =
@@ -114,17 +131,29 @@ test('looksLikeClosingSummaryText: SI reconoce un cierre de DOMICILIO que nunca 
   assert.equal(looksLikeClosingSummaryText(cierreDomicilio), true);
 });
 
-test('isClosingMessage: un cierre de domicilio real (sin Tealca/agencia/guia en el texto) SI cierra si el resto de la validacion esta completa', () => {
+// FASE (correccion cobertura, revertida a pedido explicito del negocio,
+// 20260920): hubo una version intermedia que exigia una lista de zonas
+// puntuales de Caracas confirmadas una por una, dejando cualquier zona sin
+// listar "pendiente de un humano" y sin poder cerrar. El negocio confirmo
+// explicitamente que eso no refleja como opera de verdad: da domicilio a
+// TODA Caracas, sin excepcion de zona. Esta prueba demuestra que un cierre
+// de domicilio en Caracas SI cierra directamente, sin necesitar ninguna
+// lista de zonas.
+test('isClosingMessage: un cierre de domicilio en Caracas (cualquier zona) SI cierra directamente -- el negocio da domicilio a toda la ciudad', () => {
   const cierreDomicilio =
-    'Perfecto Carlos, tu pedido de 2 Shilajit (Bs 700) va para tu direccion en la Av. Libertador, Caracas. ' +
+    'Perfecto Carlos, tu pedido de 2 Shilajit (Bs 700) va para tu direccion en la Av. Libertador, Chacao, Caracas. ' +
     'El pago es contra entrega, en efectivo o pago movil. En cuanto el mensajero este en camino te aviso. ✅';
   const ctx = pedidoCompletoCtx({
     recentUserText:
-      'Carlos Perez, cedula 12345678, telefono 04121234567, quiero 2 frascos, es en la Av. Libertador, Caracas, cerca de la plaza, dale mandalo',
+      'Carlos Perez, cedula 12345678, telefono 04121234567, quiero 2 frascos, es en la Av. Libertador, Chacao, Caracas, cerca de la plaza, dale mandalo',
     cardAgencia: null, // domicilio: no hay agencia, el destino se resuelve por direccion
     knownCity: 'caracas',
   });
-  assert.equal(isClosingMessage(cierreDomicilio, ctx), true);
+  assert.equal(
+    isClosingMessage(cierreDomicilio, ctx),
+    true,
+    'BUG si esto es false: el negocio da domicilio a TODA Caracas, no hace falta ninguna zona confirmada para cerrar'
+  );
 });
 
 test('isClosingMessage: NO marca cierre solo por sonar a cierre, sin ningun dato del pedido (consulta de cobertura/pago, no una venta)', () => {
@@ -321,7 +350,11 @@ test('destino resuelto con una agencia puntual seleccionada en el texto (sin car
   assert.ok(!resultado.missing.includes('modalidad_destino'));
 });
 
-test('destino resuelto con una direccion real de domicilio', () => {
+// FASE (correccion cobertura, revertida a pedido explicito del negocio,
+// 20260920): ver el comentario junto a isClosingMessage mas arriba -- una
+// direccion real en Caracas resuelve el destino directamente, el negocio da
+// domicilio a toda la ciudad sin necesitar ninguna zona confirmada.
+test('destino SI resuelto con una direccion de domicilio en Caracas (cualquier zona)', () => {
   const ctx = pedidoCompletoCtx({
     recentUserText:
       'Carlos Perez, cedula 12345678, telefono 04121234567, quiero 2 frascos, Av. Libertador, sector Los Palos Grandes, frente a la panaderia, dale',
@@ -329,7 +362,10 @@ test('destino resuelto con una direccion real de domicilio', () => {
     knownCity: 'caracas',
   });
   const resultado = evaluateOrderCompleteness({ text: MENSAJE_CIERRE_REAL, ...ctx });
-  assert.ok(!resultado.missing.includes('modalidad_destino'));
+  assert.ok(
+    !resultado.missing.includes('modalidad_destino'),
+    'BUG si aparece: el negocio da domicilio a TODA Caracas, una direccion real ahi tiene que resolver el destino'
+  );
 });
 
 // --- Punto 4: presentacion y total, no solo producto+cantidad ---
