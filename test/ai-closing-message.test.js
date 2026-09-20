@@ -402,6 +402,33 @@ test('looksLikeTotalCommunicated: reconoce un monto en Bs, no un numero cualquie
   assert.equal(looksLikeTotalCommunicated('dale, ya te anoto el pedido'), false);
 });
 
+test('looksLikeClosingSummaryText reconoce "pagas al recibir" solo dentro de un cierre concreto', () => {
+  assert.equal(looksLikeClosingSummaryText('Tu pedido de 2 queda confirmado para retirar en agencia. Pagas al recibir.'), true);
+  assert.equal(looksLikeClosingSummaryText('Con Tealca pagas al recibir en agencia.'), false);
+});
+
+test('un total vigente comunicado antes sirve en el turno posterior, pero uno desactualizado no', () => {
+  const base = pedidoCompletoCtx({
+    lastAssistantText: 'Tu pedido de 2 queda en 51.900 Bs. ¿Confirmas?',
+    lastUserMessage: 'Sí',
+  });
+  const cierre = 'Tu pedido de 2 queda confirmado para retirar en agencia Tealca. Pagas al recibir y luego te enviamos la guia.';
+  assert.equal(evaluateOrderCompleteness({
+    ...base,
+    text: cierre,
+    expectedTotal: 51900,
+    previouslyCommunicatedTotal: 51900,
+    orderAccepted: true,
+  }).complete, true);
+  assert.ok(evaluateOrderCompleteness({
+    ...base,
+    text: cierre,
+    expectedTotal: 69900,
+    previouslyCommunicatedTotal: 51900,
+    orderAccepted: true,
+  }).missing.includes('total_comunicado'));
+});
+
 test('looksLikeTotalCommunicated: con total esperado, un monto cualquiera en Bs no alcanza', () => {
   assert.equal(looksLikeTotalCommunicated('Total: 700 Bs', 700), true);
   assert.equal(looksLikeTotalCommunicated('Total: 999 Bs', 700), false);

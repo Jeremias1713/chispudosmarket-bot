@@ -24,11 +24,17 @@ const ai = require('../src/ai');
 const classifierMod = require('../src/classifier');
 const { updateSettings } = require('../src/settings');
 const { getSession } = require('../src/state');
+const catalog = require('../src/catalog');
 
-updateSettings({ replyDelayMs: 5 });
+updateSettings({ replyDelayMs: 5, splitRepliesEnabled: false, audioReplyEnabled: false });
 
 const textosEnviados = [];
+let fallarSiguienteEnvio = false;
 whatsapp.sendText = async (to, text) => {
+  if (fallarSiguienteEnvio) {
+    fallarSiguienteEnvio = false;
+    throw new Error('fallo simulado de WhatsApp');
+  }
   textosEnviados.push({ to, text });
   return { messages: [{ id: 'wamid.TEST' }] };
 };
@@ -71,6 +77,13 @@ function sesionBase(overrides) {
 function leerSessionsDesdeDisco() {
   const raw = fs.readFileSync(path.join(dataDir, 'sessions.json'), 'utf8');
   return JSON.parse(raw);
+}
+
+function escribirCatalogoPromo() {
+  writeRaw(dataDir, 'products.json', JSON.stringify([{
+    id: 'promo1', name: 'Producto Ficticio', price: 36900, currency: 'Bs', active: true,
+    quantityPrices: [{ quantity: 2, total: 51900 }],
+  }]));
 }
 
 test('false-close: consulta de pura cobertura, sin ningun dato de pedido, NO cierra, Y el cliente recibe la respuesta REAL a su pregunta (no el aviso generico de datos incompletos)', async () => {
@@ -343,4 +356,170 @@ test('el modelo redacta un resumen que SUENA a cierre (pago + resumen de pedido)
     'BUG si el texto de cierre original (con "pago contra entrega"/resumen) llego tal cual al cliente: el sistema no puede decir "confirmado" mientras no guarda el pedido como cerrado'
   );
   assert.match(enviado.text, /falta/i, 'el cliente tiene que recibir un aviso honesto de que todavia falta confirmar algo, no el resumen de cierre original');
+});
+
+test('combo de dos usa el total promocional estructurado y cierra con "pagas al recibir"', async () => {
+  const phone = '584120000910';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({
+      linkedProductId: 'promo1',
+      card: { producto: 'Producto Ficticio', ciudad: 'barinas' },
+    }),
+  }));
+  assert.equal(catalog.resolveApplicableTotal(catalog.findProduct('promo1'), 2), 51900);
+  replyToReturn = {
+    text: 'Tu pedido de 2 Producto Ficticio queda confirmado por 51.900 Bs para retirar en agencia Tealca. Pagas al recibir y te enviamos la guia.',
+    images: [],
+  };
+  await flow.handleIncomingMessage(phone, {
+    type: 'text', text: { body: 'Quiero 2 frascos, la agencia 1 me sirve. Persona Ejemplo, cedula 12345678, telefono 04121234567' },
+  }, 'Persona');
+  await esperarProcesamiento();
+  const session = getSession(phone);
+  assert.equal(session.orderClosed, true);
+  assert.equal(session.stage, 'vendido');
+  assert.equal(session.currentOrder.total, 51900);
+  assert.equal(leerSessionsDesdeDisco()[phone].currentOrder.total, 51900);
+});
+
+test('combo con total unitario multiplicado incorrectamente no cierra', async () => {
+  const phone = '584120000911';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({
+      linkedProductId: 'promo1',
+      card: { producto: 'Producto Ficticio', ciudad: 'barinas' },
+    }),
+  }));
+  replyToReturn = {
+    text: 'Tu pedido de 2 Producto Ficticio queda confirmado por 73.800 Bs para retirar en agencia Tealca. Pagas al recibir y te enviamos la guia.',
+    images: [],
+  };
+  await flow.handleIncomingMessage(phone, {
+    type: 'text', text: { body: 'Quiero 2 frascos, la agencia 1 me sirve. Persona Ejemplo, cedula 12345678, telefono 04121234567' },
+  }, 'Persona');
+  await esperarProcesamiento();
+  const session = getSession(phone);
+  assert.notEqual(session.orderClosed, true);
+  assert.notEqual(session.stage, 'vendido');
+});
+
+test('total comunicado antes + aceptacion posterior cierra sin exigir repetir el monto', async () => {
+  const phone = '584120000912';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({
+      linkedProductId: 'promo1',
+      card: { nombre: 'Persona Ejemplo', cedula: '12345678', telefono: '04121234567', producto: 'Producto Ficticio', ciudad: 'barinas', agenciaConfirmadaEnChat: 'Tealca Centro' },
+      currentOrder: { product: 'Producto Ficticio', quantity: 2, city: 'barinas', agency: 'Tealca Centro', modality: 'agency_pickup', accepted: false, total: null },
+    }),
+  }));
+  replyToReturn = { text: 'Tu pedido de 2 queda en 51.900 Bs. ¿Confirmas el pedido?', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: '¿Cuánto es el total?' } }, 'Persona');
+  await esperarProcesamiento();
+  assert.notEqual(getSession(phone).orderClosed, true);
+  assert.equal(getSession(phone).lastAssistantText, replyToReturn.text);
+
+  replyToReturn = { text: 'Tu pedido de 2 queda confirmado para retirar en agencia Tealca. Pagas al recibir y te enviamos la guia.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Sí' } }, 'Persona');
+  await esperarProcesamiento();
+  const session = getSession(phone);
+  assert.equal(session.currentOrder.total, 51900);
+  assert.equal(session.currentOrder.accepted, true);
+  assert.equal(session.orderClosed, true);
+  assert.equal(session.stage, 'vendido');
+  assert.equal(session.currentOrder.total, 51900);
+});
+
+test('un frasco con precio unitario correcto cierra y persiste el total', async () => {
+  const phone = '584120000913';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({ linkedProductId: 'promo1', card: { producto: 'Producto Ficticio', ciudad: 'coro' } }),
+  }));
+  replyToReturn = { text: 'Pedido de 1 Producto Ficticio confirmado por 36.900 Bs para agencia Tealca. Pagas al recibir y luego te enviamos la guia.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Quiero 1 frasco, agencia 1. Persona Ejemplo, cedula 12345678, telefono 04121234567' } }, 'Persona');
+  await esperarProcesamiento();
+  const session = getSession(phone);
+  assert.equal(session.stage, 'vendido');
+  assert.equal(session.orderClosed, true);
+  assert.equal(session.currentOrder.total, 36900);
+});
+
+test('cambiar cantidad exige el total nuevo y no acepta la cotizacion anterior', async () => {
+  const phone = '584120000914';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({
+      linkedProductId: 'promo1',
+      card: { nombre: 'Persona Ejemplo', cedula: '12345678', telefono: '04121234567', producto: 'Producto Ficticio', ciudad: 'coro', agenciaConfirmadaEnChat: 'Tealca Centro' },
+      currentOrder: { product: 'Producto Ficticio', quantity: 2, city: 'coro', agency: 'Tealca Centro', modality: 'agency_pickup', total: 51900, quotedQuantity: 2, accepted: true },
+    }),
+  }));
+  replyToReturn = { text: 'Pedido de 3 Producto Ficticio confirmado por 51.900 Bs para agencia Tealca. Pagas al recibir y luego te enviamos la guia.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Mejor quiero 3 frascos' } }, 'Persona');
+  await esperarProcesamiento();
+  let session = getSession(phone);
+  assert.notEqual(session.orderClosed, true);
+  assert.equal(session.currentOrder.quantity, 3);
+  assert.equal(session.currentOrder.total, null);
+
+  replyToReturn = { text: 'Pedido de 3 Producto Ficticio confirmado por 110.700 Bs para agencia Tealca. Pagas al recibir y luego te enviamos la guia.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Sí, confirmo los 3' } }, 'Persona');
+  await esperarProcesamiento();
+  session = getSession(phone);
+  assert.equal(session.orderClosed, true);
+  assert.equal(session.stage, 'vendido');
+  assert.equal(session.currentOrder.total, 110700);
+});
+
+test('preguntar por el plazo no borra una aceptacion vigente del pedido', async () => {
+  const phone = '584120000915';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({
+      linkedProductId: 'promo1',
+      card: { nombre: 'Persona Ejemplo', cedula: '12345678', telefono: '04121234567', producto: 'Producto Ficticio', ciudad: 'coro', agenciaConfirmadaEnChat: 'Tealca Centro' },
+      currentOrder: { product: 'Producto Ficticio', quantity: 2, city: 'coro', agency: 'Tealca Centro', modality: 'agency_pickup', total: 51900, quotedQuantity: 2, accepted: true },
+    }),
+  }));
+  replyToReturn = { text: 'Tarda el plazo informado. Tu pedido de 2 queda confirmado para agencia Tealca; pagas al recibir y luego te enviamos la guia.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: '¿Cuánto tarda en llegar?' } }, 'Persona');
+  await esperarProcesamiento();
+  const session = getSession(phone);
+  assert.equal(session.orderClosed, true);
+  assert.equal(session.stage, 'vendido');
+});
+
+test('MRW o Zoom requieren coordinacion humana y nunca cierran automaticamente', async () => {
+  for (const [suffix, courier] of [['916', 'MRW'], ['917', 'Zoom']]) {
+    const phone = `584120000${suffix}`;
+    escribirCatalogoPromo();
+    writeRaw(dataDir, 'sessions.json', JSON.stringify({
+      [phone]: sesionBase({ linkedProductId: 'promo1', card: { producto: 'Producto Ficticio', ciudad: 'coro' } }),
+    }));
+    replyToReturn = { text: `Pedido de 1 Producto Ficticio procesado por 36.900 Bs para agencia ${courier}. Pago anticipado y luego te enviamos la guia.`, images: [] };
+    await flow.handleIncomingMessage(phone, { type: 'text', text: { body: `Quiero 1 frasco por ${courier}. Persona Ejemplo, cedula 12345678, telefono 04121234567` } }, 'Persona');
+    await esperarProcesamiento();
+    const session = getSession(phone);
+    assert.notEqual(session.orderClosed, true);
+    assert.notEqual(session.stage, 'vendido');
+    assert.equal(session.currentOrder.needsHumanPayment, true);
+  }
+});
+
+test('si falla el envio del cierre, no se persiste como vendido', async () => {
+  const phone = '584120000918';
+  escribirCatalogoPromo();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionBase({ linkedProductId: 'promo1', card: { producto: 'Producto Ficticio', ciudad: 'coro' } }),
+  }));
+  replyToReturn = { text: 'Pedido de 1 Producto Ficticio confirmado por 36.900 Bs para agencia Tealca. Pagas al recibir y luego te enviamos la guia.', images: [] };
+  fallarSiguienteEnvio = true;
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Quiero 1 frasco, agencia 1. Persona Ejemplo, cedula 12345678, telefono 04121234567' } }, 'Persona');
+  await esperarProcesamiento();
+  const session = getSession(phone);
+  assert.notEqual(session.orderClosed, true);
+  assert.notEqual(session.stage, 'vendido');
 });
