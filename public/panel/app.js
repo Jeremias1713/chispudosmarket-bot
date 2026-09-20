@@ -157,6 +157,8 @@ document.querySelectorAll('.tab').forEach((tab) => {
 /* ---------- centro de automatización DroPanas ---------- */
 
 let dropanasAutomationData = null
+let dropanasOrders = []
+let dropanasOrderFilter = 'active'
 
 function automationDate(value) {
   if (!value) return 'Todavía no llegó ningún evento real'
@@ -187,6 +189,87 @@ function pendingAutomationRow(row) {
     </div>
     <button class="btn da-review-one" type="button">Revisar</button>
   </div>`
+}
+
+function dropanasOrderMatchesFilter(convo) {
+  if (dropanasOrderFilter === 'all') return true
+  if (dropanasOrderFilter === 'active') return convo.stage !== 'entregado'
+  if (dropanasOrderFilter === 'pending') return ['vendido', 'esperando_guia'].includes(convo.stage)
+  return convo.stage === dropanasOrderFilter
+}
+
+function dropanasOrderMatchesSearch(convo, query) {
+  if (!query) return true
+  const card = convo.card || {}
+  return [convo.name, convo.phone, card.nombre, card.producto, card.guia, card.agencia, convo.lastMessage]
+    .filter(Boolean)
+    .some((value) => String(value).toLocaleLowerCase('es').includes(query))
+}
+
+function dropanasOrderRow(convo) {
+  const card = convo.card || {}
+  const guide = card.guia ? `Guía ${esc(card.guia)}` : 'Sin guía registrada'
+  const product = card.producto || 'Producto sin registrar'
+  const location = card.agencia || card.ciudad || ''
+  return `<button class="dp-auto-order-row" type="button" data-phone="${esc(convo.phone)}">
+    <span class="avatar">${esc(initials(convo))}</span>
+    <span class="dp-auto-order-main">
+      <span class="dp-auto-order-name">${esc(displayName(convo))}</span>
+      <span class="dp-auto-order-detail">${esc(product)}${location ? ` · ${esc(location)}` : ''}</span>
+      <span class="dp-auto-order-phone">+${esc(convo.phone)}</span>
+    </span>
+    <span class="dp-auto-order-shipping">
+      ${stageBadge(convo)}
+      <small class="${card.guia ? '' : 'is-missing'}">${guide}</small>
+    </span>
+    <span class="dp-auto-order-activity">
+      <small>Última actividad</small>
+      <strong>${esc(timeInStage(convo.lastMessageAt) || 'sin fecha')}</strong>
+    </span>
+    <span class="dp-auto-order-open" aria-hidden="true">›</span>
+  </button>`
+}
+
+function renderDropanasOrders() {
+  const counts = {
+    all: dropanasOrders.length,
+    active: dropanasOrders.filter((c) => c.stage !== 'entregado').length,
+    pending: dropanasOrders.filter((c) => ['vendido', 'esperando_guia'].includes(c.stage)).length,
+    en_camino: dropanasOrders.filter((c) => c.stage === 'en_camino').length,
+    esperando_retiro: dropanasOrders.filter((c) => c.stage === 'esperando_retiro').length,
+    tienda_maracaibo: dropanasOrders.filter((c) => c.stage === 'tienda_maracaibo').length,
+    entregado: dropanasOrders.filter((c) => c.stage === 'entregado').length,
+  }
+  Object.entries(counts).forEach(([key, value]) => {
+    const el = $(`da_count_${key}`)
+    if (el) el.textContent = String(value)
+  })
+  $('da_ordersTotal').textContent = `${counts.active} activo${counts.active === 1 ? '' : 's'}`
+
+  const query = String($('da_ordersSearch')?.value || '').trim().toLocaleLowerCase('es')
+  const visible = dropanasOrders
+    .filter(dropanasOrderMatchesFilter)
+    .filter((convo) => dropanasOrderMatchesSearch(convo, query))
+  const list = $('da_ordersList')
+  list.innerHTML = visible.length
+    ? visible.map(dropanasOrderRow).join('')
+    : emptyState('📦', 'No hay pedidos en este filtro', query ? 'Probá con otra búsqueda.' : 'Cuando un pedido llegue a esta etapa aparecerá aquí.')
+
+  list.querySelectorAll('.dp-auto-order-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      showView('view-convos')
+      selectConversation(row.dataset.phone)
+    })
+  })
+}
+
+async function loadDropanasOrders() {
+  try {
+    dropanasOrders = await api('/conversations?scope=sold')
+    renderDropanasOrders()
+  } catch (err) {
+    $('da_ordersList').innerHTML = emptyState('!', 'No se pudieron cargar los pedidos', err.message)
+  }
 }
 
 function renderDropanasAutomation(data) {
@@ -246,7 +329,11 @@ async function loadDropanasAutomation() {
   const refresh = $('da_refresh')
   if (refresh) refresh.disabled = true
   try {
-    renderDropanasAutomation(await api('/dropanas-api/dashboard'))
+    const [dashboard] = await Promise.all([
+      api('/dropanas-api/dashboard'),
+      loadDropanasOrders(),
+    ])
+    renderDropanasAutomation(dashboard)
   } catch (err) {
     $('da_pendingList').innerHTML = emptyState('!', 'No se pudo consultar DroPanas', err.message)
     $('da_connection').textContent = 'Sin conexión'
@@ -276,6 +363,14 @@ function openDropanasReview() {
 
 $('da_refresh')?.addEventListener('click', loadDropanasAutomation)
 $('da_reviewAll')?.addEventListener('click', openDropanasReview)
+$('da_ordersSearch')?.addEventListener('input', renderDropanasOrders)
+$('da_orderFilters')?.addEventListener('click', (event) => {
+  const button = event.target.closest('.dp-auto-filter')
+  if (!button) return
+  dropanasOrderFilter = button.dataset.filter
+  document.querySelectorAll('.dp-auto-filter').forEach((item) => item.classList.toggle('is-active', item === button))
+  renderDropanasOrders()
+})
 
 /* ---------- reloj ---------- */
 
@@ -2916,6 +3011,7 @@ async function boot() {
     if (state.activeView === 'view-metrics') pollMetrics()
     if (state.activeView === 'view-products') pollProducts()
     if (state.activeView === 'view-library') pollLibrary()
+    if (state.activeView === 'view-dropanas-auto') loadDropanasOrders()
     if (state.activeView === 'view-broadcast') pollBroadcasts()
     if (state.activeView === 'view-sim') pollSimulator()
     if (state.activeView === 'view-coupons') pollCoupons()

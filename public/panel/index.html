@@ -547,6 +547,32 @@
               </div>
             </article>
 
+            <article class="card dp-auto-card dp-auto-orders-card">
+              <div class="dp-auto-card-head">
+                <div>
+                  <span class="dp-auto-eyebrow">Seguimiento operativo</span>
+                  <h3>Pedidos vendidos y en movimiento</h3>
+                  <p class="help">Solo aparecen ventas cerradas. Abrí cualquiera para ver el chat, la guía y actualizar su etapa.</p>
+                </div>
+                <strong class="dp-auto-orders-total" id="da_ordersTotal">0 activos</strong>
+              </div>
+              <div class="dp-auto-orders-tools">
+                <input type="search" id="da_ordersSearch" placeholder="Buscar cliente, teléfono, producto o guía…">
+                <div class="dp-auto-order-filters" id="da_orderFilters" role="group" aria-label="Filtrar pedidos por etapa">
+                  <button class="dp-auto-filter is-active" type="button" data-filter="active">Activos <span id="da_count_active">0</span></button>
+                  <button class="dp-auto-filter" type="button" data-filter="pending">Sin guía <span id="da_count_pending">0</span></button>
+                  <button class="dp-auto-filter" type="button" data-filter="en_camino">En camino <span id="da_count_en_camino">0</span></button>
+                  <button class="dp-auto-filter" type="button" data-filter="esperando_retiro">Para retirar <span id="da_count_esperando_retiro">0</span></button>
+                  <button class="dp-auto-filter" type="button" data-filter="tienda_maracaibo">En tienda <span id="da_count_tienda_maracaibo">0</span></button>
+                  <button class="dp-auto-filter" type="button" data-filter="entregado">Entregados <span id="da_count_entregado">0</span></button>
+                  <button class="dp-auto-filter" type="button" data-filter="all">Todos <span id="da_count_all">0</span></button>
+                </div>
+              </div>
+              <div class="dp-auto-orders-list" id="da_ordersList">
+                <div class="empty-state"><div class="icon">⌛</div><div class="title">Cargando pedidos…</div></div>
+              </div>
+            </article>
+
             <p class="dp-auto-updated" id="da_updated"></p>
           </div>
         </div>

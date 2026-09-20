@@ -287,7 +287,15 @@ router.get('/api/stages', (_req, res) => {
 
 router.get('/api/conversations', (req, res) => {
   const search = String(req.query.search || '').trim();
+  const scope = String(req.query.scope || '').trim();
   let sessions = listSessions();
+
+  // La vista operativa de DroPanas muestra solamente pedidos que ya son
+  // ventas cerradas. SOLD_STAGES es la misma fuente de verdad que usan el
+  // flujo, las metricas y el seguimiento.
+  if (scope === 'sold') {
+    sessions = sessions.filter((session) => SOLD_STAGES.includes(session.stage || 'nuevo'));
+  }
 
   if (search) {
     sessions = sessions.filter((session) => matchesConversation(session, search));
