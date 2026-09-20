@@ -220,7 +220,7 @@ test('sticker solo (sin nada mas de sustancia) NO alcanza para cerrar, aunque el
   assert.notEqual(session.orderClosed, true, 'BUG si esto es true: un sticker solo no es una aceptacion inequivoca ni trae una cantidad nueva');
 });
 
-test('delivery a domicilio en Caracas (cualquier zona, sin mencionar "agencia"/"Tealca"/"guia" en ningun lado) SI cierra con una direccion real', async () => {
+test('delivery a domicilio en Caracas no cierra aunque tenga una direccion real', async () => {
   const phone = '584120000906';
   // REVERTIDO a pedido explicito del negocio (20260920): hubo una version
   // intermedia que exigia una lista de zonas puntuales de Caracas
@@ -248,8 +248,8 @@ test('delivery a domicilio en Caracas (cualquier zona, sin mencionar "agencia"/"
   await esperarProcesamiento();
 
   const session = getSession(phone);
-  assert.equal(session.orderClosed, true, 'un pedido a domicilio con una direccion real en Caracas tiene que poder cerrar (el negocio da domicilio a toda la ciudad), aunque el texto de cierre no mencione Tealca/agencia/guia');
-  assert.equal(session.stage, 'vendido');
+  assert.notEqual(session.orderClosed, true, 'ninguna ciudad permite cerrar un pedido nuevo a domicilio');
+  assert.notEqual(session.stage, 'vendido');
 });
 
 test('delivery a domicilio: decir SOLO la palabra "domicilio" (sin una direccion real) NO alcanza para dar el destino por resuelto', async () => {

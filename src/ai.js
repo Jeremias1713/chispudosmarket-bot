@@ -163,7 +163,7 @@ function getDataRequestTemplate(settingsArg) {
     || '📦 Para procesar tu pedido envíanos:\n👤 Nombre y apellido:\n🆔 Cédula:\n📞 Teléfono:\n🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana';
 }
 
-function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) {
+function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, knownOrder) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
@@ -194,7 +194,7 @@ function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequ
   const coverageInfo = knownCityClean ? resolveDeliveryCoverage(knownCityClean) : null;
   let coverageDirective = '';
   if (coverageInfo && !coverageInfo.domicilioAllowed) {
-    coverageDirective = `\n  DATO YA CONFIRMADO, MODALIDAD DE ENTREGA: la ciudad de este cliente ("${knownCityClean}") NO tiene entrega a domicilio disponible. NUNCA le ofrezcas ni le confirmes domicilio, aunque el te lo pida o te de una direccion completa: la unica modalidad real ahi es retiro en agencia (o, si es Maracaibo puntual, la tienda propia). Si insiste en domicilio, decile con sinceridad que por ahora esa opcion no esta disponible en su zona.\n`;
+    coverageDirective = `\n  DATO YA CONFIRMADO, MODALIDAD DE ENTREGA: no hay entrega a domicilio en esta ciudad ni en ninguna otra. El envio solo puede ser para retiro en una agencia. NUNCA pidas direccion residencial ni punto de referencia.\n`;
   }
   // Nombre/cedula/telefono ya confirmados por el cliente (ver la ficha,
   // card.nombre/cedula/telefono en state.js): a diferencia de knownCity, esto
@@ -210,6 +210,9 @@ function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequ
   const knownNombreClean = String(knownCustomer?.nombre || '').trim();
   const knownCedulaClean = String(knownCustomer?.cedula || '').trim();
   const knownTelefonoClean = String(knownCustomer?.telefono || '').trim();
+  const knownOrderDirective = knownOrder && (knownOrder.quantity || knownOrder.agency)
+    ? `\n  MEMORIA DEL PEDIDO ACTUAL (no vuelvas a pedir estos datos):${knownOrder.quantity ? `\n  - Cantidad: ${knownOrder.quantity}` : ''}${knownOrder.agency ? `\n  - Agencia confirmada: ${knownOrder.agency}` : ''}${knownOrder.courier ? `\n  - Transportista: ${knownOrder.courier}` : ''}\n`
+    : '';
   // Texto EXACTO que el bot manda para pedir nombre/cedula/telefono cuando
   // retira en agencia. Editable desde Configuracion (Configuracion > "Texto
   // para pedir los datos del pedido"); si no se cargo nada ahi, usa este por
@@ -246,16 +249,15 @@ ${splitEnabled
   1. Contesta lo que te acaban de decir. Si pregunto algo, contestalo. Si conto algo, reconocelo. Esto le gana a cualquier guion de producto o a seguir pidiendo datos.
   2. No le preguntes algo que ya te contesto. Mira la conversacion antes de preguntar.
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
-  4. Las preguntas de calificacion o de interes que puedan venir en las instrucciones de un producto (por ejemplo, preguntarle si busca tal beneficio o tal otro) SOLO sirven para abrir la charla, ANTES de que el cliente te de el primer dato del pedido. En cuanto el cliente ya te dio cualquier dato del pedido (te dijo la ciudad, cuantos quiere, o cualquier otro de la lista de "COMO SE ARMA EL PEDIDO" mas abajo), NUNCA vuelvas para atras a una pregunta de calificacion del producto: seguí siempre para adelante con el guion de armar el pedido. Ejemplo tipico de este error, que hay que evitar: el cliente te dice en que ciudad esta y en vez de seguir con el paso que corresponde (domicilio/agencia segun ENTREGA) le repreguntas algo del tipo "¿buscas mas energia o mejorar tu rendimiento?": eso esta mal, ya paso el momento de esa pregunta.
+  4. Las preguntas de calificacion o de interes que puedan venir en las instrucciones de un producto SOLO sirven para abrir la charla. En cuanto el cliente ya dio un dato del pedido, segui con el siguiente dato pendiente y no vuelvas atras.
   5. Si un mensaje del cliente es exactamente "[sticker]", es porque mando un sticker de WhatsApp (no se puede leer que dice). En la practica, la gran mayoria de las veces un sticker es solo su forma de decir "si, dale, esta bien, ok", asi que asumilo asi y segui la conversacion para adelante con naturalidad, como si te hubiera dicho que si. La UNICA excepcion es si tu mensaje anterior le pedia un dato puntual en texto que un sticker no puede reemplazar (por ejemplo nombre y apellido, cedula, telefono, cuantos quiere, en que ciudad esta, o el nombre/numero de una agencia de la lista): en ese caso especifico no asumas el dato, decile con onda que te lo escriba porque necesitas ese dato exacto.
   6. Si un mensaje del cliente trae un tramo entre corchetes tipo "[Lo que se ve en la imagen que mando: ...]" o "[Mando una imagen sin texto. Lo que se ve: ...]", es porque el cliente mando una FOTO y ese texto es una descripcion automatica de lo que muestra (vos no "ves" la foto en si, solo esa descripcion). Usala con naturalidad para entender que mando y responder en consecuencia, como si hubieras visto la foto vos mismo, PERO nunca repitas el corchete ni la palabra "descripcion" en tu respuesta: contestale como a cualquier mensaje. Ejemplos: si la descripcion dice que es un comprobante de pago con un monto, agradecele y confirmale que lo recibiste (o si el monto no coincide con lo que corresponde, decilo con onda); si dice que es su cedula y se lee el numero, tomalo como el dato de cedula y no se lo vuelvas a pedir; si dice que es una foto de un producto o de una consulta, respondele sobre eso igual que si fuera una pregunta de texto. Si la descripcion dice explicitamente que algo no se alcanza a leer bien (un monto borroso, un numero cortado), no lo inventes: decile que no se ve bien esa parte y pedile que la reenvie o te confirme el dato por texto.
   7. NUNCA le digas a un cliente que su pedido "ya llego", "ya fue entregado", "ya lo recibio", "ya esta en tus manos" o cualquier variante de eso, a menos que la etapa real del pedido (ver el DATO YA CONFIRMADO de "ESTADO DEL ENVIO" mas abajo) sea "entregado", o el cliente mismo te lo acabe de decir con sus propias palabras en el mensaje que estas contestando. El tiempo que haya pasado desde que se cerro el pedido NO ES UNA SEÑAL de que ya llego (esto ya paso de verdad: se le dijo a un cliente que su pedido ya habia llegado cuando en realidad se habia armado hacia apenas 2 horas, y era mentira). Si el cliente pregunta por el estado del envio y la etapa real todavia no es "entregado", contestale la verdad segun esa etapa (ver el texto exacto de que decir en cada caso, mas abajo), nunca asumas ni inventes que ya esta resuelto.
   8. NUNCA confirmes que un cliente puede pasar a retirar o va a recibir su pedido en un dia u horario puntual (por ejemplo "¿puedo pasarlo a buscar hoy?", "¿me llega mañana?", "¿lo tienen para el viernes?") solo porque el cliente lo pregunta o lo propone con confianza. Esto ya paso de verdad: un cliente con el pedido recien cerrado (sin guia todavia) pregunto si podia pasar a retirarlo "hoy" y el bot le dijo que si, cuando en realidad ni siquiera se sabia cuando iba a estar listo, y ademas ese "hoy" resulto ser un sabado, fuera del horario de Tealca (ver HORARIO DE TEALCA mas abajo: lunes a viernes 9am a 4pm). Vos NO sabes que dia de la semana es "hoy" para el cliente, asi que la UNICA fuente confiable para contestar esto es la etapa real del pedido (ver el DATO YA CONFIRMADO de "ESTADO DEL ENVIO" mas abajo): si esa etapa todavia no es "esperando_retiro" ni "entregado", contestale con honestidad que todavia no podes confirmar un dia exacto (nunca digas que si solo por quedar bien), y si SI es "esperando_retiro", igual recorda el horario de Tealca antes de confirmar que puede pasar justo en el momento que propone.
 ${knownCityClean ?`\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${coverageDirective}${dataAlreadyRequested ? `\n  DATO YA CONFIRMADO, MUY IMPORTANTE: en esta conversacion YA le mandaste el mensaje pidiendo nombre y apellido, cedula y telefono (el bloque de "Para procesar tu pedido envianos"). NUNCA vuelvas a mandar ese bloque de nuevo, ni completo ni parecido, aunque el cliente todavia no te haya contestado con esos datos, aunque haya pasado tiempo, o aunque te mande un sticker, un "ok" u otro mensaje corto. Si todavia no te paso esos datos y te escribe algo que no son los datos, contestale lo que corresponda a ese mensaje y como mucho agregale un recordatorio CORTO en una sola frase (por ejemplo "cuando puedas pasame esos datos para procesar tu pedido"), nunca repitas el bloque completo con nombre/cedula/telefono de nuevo. En cuanto identifiques los tres datos en lo que te escribio, seguí al mensaje de cierre del pedido normalmente.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, tu UNICA pregunta pendiente sobre el pedido es la cantidad, nunca el producto. Ejemplo de error que NO tenes que cometer (esto ya paso una vez, no lo repitas): despues de resolver la agencia o la ciudad, cerrar la respuesta con algo como "¿que producto te gustaria pedir y cuantos frascos quieres?" esta MAL, porque el producto ya se sabe; lo correcto ahi es preguntar solo "¿cuantos frascos queres pedir?" (o similar, sin mencionar "que producto"). Esto vale tambien justo despues de usar la herramienta buscar_agencias_por_zona: la pregunta que sigue a la lista de agencias tiene que ser sobre la cantidad, nunca sobre el producto. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}${orderClosed ? `\n  DATO YA CONFIRMADO, EL MAS IMPORTANTE DE TODOS AHORA MISMO: el pedido de este cliente YA ESTA CERRADO (ya se mando el mensaje de cierre con el resumen, el pago contra entrega y lo de la guia de Tealca). Esto cambia como contestas TODO lo que venga ahora:\n  - La REGLA DE ORO de terminar con una pregunta de venta queda APAGADA. No la reactives.\n  - Si el cliente pregunta algo suelto del producto (por ejemplo si sirve para algo, como se toma, cuanto dura), contestale la pregunta con la info real y PARA AHI. No le agregues "¿te gustaria apartar tu frasco?", "¿te aparto uno?", "¿cuantos queres pedir?" ni ninguna frase de venta: el ya lo pidio, no hay nada que apartar de nuevo.\n  - No vuelvas a pedir ningun dato del pedido (producto, cantidad, ciudad, agencia, nombre, cedula, telefono): ya los tenes todos.\n  - Si te saluda o dice algo corto como "gracias" u "ok", contestale corto y calido, sin reabrir el pedido.\n  - Solo si el cliente dice explicitamente que quiere agregar otro producto, cambiar algo del pedido, o hacer un pedido nuevo, ahi si volves al guion normal de armar un pedido (y ese pedido nuevo es el que queda "abierto" de ahi en adelante). PERO OJO, esto NO borra nada de lo que ya sabes de este cliente: ciudad, agencia, nombre, cedula y telefono siguen siendo los mismos de antes (ver los DATO YA CONFIRMADO de mas abajo), asi que en ese pedido nuevo/modificado NUNCA vuelvas a preguntar la ciudad, ni a mandar de nuevo el bloque completo de nombre/cedula/telefono: lo unico que falta confirmar es lo que realmente cambio (por ejemplo la cantidad, o el producto nuevo si pidio otro). Esto ya paso mal una vez de verdad: un cliente cambio la cantidad de su pedido ya cerrado y el bot le volvio a preguntar la ciudad Y le volvio a pedir nombre/cedula/telefono, a pesar de que ya los tenia los tres.\n` : ''}${(knownNombreClean || knownCedulaClean || knownTelefonoClean) ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente, asi que vale aunque estos mensajes ya hayan quedado afuera del historial reciente que ves aca abajo): ya tenes estos datos de este cliente:${knownNombreClean ? `\n  - Nombre y apellido: ${knownNombreClean}` : ''}${knownCedulaClean ? `\n  - Cedula: ${knownCedulaClean}` : ''}${knownTelefonoClean ? `\n  - Telefono: ${knownTelefonoClean}` : ''}\n  NUNCA le vuelvas a pedir ninguno de estos datos, ni completo ni parcial (ni el bloque de "Para procesar tu pedido envianos", ni preguntar "cual es tu nombre" suelto), aunque el pedido se haya cerrado hace rato, aunque abra un pedido nuevo o modifique uno, o aunque estos mensajes ya no aparezcan en el historial reciente de abajo. Solo si el mismo cliente te da un dato distinto (por ejemplo corrige su telefono), usa ese nuevo valor en su lugar.\n` : ''}${orderClosed && SHIPPING_STAGE_TEXT[shippingStage] ? `\n  DATO YA CONFIRMADO, ESTADO DEL ENVIO (esto es lo unico que podes usar para hablar de si el pedido llego o no, ver reglas 7 y 8 de PRIORIDAD mas arriba): ${SHIPPING_STAGE_TEXT[shippingStage]}\n` : ''}
 
-  ENTREGA: depende de la ciudad.
-  - CARACAS (Distrito Capital, incluye todos sus municipios/parroquias): hay dos formas de recibirlo, domicilio (te lo llevan hasta la puerta) o retiro en agencia. Ofrecele PRIMERO la opcion de domicilio, es la mas comoda para el cliente, y si prefiere retirar en agencia esa tambien esta disponible.
-  - RESTO DE VENEZUELA (todos los demas estados, Maracaibo incluida): SOLO se retira en agencia (TEALCA), no hay entrega a domicilio ahi. Si un cliente fuera de Caracas pide que se lo lleven a la casa, decile con naturalidad que fuera de Caracas por ahora solo se retira en agencia, no ofrezcas ni prometas domicilio en esos casos, y segui ayudandolo a elegir la agencia mas cercana.
+${knownOrderDirective}
+  ENTREGA: en toda Venezuela, Caracas incluida, los envios son UNICAMENTE para RETIRO EN AGENCIA. No hay entrega a domicilio, delivery ni envio a la casa. Si lo piden, aclara esa politica y continua ayudando con la ciudad o agencia pendiente, sin ignorar ninguna otra pregunta del cliente.
   - MARACAIBO (estado Zulia): ademas de la agencia Tealca, ahi tambien hay tienda fisica propia del negocio, en Palacio de Eventos, local PBG-16, Maracaibo, estado Zulia 🙏🏻. ESA es la UNICA direccion que podes escribir de memoria, sin llamar a la herramienta: es fija y siempre la misma. Para las agencias Tealca de Maracaibo NUNCA hagas lo mismo: aunque te sepas que en Maracaibo hay varias agencias Tealca, NO inventes ni escribas de memoria ninguna direccion de Tealca (nombre de sector, calle, numero, etc) — eso ya paso de verdad (se le invento a un cliente una direccion de Tealca en Maracaibo que no existe en el listado real) y no puede volver a pasar. Para Maracaibo llama a buscar_agencias_por_zona exactamente igual que para cualquier otra ciudad (esta nota de la tienda propia NO reemplaza ese paso), dejá que la herramienta traiga la lista REAL de agencias Tealca de Maracaibo (suelen ser varias, no una sola), y despues sumale la tienda propia como un dato mas de la conversacion (con algun emoji si corresponde, tipo 📍), no como parte de la lista numerada. Esto es informacion SOLO para Maracaibo puntual, no para el resto del Zulia ni del pais: en cualquier otra ciudad segui con la agencia Tealca como unica opcion.
 
   HORARIO DE TEALCA: Tealca atiende de lunes a viernes, de 9:00am a 4:00pm. No atiende fines de semana ni feriados. Si el cliente pregunta si Tealca esta abierta, hasta que hora atiende, o cualquier variante de eso (por ejemplo si puede retirar su pedido "ahorita" o "hoy en la noche"), contestale con este horario exacto, sin inventar otro. Si pregunta puntualmente por su pedido fuera de ese horario, decile con naturalidad que en ese momento la agencia esta cerrada y que puede retirarlo en el proximo horario habil.
@@ -265,15 +267,12 @@ ${knownCityClean ?`\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de 
   Cuando ya hay interes real, necesitas estos datos, en este orden, de a uno por vez:
   1. Que producto quiere y cuantos. Si el cliente ya dijo la cantidad en algun momento de la conversacion (aunque haya sido hace varios mensajes), usa esa cantidad y NUNCA se la vuelvas a preguntar. Preguntale la cantidad SOLO si todavia no la dijo.
   2. En que ciudad esta.
-  3. Segun la ciudad (ver ENTREGA arriba):
-     - Si es Caracas: preguntale si prefiere domicilio o agencia (ofrecele domicilio primero). Si elige domicilio, pedile la direccion exacta con un punto de referencia. Si elige agencia, buscale las agencias con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA).
-     - Si es cualquier otra ciudad: buscale la agencia mas cercana con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA). NUNCA pidas direccion exacta ni punto de referencia fuera de Caracas: no hace falta, todo se retira en agencia, y la unica direccion que existe ahi es la de la agencia (que vos ya le diste), nunca la del cliente.
-     - IMPORTANTE: en cuanto la agencia (o la modalidad domicilio/agencia en Caracas) ya quedo resuelta, esa parte del pedido esta cerrada para siempre en esta conversacion. NUNCA vuelvas a mencionarla como un dato pendiente, ni le vuelvas a pedir que la confirme o que te de una direccion, salvo que el cliente mismo diga que cambio de ciudad o quiere otra agencia.
+  3. Segun la ciudad, busca la agencia con buscar_agencias_por_zona y pide que confirme cual le queda bien. NUNCA pidas direccion residencial ni punto de referencia. En cuanto la agencia quede resuelta, no vuelvas a pedirla salvo que el cliente cambie de ciudad o de agencia.
   4. Nombre y apellido, telefono y cedula: una vez que ya sabes el producto+cantidad y ya quedo resuelta la entrega (paso 3), pedi estos tres datos juntos, en un solo pedido (no de a uno), usando EXACTAMENTE este texto, en un UNICO mensaje de WhatsApp (no le cambies ni una palabra, ni el orden, ni le agregues nada, y no le pongas nada antes tipo "necesito estos datos": eso ya queda dicho en este mismo mensaje, ponerlo dos veces se ve repetido):
 
 ${dataRequestTemplate}
 
-     Esto aplica cuando el cliente retira en agencia (Tealca). Si es domicilio en Caracas, pedi los mismos tres datos (nombre y apellido, telefono, cedula) juntos en un solo mensaje pero con tus propias palabras, sin mencionar Tealca ni oficina (ya tiene la direccion con punto de referencia).
+     Esto aplica al retiro en agencia. Si ya recibiste uno o dos de esos campos, pide UNICAMENTE el campo que falta o que sea ambiguo, nunca los tres otra vez.
      IMPORTANTE, ESTO YA PASO DE VERDAD Y NO PUEDE VOLVER A PASAR: en vez de pedir estos datos directamente con el texto de arriba, el bot le dijo a un cliente "te paso el formulario para tus datos" (o alguna variante como "te mando el formulario", "te comparto el enlace para tus datos") y nunca le llego nada mas: no existe ningun formulario ni enlace, ese pedido de datos SIEMPRE es el texto de arriba, escrito directo en el chat, nunca un link externo. NUNCA uses la palabra "formulario" ni prometas mandar un "enlace"/"link" para que el cliente cargue sus datos: en el mismo mensaje en el que decidís pedir los datos, escribí el texto de arriba completo, ya. Lo mismo aplica para cualquier otra cosa que prometas "pasar" o "mandar" en un momento (una direccion, un dato, una condicion): si lo vas a decir, decilo YA en este mismo mensaje con la info real, nunca como una promesa de mandarlo despues.
      Cuando el cliente te conteste con esos datos, leelos con cuidado y fijate bien cual valor es cual aunque los mande en un orden distinto al que pediste, o todos juntos en un solo mensaje: el nombre es texto con letras, el telefono venezolano tiene 10 u 11 digitos (suele empezar con 0 o con 4), la cedula tiene entre 6 y 9 digitos. Si el cliente dice algo como "la direccion que me pasaste" o similar, es solo una confirmacion de la agencia/direccion, no un dato nuevo, no lo cuentes como si faltara. En cuanto identifiques nombre, telefono y cedula (aunque hayan llegado mezclados en un mismo mensaje o en un orden distinto), da esos tres datos por completos y NUNCA le vuelvas a pedir ninguno de ellos.
   Si te dice una cantidad sin precio confirmado, nunca inventes ni calcules el precio total: segui tomando los datos y decile que confirmas el precio exacto en un momento.
@@ -283,14 +282,14 @@ ${dataRequestTemplate}
   Si el cliente pide hablar con una persona, se queja o reclama algo serio, decile que ya lo pasas con un asesor humano y no sigas insistiendo con el guion de venta.
 
   CIERRE DEL PEDIDO:
-  Cuando ya tenes todos los datos (producto y cantidad, como lo va a recibir -agencia elegida, o direccion con punto de referencia si es domicilio en Caracas-, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir, en este orden:
-  1. Un resumen de lo que pidio (incluyendo la agencia donde va a retirar, o la direccion si es domicilio).
-  2. Que el pago se hace contra entrega: en la agencia, al momento de retirar (o en la puerta, si es domicilio en Caracas). NUNCA digas que "un asesor se va a poner en contacto para coordinar el pago": eso no es asi, el pago no se coordina antes, se paga ahi mismo al recibirlo. Esto vale para pedidos por Tealca (pago contra entrega); para MRW o Zoom el pago es SIEMPRE anticipado, nunca contra entrega (ver MEDIOS DE PAGO mas abajo), asi que un cierre por MRW/Zoom nunca dice "pago contra entrega".
-  3. Que en cuanto tengan la guia de envio de Tealca se la van a pasar, y que le avisan apenas el pedido llegue a la agencia (o este en camino, si es domicilio).
+  Cuando ya tenes todos los datos (producto, presentacion, cantidad, agencia elegida, nombre y apellido, telefono y cedula), el mensaje de cierre tiene que incluir, en este orden:
+  1. Un resumen de lo que pidio, incluyendo la agencia donde va a retirar.
+  2. Para Tealca, que paga al recibir en la agencia y no adelanta dinero. Para MRW/Zoom, no cierres automaticamente: el pago es anticipado y lo coordina una persona.
+  3. Para Tealca, que le pasan la guia y le avisan cuando llegue a la agencia.
   No prometas una fecha ni un tiempo de entrega exacto: eso lo confirma la guia de Tealca cuando la tengan.
 
   MEDIOS DE PAGO:
-  - Contra entrega (Tealca, retiro en agencia, o domicilio en Caracas): efectivo, transferencia o pago movil, sin adelantos. Nunca digas que hace falta adelantar nada para esto.
+  - Tealca, retiro en agencia: pago al recibir, sin adelantos. No inventes otros detalles.
   - MRW o Zoom: SI son opciones validas del negocio, pero SIEMPRE con pago ANTICIPADO (nunca contra entrega). Hoy el bot todavia no tiene forma de gestionar ese pago anticipado ni de confirmar un pedido completo por MRW/Zoom por su cuenta: si el cliente pide envio por MRW o Zoom, contestale con sinceridad que esa opcion existe con pago anticipado, y pasale la conversacion a un asesor humano para coordinar el pago y los datos de ese envio puntual (nunca inventes un monto, un metodo de pago anticipado, ni confirmes ese pedido vos mismo como si ya estuviera cerrado). Para Tealca (contra entrega) segui vendiendo y cerrando el pedido vos mismo con normalidad, sin derivarlo a nadie.
   - NUNCA aceptes ni menciones Cashea como medio de pago: no esta disponible.
   - NUNCA cobres ni cotices en dolares: los montos y precios son siempre en bolivares (Bs), el catalogo de arriba es la unica fuente de precios.
@@ -1075,26 +1074,16 @@ function resolveDeliveryCoverage(knownCity, userText) {
   // domicilio de inmediato, no recien en el proximo turno cuando la ficha
   // se ponga al dia.
   const cityKey = agencies.findKnownCityKey(userText) || agencies.findKnownCityKey(knownCity);
-  if (!cityKey) return { domicilioAllowed: false, cityKnown: false, pendingHumanConfirmation: false };
-  const estado = agencies.resolveStateForCity(cityKey);
-  if (estado !== 'Distrito Capital') {
-    // Fuera de Caracas: regla de negocio definitiva y ya confirmada, no es
-    // una zona "dudosa" -- se puede decir que no hay domicilio sin dejar
-    // nada pendiente.
-    return { domicilioAllowed: false, cityKnown: true, pendingHumanConfirmation: false };
-  }
-  // Caracas (Distrito Capital): el negocio da domicilio a TODA la ciudad,
-  // sin excepcion de zona/parroquia -- no hace falta ninguna lista.
-  return { domicilioAllowed: true, cityKnown: true, pendingHumanConfirmation: false };
+  return { domicilioAllowed: false, cityKnown: Boolean(cityKey), pendingHumanConfirmation: false };
 }
 
 const DOMICILIO_MENTION_RE =
-  /\bdomicilio\b|hasta la puerta|puerta a puerta|te lo (llevamos|entregamos|mandamos|enviamos) (a|hasta) tu (casa|direccion)/i;
+  /\bdomicilio\b|\bdelivery\b|hasta la puerta|puerta a puerta|en tu casa|a tu casa|te lo (llevamos|entregamos|mandamos|enviamos) (a|hasta) tu (casa|direccion)/i;
 // Si el propio texto YA es una negacion/derivacion correcta, o ya dice que
 // queda pendiente de confirmar con un humano, no hay nada que corregir --
 // séria al reves, estariamos reemplazando una respuesta correcta por otra.
 const DOMICILIO_DENIAL_RE =
-  /no\s+(hay|tenemos|contamos con|hacemos)\s+(entrega\s+a\s+)?domicilio|solo\s+(se\s+)?(retira|retiro|retirar)\s+en\s+(la\s+)?agencia|por\s+ahora\s+(no|solo)[^.]*agencia|solo\s+esta\s+disponible\s+en\s+caracas|necesito\s+saber\s+bien\s+tu\s+ciudad|(confirmar|confirme)\s+(con\s+(el\s+equipo|un\s+asesor)\s+)?(si\s+hay\s+)?cobertura|todavia\s+necesito\s+confirmar/i;
+  /no\s+(hay|tenemos|ofrecemos|contamos con|hacemos)\s+(entrega\s+a\s+)?(domicilio|delivery)|solo\s+(se\s+)?(retira|retiro|retirar)\s+en\s+(la\s+)?agencia|unicamente\s+para\s+retiro\s+en\s+agencia|por\s+ahora\s+(no|solo)[^.]*agencia|necesito\s+saber\s+bien\s+tu\s+ciudad/i;
 
 function looksLikeOffersDomicilio(text) {
   const norm = normalizeForMatch(text);
@@ -1122,9 +1111,14 @@ function guardAgainstUnauthorizedDelivery(text, knownCity, userText) {
     'cityKnown=',
     cityKnown
   );
+  const correction = 'No ofrecemos entrega a domicilio; los envios son unicamente para retiro en agencia Tealca.';
+  const usefulParts = String(text || '')
+    .split(/(?<=[.!?])\s+|\n+/)
+    .filter((part) => part.trim() && !DOMICILIO_MENTION_RE.test(normalizeForMatch(part)));
+  if (usefulParts.length) return `${correction} ${usefulParts.join(' ')}`.trim();
   return cityKnown
-    ? 'Por ahora la entrega a domicilio solo esta disponible en Caracas. Para tu zona la opcion es retirar en la agencia Tealca mas cercana: ¿te busco la que te quede mejor?'
-    : 'Antes de confirmarte como te llega el pedido necesito saber bien tu ciudad y zona exacta. ¿Me las confirmas?';
+    ? `${correction} ¿Te ayudo a elegir la agencia que te quede mejor?`
+    : `${correction} ¿En que ciudad retirarias?`;
 }
 
 // Aceptacion no ambigua: el pedido original de esta revision es "no
@@ -1259,9 +1253,22 @@ function looksLikePresentationConfirmed(knownProductName, recentUserText) {
 // ya dio su ok DESPUES de conocer el producto/cantidad/destino que ese
 // mismo total describe); una confirmacion puntual del MONTO en si, turno a
 // turno, necesitaria el mismo objeto de pedido estructurado de H08.
-const MONEY_MENTION_RE = /\b\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?\s*(bs\.?|bol[i\u00ed]vares)\b|\bbs\.?\s*\d/i;
-function looksLikeTotalCommunicated(closingText) {
-  return MONEY_MENTION_RE.test(String(closingText || ''));
+const MONEY_MENTION_RE = /\b\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?\s*(bs\.?|bol[i\u00ed]vares)\b|\bbs\.?\s*\d/i;
+function looksLikeTotalCommunicated(closingText, expectedTotal) {
+  const raw = String(closingText || '');
+  if (!MONEY_MENTION_RE.test(raw)) return false;
+  if (expectedTotal === null || expectedTotal === undefined || expectedTotal === '' || !Number.isFinite(Number(expectedTotal))) return true;
+  const matches = [
+    ...(raw.matchAll(/(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\s*(?:bs\.?|bol[ií]vares)/gi)),
+    ...(raw.matchAll(/(?:bs\.?|bol[ií]vares)\s*(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/gi)),
+  ];
+  const values = matches.map((match) => {
+    const value = match[1];
+    if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(value)) return Number(value.replace(/\./g, '').replace(',', '.'));
+    if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(value)) return Number(value.replace(/,/g, ''));
+    return Number(value.replace(',', '.'));
+  });
+  return values.some((value) => Math.abs(value - Number(expectedTotal)) < 0.01);
 }
 
 // Junta los chequeos de arriba. Devuelve {complete, missing}: missing lista,
@@ -1277,6 +1284,10 @@ function evaluateOrderCompleteness({
   cardAgencia,
   lastAssistantText,
   lastUserMessage,
+  knownQuantity,
+  orderModality,
+  orderCourier,
+  expectedTotal,
 } = {}) {
   const missing = [];
   const nombre = String(knownCustomer && knownCustomer.nombre || '').trim();
@@ -1299,7 +1310,7 @@ function evaluateOrderCompleteness({
   // se aceptara eso como prueba, el bot podria "inventar" un pedido
   // completo con solo escribir un resumen convincente, exactamente el
   // problema que esta validacion tiene que evitar.
-  if (!looksLikeQuantityMentioned(recentUserText, lastAssistantText)) missing.push('cantidad');
+  if (!Number(knownQuantity) && !looksLikeQuantityMentioned(recentUserText, lastAssistantText)) missing.push('cantidad');
 
   // Ver looksLikeAgencySelected/looksLikeDeliveryAddressGiven arriba: ya no
   // alcanza con knownCity sola (punto 1 de la segunda revision). Se suma
@@ -1319,18 +1330,17 @@ function evaluateOrderCompleteness({
   // resolveDeliveryCoverage mas abajo) -- una direccion completa en una
   // ciudad fuera de esa cobertura (o con la ciudad todavia sin confirmar) NO
   // puede aprobar un pedido de delivery.
-  const direccionValida =
-    looksLikeDeliveryAddressGiven(recentUserText) &&
-    resolveDeliveryCoverage(knownCity, recentUserText).domicilioAllowed;
-  const destinoYaResuelto = agenciaConfirmada || direccionValida;
+  const destinoYaResuelto = agenciaConfirmada && orderModality !== 'home_delivery';
   if (!destinoYaResuelto) missing.push('modalidad_destino');
+
+  if (/^(MRW|Zoom)$/i.test(String(orderCourier || ''))) missing.push('coordinacion_humana_pago');
 
   const aceptacionOk =
     looksLikeUnambiguousEngagement(recentUserText) ||
     looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage);
   if (!aceptacionOk) missing.push('aceptacion_no_ambigua');
 
-  if (!looksLikeTotalCommunicated(text)) missing.push('total_comunicado');
+  if (!looksLikeTotalCommunicated(text, expectedTotal)) missing.push('total_comunicado');
 
   return { complete: missing.length === 0, missing };
 }
@@ -1418,7 +1428,8 @@ const MISSING_LABELS = {
   producto: 'confirmar que producto queres',
   presentacion: 'confirmar que presentacion queres',
   cantidad: 'confirmar cuantos queres',
-  modalidad_destino: 'confirmar como lo vas a recibir (agencia puntual o direccion)',
+  modalidad_destino: 'confirmar la agencia donde vas a retirar',
+  coordinacion_humana_pago: 'coordinar con una persona el pago anticipado y el retiro en agencia',
   aceptacion_no_ambigua: 'que me confirmes el pedido',
   total_comunicado: 'confirmarte el monto total',
 };
@@ -1651,7 +1662,7 @@ function guardAgainstUnverifiedAgencyList(text, knownCity, userText) {
   return buildAgencyListMessage(scope, estado, ciudadCandidata, results);
 }
 
-async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) {
+async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, knownOrder) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
@@ -1677,7 +1688,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   }));
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) },
+    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, knownOrder) },
     ...sanitizedHistory,
     { role: 'user', content: userText },
   ];

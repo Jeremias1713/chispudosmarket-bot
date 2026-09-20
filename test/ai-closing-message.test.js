@@ -139,7 +139,7 @@ test('looksLikeClosingSummaryText: SI reconoce un cierre de DOMICILIO que nunca 
 // TODA Caracas, sin excepcion de zona. Esta prueba demuestra que un cierre
 // de domicilio en Caracas SI cierra directamente, sin necesitar ninguna
 // lista de zonas.
-test('isClosingMessage: un cierre de domicilio en Caracas (cualquier zona) SI cierra directamente -- el negocio da domicilio a toda la ciudad', () => {
+test('isClosingMessage: un cierre de domicilio en Caracas queda bloqueado', () => {
   const cierreDomicilio =
     'Perfecto Carlos, tu pedido de 2 Shilajit (Bs 700) va para tu direccion en la Av. Libertador, Chacao, Caracas. ' +
     'El pago es contra entrega, en efectivo o pago movil. En cuanto el mensajero este en camino te aviso. ✅';
@@ -151,8 +151,7 @@ test('isClosingMessage: un cierre de domicilio en Caracas (cualquier zona) SI ci
   });
   assert.equal(
     isClosingMessage(cierreDomicilio, ctx),
-    true,
-    'BUG si esto es false: el negocio da domicilio a TODA Caracas, no hace falta ninguna zona confirmada para cerrar'
+    false
   );
 });
 
@@ -354,7 +353,7 @@ test('destino resuelto con una agencia puntual seleccionada en el texto (sin car
 // 20260920): ver el comentario junto a isClosingMessage mas arriba -- una
 // direccion real en Caracas resuelve el destino directamente, el negocio da
 // domicilio a toda la ciudad sin necesitar ninguna zona confirmada.
-test('destino SI resuelto con una direccion de domicilio en Caracas (cualquier zona)', () => {
+test('destino NO resuelto con una direccion de domicilio en Caracas', () => {
   const ctx = pedidoCompletoCtx({
     recentUserText:
       'Carlos Perez, cedula 12345678, telefono 04121234567, quiero 2 frascos, Av. Libertador, sector Los Palos Grandes, frente a la panaderia, dale',
@@ -363,8 +362,7 @@ test('destino SI resuelto con una direccion de domicilio en Caracas (cualquier z
   });
   const resultado = evaluateOrderCompleteness({ text: MENSAJE_CIERRE_REAL, ...ctx });
   assert.ok(
-    !resultado.missing.includes('modalidad_destino'),
-    'BUG si aparece: el negocio da domicilio a TODA Caracas, una direccion real ahi tiene que resolver el destino'
+    resultado.missing.includes('modalidad_destino')
   );
 });
 
@@ -402,6 +400,12 @@ test('looksLikeTotalCommunicated: reconoce un monto en Bs, no un numero cualquie
   assert.equal(looksLikeTotalCommunicated('tu pedido son Bs 700 en total'), true);
   assert.equal(looksLikeTotalCommunicated('700 Bs contra entrega'), true);
   assert.equal(looksLikeTotalCommunicated('dale, ya te anoto el pedido'), false);
+});
+
+test('looksLikeTotalCommunicated: con total esperado, un monto cualquiera en Bs no alcanza', () => {
+  assert.equal(looksLikeTotalCommunicated('Total: 700 Bs', 700), true);
+  assert.equal(looksLikeTotalCommunicated('Total: 999 Bs', 700), false);
+  assert.equal(looksLikeTotalCommunicated('Total: 1.050 Bs', 1050), true);
 });
 
 // --- Punto 6: el bot nunca dice "confirmado" cuando el sistema no puede

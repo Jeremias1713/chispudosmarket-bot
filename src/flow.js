@@ -46,6 +46,7 @@ const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
 const { SOLD_STAGES, isAllowedAutoTransition } = require('./stageRules');
+const { applyOrderMessage } = require('./orderMemory');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -742,8 +743,60 @@ async function processReply(from) {
     const fullHistory = [...(getSession(from).history || [])].map((m) => ({ role: m.role, content: m.content }));
     const history = fullHistory.slice(0, historyStart);
     const userText = batchTexts.length ? batchTexts.join('\n') : rawText;
-    const knownCity = session.card?.ciudad || null;
-    const knownProduct = session.linkedProductId ? findProduct(session.linkedProductId)?.name || null : null;
+    const explicitNewOrder = /\b(otro|nuevo|segunda)\s+pedido\b|\bquiero\s+pedir\s+de\s+nuevo\b/i.test(userText);
+    const startsFreshOrder = session.newOrderPending === true ||
+      (explicitNewOrder && (session.orderClosed === true || SOLD_STAGES.includes(session.stage)));
+    const productRecord = !explicitNewOrder && session.linkedProductId ? findProduct(session.linkedProductId) : null;
+    const knownProduct = productRecord?.name || null;
+    const memoryUpdate = applyOrderMessage({
+      currentOrder: startsFreshOrder ? null : session.currentOrder,
+      text: userText,
+      precedingAssistantText: session.lastAssistantText,
+      knownCustomer: session.card || {},
+    });
+    if (!memoryUpdate.order.product && (knownProduct || (!startsFreshOrder && session.card?.producto))) {
+      memoryUpdate.order.product = knownProduct || session.card.product;
+    }
+    const cardAfterMemory = { ...(session.card || {}), ...memoryUpdate.identity };
+    if (memoryUpdate.order.city) cardAfterMemory.ciudad = memoryUpdate.order.city;
+    if (startsFreshOrder || (session.currentOrder?.city && memoryUpdate.order.city !== session.currentOrder.city)) {
+      cardAfterMemory.agenciaConfirmadaEnChat = null;
+    }
+    const memoryPatch = { currentOrder: memoryUpdate.order, card: cardAfterMemory, newOrderPending: false };
+    if (startsFreshOrder) {
+      const previousOrders = [...(session.orderHistory || [])];
+      if (session.orderClosed === true || SOLD_STAGES.includes(session.stage)) {
+        previousOrders.push({
+          closedAt: session.soldAt || session.updatedAt || null,
+          stage: session.stage || null,
+          order: session.currentOrder || null,
+          card: {
+            producto: session.card?.producto || null,
+            guia: session.card?.guia || null,
+            agencia: session.card?.agencia || session.card?.agenciaConfirmadaEnChat || null,
+            monto: session.card?.monto ?? null,
+          },
+        });
+      }
+      memoryPatch.orderHistory = previousOrders;
+      memoryPatch.orderClosed = false;
+      memoryPatch.orderDataRequested = false;
+      memoryPatch.soldAt = null;
+      if (!session.stageLocked) {
+        memoryPatch.stage = 'interesado';
+        memoryPatch.stageReason = 'Pedido nuevo iniciado por el cliente';
+      }
+    }
+    updateSession(from, memoryPatch);
+    session.currentOrder = memoryUpdate.order;
+    session.card = cardAfterMemory;
+    if (startsFreshOrder) {
+      session.orderClosed = false;
+      session.orderDataRequested = false;
+      session.soldAt = null;
+      if (!session.stageLocked) session.stage = 'interesado';
+    }
+    const knownCity = memoryUpdate.order.city || (!startsFreshOrder ? session.card?.ciudad : null) || null;
     // OJO: antes esto se sacaba SOLO de session.stage (puesto por el
     // clasificador por IA, que corre aparte y despues de mandar la
     // respuesta). En la practica eso resulto poco confiable: hubo
@@ -762,7 +815,7 @@ async function processReply(from) {
     // reportado por el negocio). Por eso ahora se toman las DOS señales: el
     // flag de deteccion de texto, O la etapa real que ya tiene el pedido en
     // el panel.
-    const orderClosed = session.orderClosed === true || SOLD_STAGES.includes(session.stage);
+    const orderClosed = startsFreshOrder ? false : (session.orderClosed === true || SOLD_STAGES.includes(session.stage));
     // Mismo criterio que orderClosed, pero para el bloque de "pedime tu
     // nombre, cedula y telefono": se detecto que a veces el modelo lo manda
     // dos veces en la misma conversacion (por ejemplo si el cliente contesta
@@ -793,7 +846,7 @@ async function processReply(from) {
       cedula: session.card?.cedula || null,
       telefono: session.card?.telefono || null,
     };
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer);
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, memoryUpdate.order);
 
     // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
     // habia pedido nombre/cedula/telefono antes y el modelo igual intento
@@ -801,14 +854,28 @@ async function processReply(from) {
     // corto en su lugar (o el resto del mensaje, si tenia algo mas aparte del
     // bloque repetido).
     let finalReply = reply;
+    const missingIdentity = [
+      !knownCustomer.nombre && 'nombre y apellido',
+      !knownCustomer.cedula && 'cedula',
+      !knownCustomer.telefono && 'telefono',
+    ].filter(Boolean);
+    if (missingIdentity.length > 0 && missingIdentity.length < 3 && looksLikeEmptyDataRequest(reply)) {
+      const withoutFullRequest = stripDuplicateDataRequest(reply, {
+        nombre: knownCustomer.nombre || 'ya recibido',
+        cedula: knownCustomer.cedula || '0000000',
+        telefono: knownCustomer.telefono || '04120000000',
+      });
+      const requestOnlyMissing = `Solo me falta ${missingIdentity.join(' y ')} para completar tus datos.`;
+      finalReply = withoutFullRequest ? `${withoutFullRequest}\n\n${requestOnlyMissing}` : requestOnlyMissing;
+    }
     // Ver mentionsDataFieldsAsRequest en ai.js: ademas del formato de
     // plantilla (looksLikeEmptyDataRequest), esto tambien detecta cuando el
     // modelo repite el mismo pedido de datos pero en prosa propia, sin dos
     // puntos ni salto de linea (bug real: paso 5 horas despues de que el
     // cliente ya habia dado y confirmado sus datos, y el modelo se los pidio
     // de nuevo con otras palabras que no matcheaban el regex original).
-    if (dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || mentionsDataFieldsAsRequest(reply, knownCustomer))) {
-      const stripped = stripDuplicateDataRequest(reply, knownCustomer);
+    if (dataAlreadyRequested && (looksLikeEmptyDataRequest(finalReply) || mentionsDataFieldsAsRequest(finalReply, knownCustomer))) {
+      const stripped = stripDuplicateDataRequest(finalReply, knownCustomer);
       finalReply = stripped === null ? DATA_REQUEST_REMINDER : stripped;
     }
 
@@ -883,7 +950,7 @@ async function processReply(from) {
       // O de la ficha (el clasificador lo detecto en la charla libre, sin que
       // haya un gatillo de producto formal): cualquiera de los dos cuenta
       // como "producto identificado" para la validacion de cierre.
-      knownProduct: knownProduct || session.card?.producto || null,
+      knownProduct: knownProduct || memoryUpdate.order.product || (!startsFreshOrder ? session.card?.producto : null) || null,
       knownCity,
       // agenciaConfirmadaEnChat es la persistencia de una confirmacion de
       // agencia dada EN LA CONVERSACION (ver el bloque que arma "patch" mas
@@ -892,7 +959,7 @@ async function processReply(from) {
       // esto, una confirmacion como "Si" a "esta agencia te queda bien?"
       // solo cuenta en el turno exacto en que paso; unos turnos despues (dar
       // nombre/cedula/telefono, preguntar el plazo) dejaria de verse.
-      cardAgencia: session.card?.agencia || session.card?.agenciaConfirmadaEnChat || null,
+      cardAgencia: memoryUpdate.order.agency || (!startsFreshOrder ? (session.card?.agenciaConfirmadaEnChat || session.card?.agencia) : null) || null,
       // Para reconocer una aceptacion corta ("si"/"dale") como valida SOLO
       // cuando responde de verdad a una pregunta de confirmacion del bot
       // (ver looksLikeContextualShortAcceptance en ai.js): lastAssistantText
@@ -900,6 +967,12 @@ async function processReply(from) {
       // cliente esta contestando ahora con userText).
       lastAssistantText: session.lastAssistantText || null,
       lastUserMessage: userText,
+      knownQuantity: memoryUpdate.order.quantity,
+      orderModality: memoryUpdate.order.modality,
+      orderCourier: memoryUpdate.order.courier,
+      expectedTotal: productRecord && memoryUpdate.order.quantity
+        ? Number(productRecord.price) * Number(memoryUpdate.order.quantity)
+        : null,
     };
 
     // FASE (correccion validacion-cierre v3, punto 6): si el propio texto
@@ -1011,10 +1084,12 @@ async function processReply(from) {
       const agenciaLabel = extractConfirmedAgencyLabel(closingCtx.lastAssistantText);
       if (agenciaLabel) {
         patch.card = { ...(session.card || {}), agenciaConfirmadaEnChat: agenciaLabel };
+        patch.currentOrder = { ...(session.currentOrder || {}), agency: agenciaLabel, modality: 'agency_pickup' };
       }
     }
     if (isNewClose) {
       patch.orderClosed = true;
+      patch.currentOrder = { ...(patch.currentOrder || session.currentOrder || {}), closed: true };
       // Ver punto 5 mas arriba (segmentoPedidoActual): este es el indice
       // REAL que las conversaciones futuras van a usar como limite del
       // pedido cerrado, en vez de tener que adivinarlo de nuevo por estilo
@@ -1107,6 +1182,7 @@ async function processReply(from) {
         const mergedCard = { ...(current.card || {}) };
         for (const [key, value] of Object.entries(classification.card || {})) {
           if (value !== null && value !== undefined && String(value).trim() !== '') {
+            if (key === 'ciudad' && current.currentOrder?.city) continue;
             mergedCard[key] = value;
           }
         }
@@ -1123,7 +1199,9 @@ async function processReply(from) {
         // implicaria retroceder un rango logistico ya alcanzado; "devolucion"
         // es la unica excepcion (ver esa funcion), porque es evidencia nueva
         // legitima sin importar en que etapa logistica estaba el pedido.
-        const stageChangeAllowed = isAllowedAutoTransition(current.stage, classification.stage);
+        const classifierWouldSell = SOLD_STAGES.includes(classification.stage) && !SOLD_STAGES.includes(current.stage);
+        const stageChangeAllowed = isAllowedAutoTransition(current.stage, classification.stage) &&
+          (!classifierWouldSell || current.orderClosed === true);
         if (stageChangeAllowed) {
           classPatch.stage = classification.stage;
           classPatch.stageReason = classification.razon || null;
