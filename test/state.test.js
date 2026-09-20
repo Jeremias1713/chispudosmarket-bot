@@ -37,6 +37,8 @@ test('H03 - resetSession ya NO borra historial, card, adCode ni marcas de venta 
   assert.equal(after.soldAt, before.soldAt, 'la fecha de venta se conserva');
   assert.equal(after.shippingNotifiedAt, before.shippingNotifiedAt, 'el aviso de envio se conserva');
   assert.equal(after.stage, before.stage, 'la etapa (entregado/vendido/etc.) no se toca');
+  assert.equal(after.currentOrder, null, 'el pedido nuevo no hereda decisiones estructuradas del anterior');
+  assert.equal(after.newOrderPending, true);
 });
 
 test('H03 (caso bueno) - resetSession de una sesion nueva sigue dejando un flujo en blanco normal', () => {

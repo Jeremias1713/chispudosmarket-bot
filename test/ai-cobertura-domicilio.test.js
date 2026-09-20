@@ -31,16 +31,16 @@ after(() => cleanup(dataDir));
 
 // --- resolveDeliveryCoverage: la fuente de verdad deterministica ---
 
-test('resolveDeliveryCoverage: cualquier ciudad de Caracas (Distrito Capital) tiene domicilio autorizado, sin necesitar ninguna zona puntual', () => {
+test('resolveDeliveryCoverage: Caracas tampoco autoriza domicilio', () => {
   const r = resolveDeliveryCoverage('caracas', '');
   assert.equal(r.cityKnown, true);
-  assert.equal(r.domicilioAllowed, true, 'BUG si esto es false: el negocio da domicilio a TODA Caracas, no hace falta ninguna zona confirmada');
+  assert.equal(r.domicilioAllowed, false);
 });
 
-test('resolveDeliveryCoverage: una direccion puntual DENTRO de Caracas (cualquier zona/parroquia) tambien autoriza domicilio', () => {
+test('resolveDeliveryCoverage: una direccion puntual en Caracas tampoco autoriza domicilio', () => {
   const r = resolveDeliveryCoverage('caracas', 'vivo en Catia, cerca del metro');
   assert.equal(r.cityKnown, true);
-  assert.equal(r.domicilioAllowed, true, 'BUG si esto es false: cualquier zona de Caracas tiene que autorizar domicilio, no solo una lista puntual');
+  assert.equal(r.domicilioAllowed, false);
 });
 
 test('resolveDeliveryCoverage: Carupano, Valencia, Barquisimeto y Maracaibo NUNCA tienen domicilio (regla definitiva)', () => {
@@ -76,13 +76,12 @@ test('resolveDeliveryCoverage: una ciudad mencionada AHORA en el texto tiene pri
   );
 });
 
-test('resolveDeliveryCoverage: al reves, un cliente que dice "ahora estoy en Caracas" pasa a tener domicilio autorizado de inmediato, sin esperar al clasificador', () => {
+test('resolveDeliveryCoverage: cambiar a Caracas sigue sin autorizar domicilio', () => {
   const r = resolveDeliveryCoverage('valencia', 'ahora estoy en Caracas');
   assert.equal(r.cityKnown, true);
   assert.equal(
     r.domicilioAllowed,
-    true,
-    'BUG si esto es false: la ciudad NUEVA que el cliente acaba de decir en este mensaje tiene que autorizar domicilio de inmediato'
+    false
   );
 });
 
@@ -135,10 +134,11 @@ test('guardAgainstUnauthorizedDelivery: una oferta de domicilio con la ciudad TO
   assert.match(corregido, /ciudad/i, 'tiene que pedir la ciudad/zona antes de prometer cualquier modalidad');
 });
 
-test('guardAgainstUnauthorizedDelivery: una oferta de domicilio en Caracas (cualquier zona) se deja tal cual -- no hay nada que corregir', () => {
+test('guardAgainstUnauthorizedDelivery: una oferta de domicilio en Caracas tambien se corrige', () => {
   const original = 'Perfecto, te lo llevamos hasta la puerta de tu casa en Caracas.';
   const corregido = guardAgainstUnauthorizedDelivery(original, 'caracas', 'vivo en caracas, en la av. libertador');
-  assert.equal(corregido, original, 'BUG si cambio: Caracas SI tiene cobertura de domicilio, no hay nada que corregir');
+  assert.notEqual(corregido, original);
+  assert.match(corregido, /retiro en agencia tealca/i);
 });
 
 test('guardAgainstUnauthorizedDelivery: es idempotente -- su propio mensaje de correccion, si se le vuelve a pasar, NO se vuelve a marcar como una oferta pendiente de corregir', () => {
@@ -180,7 +180,7 @@ test('evaluateOrderCompleteness: una direccion COMPLETA en una ciudad SIN cobert
   );
 });
 
-test('evaluateOrderCompleteness: la MISMA direccion, pero en Caracas, SI resuelve el destino (domicilio disponible en toda la ciudad)', () => {
+test('evaluateOrderCompleteness: una direccion en Caracas no sustituye una agencia', () => {
   const result = evaluateOrderCompleteness({
     text: 'Tu pedido de 2 Shilajit (Bs 700) va para tu direccion en la Av. Bolivar, cerca de la plaza, Caracas. El pago es contra entrega.',
     knownCustomer: { nombre: 'Ana Diaz', cedula: '20123456', telefono: '04121234567' },
@@ -190,8 +190,8 @@ test('evaluateOrderCompleteness: la MISMA direccion, pero en Caracas, SI resuelv
     cardAgencia: null,
   });
   assert.ok(
-    !result.missing.includes('modalidad_destino'),
-    `BUG si "modalidad_destino" aparece: Caracas tiene domicilio disponible en toda la ciudad, una direccion completa ahi si tiene que cerrar (missing=${JSON.stringify(result.missing)})`
+    result.missing.includes('modalidad_destino'),
+    `missing=${JSON.stringify(result.missing)}`
   );
 });
 
