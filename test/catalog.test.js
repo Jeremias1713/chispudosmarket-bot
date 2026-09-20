@@ -72,3 +72,18 @@ test('H39 (caso bueno, para no romperlo al reparar) - triggers guardado como arr
   assert.deepEqual(products[0].triggers, ['colageno', 'piel']);
   assert.doesNotThrow(() => products[0].triggers.join(', '));
 });
+
+test('precio aplicable usa la promocion estructurada y cae al precio unitario fuera de ella', () => {
+  const product = { price: 36900, quantityPrices: [{ quantity: 2, total: 51900 }] };
+  assert.equal(catalog.resolveApplicableTotal(product, 1), 36900);
+  assert.equal(catalog.resolveApplicableTotal(product, 2), 51900);
+  assert.equal(catalog.resolveApplicableTotal(product, 3), 110700);
+});
+
+test('reglas de precio invalidas no entran al catalogo', () => {
+  assert.deepEqual(catalog.normalizeQuantityPrices([
+    { quantity: 2, total: 51900 },
+    { quantity: 0, total: 1 },
+    { quantity: 3, total: -5 },
+  ]), [{ quantity: 2, total: 51900 }]);
+});

@@ -6,6 +6,7 @@ const {
   extractIdentity,
   extractDestinationCity,
   extractAgencySelection,
+  extractMoney,
   applyOrderMessage,
 } = require('../src/orderMemory');
 
@@ -58,9 +59,32 @@ test('cambiar ciudad invalida agencia, sin borrar cantidad', () => {
 });
 
 test('cambio explicito de cantidad actualiza el pedido', () => {
-  const previous = { ...blankOrder(), quantity: 2 };
+  const previous = { ...blankOrder(), quantity: 2, total: 51900, quotedQuantity: 2, accepted: true };
   const next = applyOrderMessage({ currentOrder: previous, text: 'Mejor 3', precedingAssistantText: '' }).order;
   assert.equal(next.quantity, 3);
+  assert.equal(next.total, null);
+  assert.equal(next.accepted, false);
+});
+
+test('conserva un total cotizado y una aceptacion contextual para las condiciones vigentes', () => {
+  const previous = { ...blankOrder(), quantity: 2 };
+  const next = applyOrderMessage({
+    currentOrder: previous,
+    text: 'Sí',
+    precedingAssistantText: 'Tu pedido de 2 queda en 51.900 Bs. ¿Confirmas el pedido?',
+  }).order;
+  assert.equal(extractMoney('Total Bs 51.900'), 51900);
+  assert.equal(next.total, 51900);
+  assert.equal(next.quotedQuantity, 2);
+  assert.equal(next.accepted, true);
+});
+
+test('una retractacion invalida la aceptacion sin borrar los demas datos', () => {
+  const previous = { ...blankOrder(), quantity: 2, total: 51900, accepted: true, agency: 'Tealca Centro' };
+  const next = applyOrderMessage({ currentOrder: previous, text: 'Espera, todavía no lo confirmes', precedingAssistantText: '' }).order;
+  assert.equal(next.accepted, false);
+  assert.equal(next.quantity, 2);
+  assert.equal(next.agency, 'Tealca Centro');
 });
 
 test('MRW y Zoom quedan como retiro en agencia con coordinacion humana', () => {

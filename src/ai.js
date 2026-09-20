@@ -1288,6 +1288,8 @@ function evaluateOrderCompleteness({
   orderModality,
   orderCourier,
   expectedTotal,
+  previouslyCommunicatedTotal,
+  orderAccepted,
 } = {}) {
   const missing = [];
   const nombre = String(knownCustomer && knownCustomer.nombre || '').trim();
@@ -1335,12 +1337,19 @@ function evaluateOrderCompleteness({
 
   if (/^(MRW|Zoom)$/i.test(String(orderCourier || ''))) missing.push('coordinacion_humana_pago');
 
-  const aceptacionOk =
-    looksLikeUnambiguousEngagement(recentUserText) ||
-    looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage);
+  const aceptacionOk = orderAccepted === true || (
+    orderAccepted === undefined && (
+      looksLikeUnambiguousEngagement(recentUserText) ||
+      looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage)
+    )
+  );
   if (!aceptacionOk) missing.push('aceptacion_no_ambigua');
 
-  if (!looksLikeTotalCommunicated(text, expectedTotal)) missing.push('total_comunicado');
+  const totalVigenteYaComunicado = previouslyCommunicatedTotal !== null && previouslyCommunicatedTotal !== undefined &&
+    expectedTotal !== null && expectedTotal !== undefined &&
+    Number.isFinite(Number(previouslyCommunicatedTotal)) && Number.isFinite(Number(expectedTotal)) &&
+    Math.abs(Number(previouslyCommunicatedTotal) - Number(expectedTotal)) < 0.01;
+  if (!looksLikeTotalCommunicated(text, expectedTotal) && !totalVigenteYaComunicado) missing.push('total_comunicado');
 
   return { complete: missing.length === 0, missing };
 }
@@ -1389,7 +1398,7 @@ function looksLikeClosingSummaryText(text) {
   const raw = String(text || '').replace(COURTESY_TAIL_QUESTION_RE, '');
   if (raw.includes('?') || raw.includes('\u00bf')) return false;
   const norm = normalizeForMatch(raw);
-  const mentionsPayment = /contra entrega|pago (movil|anticipado)|\befectivo\b|\btransferencia\b/.test(norm);
+  const mentionsPayment = /contra entrega|pagas? al recibir|pago (movil|anticipado)|\befectivo\b|\btransferencia\b/.test(norm);
   if (!mentionsPayment) return false;
   // FASE (correccion regresion cierre secuencial, punto 6, tercera parte):
   // "tu pedido"/"el pedido" A SECAS (sin ningun dato puntual pegado, como
@@ -1404,7 +1413,7 @@ function looksLikeClosingSummaryText(text) {
   // listo/armado") o una accion de entrega concreta (te lo llevamos/va a
   // tu direccion), nunca por la sola palabra "pedido".
   const mentionsOrderRecap =
-    /pedido de \d|pedido queda|te (lo |los |la |las )?(llevamos|enviamos|mandamos|entregamos)|va (a|para|camino)/.test(norm);
+    /pedido de \d|pedido (?:queda )?(?:listo|confirmado|procesado)|te (lo |los |la |las )?(llevamos|enviamos|mandamos|entregamos)|va (a|para|camino)/.test(norm);
   const mentionsTrackingOrPickup =
     /\bguia\b|\btealca\b|\bagencia\b|en camino|te aviso cuando|cuando (llegue|este listo)|mensajero/.test(norm);
   const mentionsOrderSpecifics = ORDER_SPECIFICS_RE.test(norm);

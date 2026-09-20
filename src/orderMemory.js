@@ -19,9 +19,35 @@ function blankOrder() {
     courier: null,
     modality: 'agency_pickup',
     total: null,
+    quotedQuantity: null,
     accepted: false,
     needsHumanPayment: false,
   };
+}
+
+function extractMoney(text) {
+  const raw = String(text || '');
+  const matches = [
+    raw.match(/(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\s*(?:bs\.?|bol[ií]vares)/i),
+    raw.match(/(?:bs\.?|bol[ií]vares)\s*(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/i),
+  ];
+  const value = matches.find(Boolean)?.[1];
+  if (!value) return null;
+  if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(value)) return Number(value.replace(/\./g, '').replace(',', '.'));
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(value)) return Number(value.replace(/,/g, ''));
+  return Number(value.replace(',', '.'));
+}
+
+function isRetraction(text) {
+  return /\bno\s+(me\s+lo\s+)?(mandes|envies|proceses|confirmes|cierres|pidas)\b|\btodavia\s+no\b|\baun\s+no\b|\bespera(te)?\b|\bsolo\s+(estoy\s+)?consultando\b|\bcancela/i.test(fold(text));
+}
+
+function isCurrentTermsAcceptance(text, precedingAssistantText) {
+  const norm = fold(text).trim();
+  if (!norm || norm === '[sticker]' || isRetraction(norm) || /\?$/.test(norm)) return false;
+  if (/\b(quiero|dame|llevo|confirmo|procede|procesa|haz|hace)\b/.test(norm)) return true;
+  const short = /^(si|sip|dale|ok|okay|listo|perfecto|correcto|de acuerdo|esta bien)[.!\s]*$/.test(norm);
+  return short && /\b(confirmas|confirmame|procedemos|cerramos|asi queda|pedido)\b/.test(fold(precedingAssistantText));
 }
 
 function extractQuantity(text, precedingAssistantText) {
@@ -31,8 +57,6 @@ function extractQuantity(text, precedingAssistantText) {
   for (const line of lines) {
     const normalized = fold(line).replace(/[.!?]+$/g, '').trim();
     if (menu && /^[123]$/.test(normalized)) continue;
-    if (/\b(agencia|opcion)\s*(numero\s*)?\d+\b/.test(normalized) || /^la\s+\d+$/.test(normalized)) continue;
-    if (/\b(cedula|telefono|tlf|plazo|dias?|horas?)\b/.test(normalized)) continue;
     const withUnit = normalized.match(/\b([1-9]|[12]\d|30)\s*(frascos?|unidades?|potes?|combos?|cajas?)\b/);
     if (withUnit) { result = Number(withUnit[1]); continue; }
     const word = normalized.match(/\b(un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b(?:\s*(frascos?|unidades?|potes?|combos?|cajas?))?/);
@@ -40,6 +64,11 @@ function extractQuantity(text, precedingAssistantText) {
       result = WORD_QUANTITIES[word[1]];
       continue;
     }
+    // Los numeros sueltos de identidad/plazo no son cantidades. Las formas
+    // con unidad se evaluan antes para admitir mensajes compactos como
+    // "quiero 2 frascos, cedula..., telefono...".
+    if (/\b(agencia|opcion)\s*(numero\s*)?\d+\b/.test(normalized) || /^la\s+\d+$/.test(normalized)) continue;
+    if (/\b(cedula|telefono|tlf|plazo|dias?|horas?)\b/.test(normalized)) continue;
     const short = normalized.match(/^(?:quiero|dame|serian|mejor|llevo|quiero mejor|dale,?\s*)?\s*([1-9]|[12]\d|30)$/);
     if (short) result = Number(short[1]);
   }
@@ -111,8 +140,19 @@ function extractAgencySelection(userText, assistantText) {
 
 function applyOrderMessage({ currentOrder, text, precedingAssistantText, knownCustomer }) {
   const order = { ...blankOrder(), ...(currentOrder || {}) };
+  const previousQuantity = order.quantity;
+  const quotedTotal = extractMoney(precedingAssistantText);
+  if (quotedTotal && previousQuantity) {
+    order.total = quotedTotal;
+    order.quotedQuantity = previousQuantity;
+  }
   const quantity = extractQuantity(text, precedingAssistantText);
-  if (quantity) order.quantity = quantity;
+  if (quantity && quantity !== previousQuantity) {
+    order.quantity = quantity;
+    order.total = null;
+    order.quotedQuantity = null;
+    order.accepted = false;
+  }
 
   const city = extractDestinationCity(text);
   if (city && city !== order.city) {
@@ -124,6 +164,8 @@ function applyOrderMessage({ currentOrder, text, precedingAssistantText, knownCu
   if (agency) order.agency = agency;
 
   const norm = fold(text);
+  if (isRetraction(norm)) order.accepted = false;
+  else if (isCurrentTermsAcceptance(text, precedingAssistantText)) order.accepted = true;
   if (/\b(mrw|zoom)\b/.test(norm)) {
     order.courier = /\bmrw\b/.test(norm) ? 'MRW' : 'Zoom';
     order.modality = 'agency_pickup';
@@ -144,5 +186,7 @@ module.exports = {
   extractIdentity,
   extractDestinationCity,
   extractAgencySelection,
+  extractMoney,
+  isCurrentTermsAcceptance,
   applyOrderMessage,
 };

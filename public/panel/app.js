@@ -1447,6 +1447,7 @@ function openProduct(p) {
   $('productFormTitle').textContent = p ? 'Editar producto' : 'Nuevo producto'
   $('p_name').value = p?.name || ''
   $('p_price').value = p?.price ?? ''
+  $('p_quantity_prices').value = (p?.quantityPrices || []).map((r) => `${r.quantity}=${r.total}`).join('\n')
   $('p_currency').value = p?.currency || 'Bs'
   $('p_active').value = p && p.active === false ? '0' : '1'
   $('p_sku').value = p?.sku || ''
@@ -1477,6 +1478,10 @@ $('saveProduct').addEventListener('click', async () => {
   const body = {
     name: $('p_name').value.trim(),
     price: Number($('p_price').value) || 0,
+    quantityPrices: $('p_quantity_prices').value.split(/\r?\n/).map((line) => {
+      const [quantity, total] = line.split('=').map((v) => Number(String(v || '').trim()))
+      return { quantity, total }
+    }).filter((r) => Number.isInteger(r.quantity) && r.quantity > 0 && Number.isFinite(r.total) && r.total > 0),
     currency: $('p_currency').value.trim() || 'Bs',
     active: $('p_active').value === '1',
     sku: $('p_sku').value.trim(),

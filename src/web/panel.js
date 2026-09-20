@@ -1169,6 +1169,9 @@ function sanitizeProductInput(body) {
   if (body.name != null) patch.name = String(body.name).trim();
   if (body.sku != null) patch.sku = String(body.sku).trim();
   if (body.price != null) patch.price = Number(body.price) || 0;
+  if (body.quantityPrices !== undefined) {
+    patch.quantityPrices = Array.isArray(body.quantityPrices) ? body.quantityPrices : [];
+  }
   if (body.currency != null) patch.currency = String(body.currency).trim() || 'Bs';
   if (body.description != null) patch.description = String(body.description);
   if (body.active != null) patch.active = Boolean(body.active);
