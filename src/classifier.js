@@ -72,7 +72,7 @@ function client() {
 }
 
 const CLASSIFIER_PROMPT = `Clasificas conversaciones de venta por WhatsApp de un negocio que vende
-con retiro en agencia. No existe entrega a domicilio para pedidos nuevos.
+con retiro en agencia.
 
   Leete todos los mensajes y devolve la etapa en la que esta la conversacion AHORA.
 

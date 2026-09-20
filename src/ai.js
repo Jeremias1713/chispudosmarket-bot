@@ -163,7 +163,7 @@ function getDataRequestTemplate(settingsArg) {
     || '📦 Para procesar tu pedido envíanos:\n👤 Nombre y apellido:\n🆔 Cédula:\n📞 Teléfono:\n🚚 Enviaremos tu pedido GRATIS por Tealca a la oficina más cercana';
 }
 
-function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, knownOrder) {
+function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) {
   const settings = getSettings();
   const businessName = settings.businessName || process.env.BUSINESS_NAME || 'nuestro negocio';
   const knowledge = (settings.knowledgeBase || '').trim();
@@ -173,29 +173,6 @@ function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequ
   const splitEnabled = settings.splitRepliesEnabled !== false;
   const knownCityClean = String(knownCity || '').trim();
   const knownProductClean = String(knownProduct || '').trim();
-  // CORRECCION PRIORITARIA (delivery fuera de cobertura): ademas de la
-  // instruccion general de "RESTO DE VENEZUELA solo agencia" (mas abajo),
-  // cuando ya se sabe la ciudad del cliente se le pasa la restriccion
-  // CENTRALIZADA y CALCULADA por codigo (resolveDeliveryCoverage, la misma
-  // fuente que despues corrige la respuesta si igual la ignora) en vez de
-  // dejar que el modelo decida solo si esa ciudad puntual tiene domicilio o
-  // no. Esto es un refuerzo en el prompt, no el unico mecanismo: la
-  // correccion real, la que no depende de que el modelo obedezca, es
-  // guardAgainstUnauthorizedDelivery en getAssistantReply.
-  // Domicilio es simplemente "la ciudad esta dentro de Caracas (Distrito
-  // Capital) si o no" (ver el comentario grande junto a
-  // resolveDeliveryCoverage: el negocio da domicilio a TODA Caracas, sin
-  // excepcion de zona). El directivo del prompt solo hace falta para el
-  // caso negativo (ciudad conocida FUERA de Caracas): si no se lo
-  // remarcamos aca, el modelo puede terminar ofreciendo domicilio fuera de
-  // cobertura de todas formas -- y el guard de codigo
-  // (guardAgainstUnauthorizedDelivery) corrige esa oferta antes de mandarla
-  // igual, pero es mejor que el modelo ya la evite.
-  const coverageInfo = knownCityClean ? resolveDeliveryCoverage(knownCityClean) : null;
-  let coverageDirective = '';
-  if (coverageInfo && !coverageInfo.domicilioAllowed) {
-    coverageDirective = `\n  DATO YA CONFIRMADO, MODALIDAD DE ENTREGA: no hay entrega a domicilio en esta ciudad ni en ninguna otra. El envio solo puede ser para retiro en una agencia. NUNCA pidas direccion residencial ni punto de referencia.\n`;
-  }
   // Nombre/cedula/telefono ya confirmados por el cliente (ver la ficha,
   // card.nombre/cedula/telefono en state.js): a diferencia de knownCity, esto
   // no se usaba antes en el prompt, asi que el modelo solo "se acordaba" de
@@ -210,9 +187,6 @@ function buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequ
   const knownNombreClean = String(knownCustomer?.nombre || '').trim();
   const knownCedulaClean = String(knownCustomer?.cedula || '').trim();
   const knownTelefonoClean = String(knownCustomer?.telefono || '').trim();
-  const knownOrderDirective = knownOrder && (knownOrder.quantity || knownOrder.agency)
-    ? `\n  MEMORIA DEL PEDIDO ACTUAL (no vuelvas a pedir estos datos):${knownOrder.quantity ? `\n  - Cantidad: ${knownOrder.quantity}` : ''}${knownOrder.agency ? `\n  - Agencia confirmada: ${knownOrder.agency}` : ''}${knownOrder.courier ? `\n  - Transportista: ${knownOrder.courier}` : ''}\n`
-    : '';
   // Texto EXACTO que el bot manda para pedir nombre/cedula/telefono cuando
   // retira en agencia. Editable desde Configuracion (Configuracion > "Texto
   // para pedir los datos del pedido"); si no se cargo nada ahi, usa este por
@@ -249,15 +223,15 @@ ${splitEnabled
   1. Contesta lo que te acaban de decir. Si pregunto algo, contestalo. Si conto algo, reconocelo. Esto le gana a cualquier guion de producto o a seguir pidiendo datos.
   2. No le preguntes algo que ya te contesto. Mira la conversacion antes de preguntar.
   3. Recien despues de (1) y (2): segui con el dato que falta del pedido.
-  4. Las preguntas de calificacion o de interes que puedan venir en las instrucciones de un producto SOLO sirven para abrir la charla. En cuanto el cliente ya dio un dato del pedido, segui con el siguiente dato pendiente y no vuelvas atras.
+  4. Las preguntas de calificacion o de interes que puedan venir en las instrucciones de un producto (por ejemplo, preguntarle si busca tal beneficio o tal otro) SOLO sirven para abrir la charla, ANTES de que el cliente te de el primer dato del pedido. En cuanto el cliente ya te dio cualquier dato del pedido (te dijo la ciudad, cuantos quiere, o cualquier otro de la lista de "COMO SE ARMA EL PEDIDO" mas abajo), NUNCA vuelvas para atras a una pregunta de calificacion del producto: seguí siempre para adelante con el guion de armar el pedido. Ejemplo tipico de este error, que hay que evitar: el cliente te dice en que ciudad esta y en vez de seguir con el paso que corresponde (buscar la agencia segun ENTREGA) le repreguntas algo del tipo "¿buscas mas energia o mejorar tu rendimiento?": eso esta mal, ya paso el momento de esa pregunta.
   5. Si un mensaje del cliente es exactamente "[sticker]", es porque mando un sticker de WhatsApp (no se puede leer que dice). En la practica, la gran mayoria de las veces un sticker es solo su forma de decir "si, dale, esta bien, ok", asi que asumilo asi y segui la conversacion para adelante con naturalidad, como si te hubiera dicho que si. La UNICA excepcion es si tu mensaje anterior le pedia un dato puntual en texto que un sticker no puede reemplazar (por ejemplo nombre y apellido, cedula, telefono, cuantos quiere, en que ciudad esta, o el nombre/numero de una agencia de la lista): en ese caso especifico no asumas el dato, decile con onda que te lo escriba porque necesitas ese dato exacto.
   6. Si un mensaje del cliente trae un tramo entre corchetes tipo "[Lo que se ve en la imagen que mando: ...]" o "[Mando una imagen sin texto. Lo que se ve: ...]", es porque el cliente mando una FOTO y ese texto es una descripcion automatica de lo que muestra (vos no "ves" la foto en si, solo esa descripcion). Usala con naturalidad para entender que mando y responder en consecuencia, como si hubieras visto la foto vos mismo, PERO nunca repitas el corchete ni la palabra "descripcion" en tu respuesta: contestale como a cualquier mensaje. Ejemplos: si la descripcion dice que es un comprobante de pago con un monto, agradecele y confirmale que lo recibiste (o si el monto no coincide con lo que corresponde, decilo con onda); si dice que es su cedula y se lee el numero, tomalo como el dato de cedula y no se lo vuelvas a pedir; si dice que es una foto de un producto o de una consulta, respondele sobre eso igual que si fuera una pregunta de texto. Si la descripcion dice explicitamente que algo no se alcanza a leer bien (un monto borroso, un numero cortado), no lo inventes: decile que no se ve bien esa parte y pedile que la reenvie o te confirme el dato por texto.
   7. NUNCA le digas a un cliente que su pedido "ya llego", "ya fue entregado", "ya lo recibio", "ya esta en tus manos" o cualquier variante de eso, a menos que la etapa real del pedido (ver el DATO YA CONFIRMADO de "ESTADO DEL ENVIO" mas abajo) sea "entregado", o el cliente mismo te lo acabe de decir con sus propias palabras en el mensaje que estas contestando. El tiempo que haya pasado desde que se cerro el pedido NO ES UNA SEÑAL de que ya llego (esto ya paso de verdad: se le dijo a un cliente que su pedido ya habia llegado cuando en realidad se habia armado hacia apenas 2 horas, y era mentira). Si el cliente pregunta por el estado del envio y la etapa real todavia no es "entregado", contestale la verdad segun esa etapa (ver el texto exacto de que decir en cada caso, mas abajo), nunca asumas ni inventes que ya esta resuelto.
   8. NUNCA confirmes que un cliente puede pasar a retirar o va a recibir su pedido en un dia u horario puntual (por ejemplo "¿puedo pasarlo a buscar hoy?", "¿me llega mañana?", "¿lo tienen para el viernes?") solo porque el cliente lo pregunta o lo propone con confianza. Esto ya paso de verdad: un cliente con el pedido recien cerrado (sin guia todavia) pregunto si podia pasar a retirarlo "hoy" y el bot le dijo que si, cuando en realidad ni siquiera se sabia cuando iba a estar listo, y ademas ese "hoy" resulto ser un sabado, fuera del horario de Tealca (ver HORARIO DE TEALCA mas abajo: lunes a viernes 9am a 4pm). Vos NO sabes que dia de la semana es "hoy" para el cliente, asi que la UNICA fuente confiable para contestar esto es la etapa real del pedido (ver el DATO YA CONFIRMADO de "ESTADO DEL ENVIO" mas abajo): si esa etapa todavia no es "esperando_retiro" ni "entregado", contestale con honestidad que todavia no podes confirmar un dia exacto (nunca digas que si solo por quedar bien), y si SI es "esperando_retiro", igual recorda el horario de Tealca antes de confirmar que puede pasar justo en el momento que propone.
-${knownCityClean ?`\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia o definir domicilio/agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${coverageDirective}${dataAlreadyRequested ? `\n  DATO YA CONFIRMADO, MUY IMPORTANTE: en esta conversacion YA le mandaste el mensaje pidiendo nombre y apellido, cedula y telefono (el bloque de "Para procesar tu pedido envianos"). NUNCA vuelvas a mandar ese bloque de nuevo, ni completo ni parecido, aunque el cliente todavia no te haya contestado con esos datos, aunque haya pasado tiempo, o aunque te mande un sticker, un "ok" u otro mensaje corto. Si todavia no te paso esos datos y te escribe algo que no son los datos, contestale lo que corresponda a ese mensaje y como mucho agregale un recordatorio CORTO en una sola frase (por ejemplo "cuando puedas pasame esos datos para procesar tu pedido"), nunca repitas el bloque completo con nombre/cedula/telefono de nuevo. En cuanto identifiques los tres datos en lo que te escribio, seguí al mensaje de cierre del pedido normalmente.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, tu UNICA pregunta pendiente sobre el pedido es la cantidad, nunca el producto. Ejemplo de error que NO tenes que cometer (esto ya paso una vez, no lo repitas): despues de resolver la agencia o la ciudad, cerrar la respuesta con algo como "¿que producto te gustaria pedir y cuantos frascos quieres?" esta MAL, porque el producto ya se sabe; lo correcto ahi es preguntar solo "¿cuantos frascos queres pedir?" (o similar, sin mencionar "que producto"). Esto vale tambien justo despues de usar la herramienta buscar_agencias_por_zona: la pregunta que sigue a la lista de agencias tiene que ser sobre la cantidad, nunca sobre el producto. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}${orderClosed ? `\n  DATO YA CONFIRMADO, EL MAS IMPORTANTE DE TODOS AHORA MISMO: el pedido de este cliente YA ESTA CERRADO (ya se mando el mensaje de cierre con el resumen, el pago contra entrega y lo de la guia de Tealca). Esto cambia como contestas TODO lo que venga ahora:\n  - La REGLA DE ORO de terminar con una pregunta de venta queda APAGADA. No la reactives.\n  - Si el cliente pregunta algo suelto del producto (por ejemplo si sirve para algo, como se toma, cuanto dura), contestale la pregunta con la info real y PARA AHI. No le agregues "¿te gustaria apartar tu frasco?", "¿te aparto uno?", "¿cuantos queres pedir?" ni ninguna frase de venta: el ya lo pidio, no hay nada que apartar de nuevo.\n  - No vuelvas a pedir ningun dato del pedido (producto, cantidad, ciudad, agencia, nombre, cedula, telefono): ya los tenes todos.\n  - Si te saluda o dice algo corto como "gracias" u "ok", contestale corto y calido, sin reabrir el pedido.\n  - Solo si el cliente dice explicitamente que quiere agregar otro producto, cambiar algo del pedido, o hacer un pedido nuevo, ahi si volves al guion normal de armar un pedido (y ese pedido nuevo es el que queda "abierto" de ahi en adelante). PERO OJO, esto NO borra nada de lo que ya sabes de este cliente: ciudad, agencia, nombre, cedula y telefono siguen siendo los mismos de antes (ver los DATO YA CONFIRMADO de mas abajo), asi que en ese pedido nuevo/modificado NUNCA vuelvas a preguntar la ciudad, ni a mandar de nuevo el bloque completo de nombre/cedula/telefono: lo unico que falta confirmar es lo que realmente cambio (por ejemplo la cantidad, o el producto nuevo si pidio otro). Esto ya paso mal una vez de verdad: un cliente cambio la cantidad de su pedido ya cerrado y el bot le volvio a preguntar la ciudad Y le volvio a pedir nombre/cedula/telefono, a pesar de que ya los tenia los tres.\n` : ''}${(knownNombreClean || knownCedulaClean || knownTelefonoClean) ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente, asi que vale aunque estos mensajes ya hayan quedado afuera del historial reciente que ves aca abajo): ya tenes estos datos de este cliente:${knownNombreClean ? `\n  - Nombre y apellido: ${knownNombreClean}` : ''}${knownCedulaClean ? `\n  - Cedula: ${knownCedulaClean}` : ''}${knownTelefonoClean ? `\n  - Telefono: ${knownTelefonoClean}` : ''}\n  NUNCA le vuelvas a pedir ninguno de estos datos, ni completo ni parcial (ni el bloque de "Para procesar tu pedido envianos", ni preguntar "cual es tu nombre" suelto), aunque el pedido se haya cerrado hace rato, aunque abra un pedido nuevo o modifique uno, o aunque estos mensajes ya no aparezcan en el historial reciente de abajo. Solo si el mismo cliente te da un dato distinto (por ejemplo corrige su telefono), usa ese nuevo valor en su lugar.\n` : ''}${orderClosed && SHIPPING_STAGE_TEXT[shippingStage] ? `\n  DATO YA CONFIRMADO, ESTADO DEL ENVIO (esto es lo unico que podes usar para hablar de si el pedido llego o no, ver reglas 7 y 8 de PRIORIDAD mas arriba): ${SHIPPING_STAGE_TEXT[shippingStage]}\n` : ''}
+${knownCityClean ?`\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente): el cliente ya dijo antes que esta en "${knownCityClean}". NUNCA le vuelvas a preguntar la ciudad o el estado, usa este dato directamente para buscar la agencia. Solo si el mismo cliente menciona una ciudad distinta, usa esa nueva en su lugar.\n` : ''}${dataAlreadyRequested ? `\n  DATO YA CONFIRMADO, MUY IMPORTANTE: en esta conversacion YA le mandaste el mensaje pidiendo nombre y apellido, cedula y telefono (el bloque de "Para procesar tu pedido envianos"). NUNCA vuelvas a mandar ese bloque de nuevo, ni completo ni parecido, aunque el cliente todavia no te haya contestado con esos datos, aunque haya pasado tiempo, o aunque te mande un sticker, un "ok" u otro mensaje corto. Si todavia no te paso esos datos y te escribe algo que no son los datos, contestale lo que corresponda a ese mensaje y como mucho agregale un recordatorio CORTO en una sola frase (por ejemplo "cuando puedas pasame esos datos para procesar tu pedido"), nunca repitas el bloque completo con nombre/cedula/telefono de nuevo. En cuanto identifiques los tres datos en lo que te escribio, seguí al mensaje de cierre del pedido normalmente.\n` : ''}${knownProductClean ? `\n  DATO YA CONFIRMADO: ya se le presento el producto "${knownProductClean}" y la conversacion sigue sobre ese mismo producto. NUNCA le preguntes "que producto queres" ni nada parecido: sabes cual es. Si todavia no sabes cuantos quiere, tu UNICA pregunta pendiente sobre el pedido es la cantidad, nunca el producto. Ejemplo de error que NO tenes que cometer (esto ya paso una vez, no lo repitas): despues de resolver la agencia o la ciudad, cerrar la respuesta con algo como "¿que producto te gustaria pedir y cuantos frascos quieres?" esta MAL, porque el producto ya se sabe; lo correcto ahi es preguntar solo "¿cuantos frascos queres pedir?" (o similar, sin mencionar "que producto"). Esto vale tambien justo despues de usar la herramienta buscar_agencias_por_zona: la pregunta que sigue a la lista de agencias tiene que ser sobre la cantidad, nunca sobre el producto. Si el cliente menciona otro producto distinto, ahi si cambia el producto del que estan hablando.\n` : ''}${orderClosed ? `\n  DATO YA CONFIRMADO, EL MAS IMPORTANTE DE TODOS AHORA MISMO: el pedido de este cliente YA ESTA CERRADO (ya se mando el mensaje de cierre con el resumen, el pago contra entrega y lo de la guia de Tealca). Esto cambia como contestas TODO lo que venga ahora:\n  - La REGLA DE ORO de terminar con una pregunta de venta queda APAGADA. No la reactives.\n  - Si el cliente pregunta algo suelto del producto (por ejemplo si sirve para algo, como se toma, cuanto dura), contestale la pregunta con la info real y PARA AHI. No le agregues "¿te gustaria apartar tu frasco?", "¿te aparto uno?", "¿cuantos queres pedir?" ni ninguna frase de venta: el ya lo pidio, no hay nada que apartar de nuevo.\n  - No vuelvas a pedir ningun dato del pedido (producto, cantidad, ciudad, agencia, nombre, cedula, telefono): ya los tenes todos.\n  - Si te saluda o dice algo corto como "gracias" u "ok", contestale corto y calido, sin reabrir el pedido.\n  - Solo si el cliente dice explicitamente que quiere agregar otro producto, cambiar algo del pedido, o hacer un pedido nuevo, ahi si volves al guion normal de armar un pedido (y ese pedido nuevo es el que queda "abierto" de ahi en adelante). PERO OJO, esto NO borra nada de lo que ya sabes de este cliente: ciudad, agencia, nombre, cedula y telefono siguen siendo los mismos de antes (ver los DATO YA CONFIRMADO de mas abajo), asi que en ese pedido nuevo/modificado NUNCA vuelvas a preguntar la ciudad, ni a mandar de nuevo el bloque completo de nombre/cedula/telefono: lo unico que falta confirmar es lo que realmente cambio (por ejemplo la cantidad, o el producto nuevo si pidio otro). Esto ya paso mal una vez de verdad: un cliente cambio la cantidad de su pedido ya cerrado y el bot le volvio a preguntar la ciudad Y le volvio a pedir nombre/cedula/telefono, a pesar de que ya los tenia los tres.\n` : ''}${(knownNombreClean || knownCedulaClean || knownTelefonoClean) ? `\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de lo que ves en el historial reciente, asi que vale aunque estos mensajes ya hayan quedado afuera del historial reciente que ves aca abajo): ya tenes estos datos de este cliente:${knownNombreClean ? `\n  - Nombre y apellido: ${knownNombreClean}` : ''}${knownCedulaClean ? `\n  - Cedula: ${knownCedulaClean}` : ''}${knownTelefonoClean ? `\n  - Telefono: ${knownTelefonoClean}` : ''}\n  NUNCA le vuelvas a pedir ninguno de estos datos, ni completo ni parcial (ni el bloque de "Para procesar tu pedido envianos", ni preguntar "cual es tu nombre" suelto), aunque el pedido se haya cerrado hace rato, aunque abra un pedido nuevo o modifique uno, o aunque estos mensajes ya no aparezcan en el historial reciente de abajo. Solo si el mismo cliente te da un dato distinto (por ejemplo corrige su telefono), usa ese nuevo valor en su lugar.\n` : ''}${orderClosed && SHIPPING_STAGE_TEXT[shippingStage] ? `\n  DATO YA CONFIRMADO, ESTADO DEL ENVIO (esto es lo unico que podes usar para hablar de si el pedido llego o no, ver reglas 7 y 8 de PRIORIDAD mas arriba): ${SHIPPING_STAGE_TEXT[shippingStage]}\n` : ''}
 
-${knownOrderDirective}
-  ENTREGA: en toda Venezuela, Caracas incluida, los envios son UNICAMENTE para RETIRO EN AGENCIA. No hay entrega a domicilio, delivery ni envio a la casa. Si lo piden, aclara esa politica y continua ayudando con la ciudad o agencia pendiente, sin ignorar ninguna otra pregunta del cliente.
+  ENTREGA: depende de la ciudad.
+  - TODA VENEZUELA (Caracas incluida, y todos los demas estados, Maracaibo tambien): SOLO se retira en agencia (TEALCA), no hay entrega a domicilio en ningun lado, ni siquiera en Caracas. Si un cliente pide que se lo lleven a la casa, decile con naturalidad que por ahora solo se retira en agencia, no ofrezcas ni prometas domicilio en ningun caso, y segui ayudandolo a elegir la agencia mas cercana.
   - MARACAIBO (estado Zulia): ademas de la agencia Tealca, ahi tambien hay tienda fisica propia del negocio, en Palacio de Eventos, local PBG-16, Maracaibo, estado Zulia 🙏🏻. ESA es la UNICA direccion que podes escribir de memoria, sin llamar a la herramienta: es fija y siempre la misma. Para las agencias Tealca de Maracaibo NUNCA hagas lo mismo: aunque te sepas que en Maracaibo hay varias agencias Tealca, NO inventes ni escribas de memoria ninguna direccion de Tealca (nombre de sector, calle, numero, etc) — eso ya paso de verdad (se le invento a un cliente una direccion de Tealca en Maracaibo que no existe en el listado real) y no puede volver a pasar. Para Maracaibo llama a buscar_agencias_por_zona exactamente igual que para cualquier otra ciudad (esta nota de la tienda propia NO reemplaza ese paso), dejá que la herramienta traiga la lista REAL de agencias Tealca de Maracaibo (suelen ser varias, no una sola), y despues sumale la tienda propia como un dato mas de la conversacion (con algun emoji si corresponde, tipo 📍), no como parte de la lista numerada. Esto es informacion SOLO para Maracaibo puntual, no para el resto del Zulia ni del pais: en cualquier otra ciudad segui con la agencia Tealca como unica opcion.
 
   HORARIO DE TEALCA: Tealca atiende de lunes a viernes, de 9:00am a 4:00pm. No atiende fines de semana ni feriados. Si el cliente pregunta si Tealca esta abierta, hasta que hora atiende, o cualquier variante de eso (por ejemplo si puede retirar su pedido "ahorita" o "hoy en la noche"), contestale con este horario exacto, sin inventar otro. Si pregunta puntualmente por su pedido fuera de ese horario, decile con naturalidad que en ese momento la agencia esta cerrada y que puede retirarlo en el proximo horario habil.
@@ -267,33 +241,27 @@ ${knownOrderDirective}
   Cuando ya hay interes real, necesitas estos datos, en este orden, de a uno por vez:
   1. Que producto quiere y cuantos. Si el cliente ya dijo la cantidad en algun momento de la conversacion (aunque haya sido hace varios mensajes), usa esa cantidad y NUNCA se la vuelvas a preguntar. Preguntale la cantidad SOLO si todavia no la dijo.
   2. En que ciudad esta.
-  3. Segun la ciudad, busca la agencia con buscar_agencias_por_zona y pide que confirme cual le queda bien. NUNCA pidas direccion residencial ni punto de referencia. En cuanto la agencia quede resuelta, no vuelvas a pedirla salvo que el cliente cambie de ciudad o de agencia.
+  3. Segun la ciudad (ver ENTREGA arriba):
+     - Sea Caracas o cualquier otra ciudad: buscale la agencia mas cercana con buscar_agencias_por_zona y que te confirme cual le queda bien (ver AGENCIAS Y COBERTURA). NUNCA pidas direccion exacta ni punto de referencia: no hace falta, todo se retira en agencia (incluida Caracas), y la unica direccion que existe ahi es la de la agencia (que vos ya le diste), nunca la del cliente.
+     - IMPORTANTE: en cuanto la agencia ya quedo resuelta, esa parte del pedido esta cerrada para siempre en esta conversacion. NUNCA vuelvas a mencionarla como un dato pendiente, ni le vuelvas a pedir que la confirme o que te de una direccion, salvo que el cliente mismo diga que cambio de ciudad o quiere otra agencia.
   4. Nombre y apellido, telefono y cedula: una vez que ya sabes el producto+cantidad y ya quedo resuelta la entrega (paso 3), pedi estos tres datos juntos, en un solo pedido (no de a uno), usando EXACTAMENTE este texto, en un UNICO mensaje de WhatsApp (no le cambies ni una palabra, ni el orden, ni le agregues nada, y no le pongas nada antes tipo "necesito estos datos": eso ya queda dicho en este mismo mensaje, ponerlo dos veces se ve repetido):
 
 ${dataRequestTemplate}
 
-     Esto aplica al retiro en agencia. Si ya recibiste uno o dos de esos campos, pide UNICAMENTE el campo que falta o que sea ambiguo, nunca los tres otra vez.
+     Esto aplica siempre, porque el cliente siempre retira en agencia (Tealca).
      IMPORTANTE, ESTO YA PASO DE VERDAD Y NO PUEDE VOLVER A PASAR: en vez de pedir estos datos directamente con el texto de arriba, el bot le dijo a un cliente "te paso el formulario para tus datos" (o alguna variante como "te mando el formulario", "te comparto el enlace para tus datos") y nunca le llego nada mas: no existe ningun formulario ni enlace, ese pedido de datos SIEMPRE es el texto de arriba, escrito directo en el chat, nunca un link externo. NUNCA uses la palabra "formulario" ni prometas mandar un "enlace"/"link" para que el cliente cargue sus datos: en el mismo mensaje en el que decidís pedir los datos, escribí el texto de arriba completo, ya. Lo mismo aplica para cualquier otra cosa que prometas "pasar" o "mandar" en un momento (una direccion, un dato, una condicion): si lo vas a decir, decilo YA en este mismo mensaje con la info real, nunca como una promesa de mandarlo despues.
      Cuando el cliente te conteste con esos datos, leelos con cuidado y fijate bien cual valor es cual aunque los mande en un orden distinto al que pediste, o todos juntos en un solo mensaje: el nombre es texto con letras, el telefono venezolano tiene 10 u 11 digitos (suele empezar con 0 o con 4), la cedula tiene entre 6 y 9 digitos. Si el cliente dice algo como "la direccion que me pasaste" o similar, es solo una confirmacion de la agencia/direccion, no un dato nuevo, no lo cuentes como si faltara. En cuanto identifiques nombre, telefono y cedula (aunque hayan llegado mezclados en un mismo mensaje o en un orden distinto), da esos tres datos por completos y NUNCA le vuelvas a pedir ninguno de ellos.
   Si te dice una cantidad sin precio confirmado, nunca inventes ni calcules el precio total: segui tomando los datos y decile que confirmas el precio exacto en un momento.
   Si no sabes un precio, un plazo de envio o un dato del producto, decilo asi de simple: que lo confirmas en un momento. Nunca lo inventes.
-  NUNCA prometas un resultado o efecto "en los primeros dias" (ni ninguna otra promesa de tiempo de efecto), y NUNCA le digas a un cliente que con un solo frasco/unidad "se queda a medio camino" o algo asi (insinuar que necesita comprar mas para que funcione de verdad): son afirmaciones que no se pueden sostener. Si el cliente pregunta cuanto tarda en notar algo, contestale con honestidad que varia de persona a persona, sin prometer un plazo.
   NUNCA escribas un link ni una imagen en formato markdown (cosas como "![nombre](https://...)" o cualquier link inventado/de ejemplo) directo en el texto del mensaje: WhatsApp no lo muestra como imagen, el cliente ve el texto crudo y el link ni siquiera funciona. Esto paso de verdad: un cliente pidio ver una foto y en vez de mandarsela de verdad (o decirle que no tenias una para ese momento), se le mando un link falso como texto plano, que no le sirvio de nada. Si el cliente pide una foto y no es un caso en el que corresponda usar mostrar_foto (ver mas abajo), decile con tus palabras que por ahora no tenes esa foto para mandarle, sin inventar ningun link.
   Si el cliente pide hablar con una persona, se queja o reclama algo serio, decile que ya lo pasas con un asesor humano y no sigas insistiendo con el guion de venta.
 
   CIERRE DEL PEDIDO:
-  Cuando ya tenes todos los datos (producto, presentacion, cantidad, agencia elegida, nombre y apellido, telefono y cedula), el mensaje de cierre tiene que incluir, en este orden:
-  1. Un resumen de lo que pidio, incluyendo la agencia donde va a retirar.
-  2. Para Tealca, que paga al recibir en la agencia y no adelanta dinero. Para MRW/Zoom, no cierres automaticamente: el pago es anticipado y lo coordina una persona.
-  3. Para Tealca, que le pasan la guia y le avisan cuando llegue a la agencia.
+  Cuando ya tenes todos los datos (producto y cantidad, la agencia elegida, nombre y apellido, telefono, cedula), el mensaje de cierre tiene que incluir, en este orden:
+  1. Un resumen de lo que pidio (incluyendo la agencia donde va a retirar).
+  2. Que el pago se hace contra entrega: en la agencia, al momento de retirar. NUNCA digas que "un asesor se va a poner en contacto para coordinar el pago": eso no es asi, el pago no se coordina antes, se paga ahi mismo al recibirlo.
+  3. Que en cuanto tengan la guia de envio de Tealca se la van a pasar, y que le avisan apenas el pedido llegue a la agencia.
   No prometas una fecha ni un tiempo de entrega exacto: eso lo confirma la guia de Tealca cuando la tengan.
-
-  MEDIOS DE PAGO:
-  - Tealca, retiro en agencia: pago al recibir, sin adelantos. No inventes otros detalles.
-  - MRW o Zoom: SI son opciones validas del negocio, pero SIEMPRE con pago ANTICIPADO (nunca contra entrega). Hoy el bot todavia no tiene forma de gestionar ese pago anticipado ni de confirmar un pedido completo por MRW/Zoom por su cuenta: si el cliente pide envio por MRW o Zoom, contestale con sinceridad que esa opcion existe con pago anticipado, y pasale la conversacion a un asesor humano para coordinar el pago y los datos de ese envio puntual (nunca inventes un monto, un metodo de pago anticipado, ni confirmes ese pedido vos mismo como si ya estuviera cerrado). Para Tealca (contra entrega) segui vendiendo y cerrando el pedido vos mismo con normalidad, sin derivarlo a nadie.
-  - NUNCA aceptes ni menciones Cashea como medio de pago: no esta disponible.
-  - NUNCA cobres ni cotices en dolares: los montos y precios son siempre en bolivares (Bs), el catalogo de arriba es la unica fuente de precios.
-  - Nunca inventes una promocion, descuento o combo que no este en el catalogo o en los cupones vigentes de mas abajo.
   Usa 1 o 2 emojis en este mensaje para que se sienta cercano y de confirmacion (por ejemplo ✅📦🚚), no lo mandes en texto plano y seco.
   IMPORTANTE, esto es innegociable: ese mensaje de cierre es LO ULTIMO que decis sobre este pedido. Nunca mandes un mensaje aparte despues con cosas como "¡Listo! Todo esta confirmado" ni "¿Hay algo mas en lo que te pueda ayudar?" ni ninguna otra variante de esa pregunta: eso contradice la REGLA DE ORO (ya esta todo cerrado, no hace falta inventar una pregunta ni una confirmacion de relleno). Si el cliente te contesta despues con algo corto como "gracias" o "ok", ahi si podes responder algo breve y calido, pero nunca reabras el pedido con esa pregunta de cierre de servicio.
   DESPUES DEL CIERRE: una vez que el pedido ya quedo cerrado en esta conversacion, el cliente ya lo compro, no hay nada mas que venderle. Si despues sigue preguntando cosas sueltas sobre el producto (por ejemplo "¿esto sirve para tal cosa?", "¿cuanto dura?"), contestale la pregunta con la info real y nada mas. NUNCA le agregues de nuevo preguntas o frases de venta como "¿te gustaria apartar tu frasco?", "¿cuantos queres pedir?" ni parecidas: eso suena a que no te acordas que ya hizo el pedido. Si el cliente dice explicitamente que quiere agregar algo mas o cambiar el pedido, ahi si retomas el guion de pedido normal.
@@ -317,7 +285,7 @@ ${couponsText()}
   - Si mas adelante el cliente se refiere a una de esas agencias por su numero o nombre (ej. "la cuatro", "la segunda", "esa de La Candelaria"), NO vuelvas a usar la herramienta: mirá la lista numerada que vos mismo mandaste antes en la conversacion, identifica cual eligio y confirmale la direccion de esa agencia puntual, preguntandole si le queda bien esa.
   - NUNCA repitas la lista completa de agencias ni la pregunta de "¿cual te queda bien?" dos veces seguidas en la misma conversacion sin que haya pasado algo nuevo. Si ya se la mandaste una vez, no la vuelvas a mandar de nuevo salvo que el cliente la pida de nuevo explicitamente (ej. "mandamela otra vez", "cuales eran"). Antes de responder, fijate en el historial si la ULTIMA lista de agencias que vos mandaste es igual a la que estarias por mandar ahora: si es asi, no la repitas, contesta puntualmente lo que el cliente esta preguntando ahora en su lugar.
   - Si ninguna de las agencias que le ofreciste le queda bien (dice que le queda lejos, que prefiere otra zona, etc.), NO le repitas la misma lista de nuevo: pregunta por otra ciudad/zona mas puntual y usa la herramienta con ese nuevo dato, o si no hay otra opcion cercana, decile con sinceridad que por ahora esa es la cobertura disponible en su zona y que capaz alguien del equipo pueda revisar otra alternativa.
-  - Si el cliente pregunta puntualmente por MRW o Zoom, ver MEDIOS DE PAGO mas arriba: son opciones validas del negocio (con pago anticipado), asi que NUNCA las rechaces ni digas que Tealca es la unica forma de envio que existe. Como el bot todavia no las gestiona solo, derivalas a un asesor humano en vez de cerrar ese pedido vos mismo. Si pregunta puntualmente por otro servicio de envio o mensajeria que de verdad EL NEGOCIO NO OFRECE (por ejemplo un delivery propio fuera de Caracas, o que se lo mandes directo a una ciudad sin agencia y sin MRW/Zoom), contestale con sinceridad que esa opcion puntual no esta disponible y ofrecele elegir la agencia Tealca mas conveniente de la lista. NUNCA ignores la pregunta ni contestes repitiendo la lista de agencias como si no te hubiera preguntado nada: primero respondele eso puntual, y recien despues, si corresponde, volvé a la pregunta de que agencia le queda mejor (sin repetir la lista entera si ya se la mandaste).
+  - Si el cliente pregunta puntualmente por un servicio de envio o mensajeria que EL NEGOCIO NO OFRECE (por ejemplo MRW, Zoom, un delivery propio, o que se lo mandes directo a una ciudad sin agencia), contestale con sinceridad que el envio es unicamente por la agencia (Tealca) a las direcciones que le pasaste, que el negocio no gestiona otros couriers, y ofrecele elegir la agencia mas conveniente de la lista. NUNCA ignores esa pregunta ni contestes repitiendo la lista de agencias como si no te hubiera preguntado nada: primero respondele eso puntual, y recien despues, si corresponde, volvé a la pregunta de que agencia le queda mejor (sin repetir la lista entera si ya se la mandaste).
 ${libraryImagesText() ? `
   FOTOS DURANTE LA CHARLA:
   Estas son las imagenes cargadas en la biblioteca del negocio:
@@ -807,652 +775,16 @@ function runTool(call) {
 // como "vendido": eso demostro ser poco confiable en la practica (el cliente
 // seguia recibiendo la pregunta de venta despues del cierre porque la etapa
 // nunca se marcaba). En cambio, miramos el propio texto que el bot ya
-// genero: el mensaje de cierre siempre tiene que mencionar el pago contra
+// generó: el mensaje de cierre siempre tiene que mencionar el pago contra
 // entrega y la guia de Tealca (instrucciones de arriba), asi que buscamos
-// esas senales directamente, sin acentos y en minuscula para no fallar por
+// esas señales directamente, sin acentos y en minuscula para no fallar por
 // mayusculas/tildes.
-//
-// FASE (correccion cierre-flexible, v2): el solo texto NO alcanza, y
-// tampoco alcanza con revisar UN solo dato. La v1 de esta correccion exigia
-// solo nombre+cedula+telefono ya confirmados en la ficha (knownCustomer),
-// pero eso tiene un agujero real: un CLIENTE ANTIGUO que ya compro antes
-// tiene esos tres datos guardados en la ficha PARA SIEMPRE, asi que una
-// pregunta suya de pura cobertura ("hacen envios a Barinas?", sin ningun
-// interes de compra nuevo) igual pasaba la validacion vieja si el texto del
-// bot mencionaba tealca/pago/guia. Ahora se exige, ademas del texto, que
-// esten presentes las senales de un pedido armado DE VERDAD en ESTA
-// conversacion (no solo datos historicos del cliente):
-//   1. identidad del cliente (nombre+cedula+telefono, en la ficha O recien
-//      escritos por el cliente en esta conversacion),
-//   2. producto identificado (catalogo vinculado a la conversacion, o ya en
-//      la ficha),
-//   3. cantidad mencionada por el CLIENTE (no alcanza con que el bot la
-//      repita en el resumen),
-//   4. modalidad/destino resuelto (ciudad ya conocida, agencia ya cargada
-//      en la ficha, o mencion explicita de agencia/domicilio/tienda en la
-//      conversacion reciente),
-//   5. algo mas que un "si"/sticker suelto en los mensajes recientes del
-//      cliente (aceptacion no ambigua: tiene que haber escrito algo de
-//      sustancia en esta conversacion, no solo una afirmacion vacia).
-// Ver evaluateOrderCompleteness mas abajo para el detalle de cada chequeo.
-//
-// LIMITACION HONESTA (no se resuelve sin rehacer el modelo de datos, ver
-// H08 en docs/contratos.md): esto sigue sin ser un objeto de "pedido"
-// estructurado con su propio total en Bs confirmado explicitamente turno a
-// turno por el cliente; se infiere sobre una ventana de los ULTIMOS
-// mensajes del cliente (recentUserText) mas lo que ya haya en la ficha, no
-// sobre un pedido completo persistido campo por campo. En conversaciones
-// normales (el cierre llega pocos turnos despues de cada dato) esto cubre
-// el caso real reportado; en conversaciones MUY largas donde la cantidad o
-// la ciudad se dijeron muy al principio y quedaron fuera de esa ventana,
-// podria no reconocerlas (falso NEGATIVO: el pedido no cierra solo y
-// necesitaria intervencion humana) -- nunca al reves (nunca cierra de mas
-// por este motivo).
-// FASE (correccion validacion-cierre): la version anterior solo reconocia
-// digitos CONSECUTIVOS ("\d{6,11}"), asi que un telefono escrito como la
-// gente realmente lo escribe -- con "+58" adelante, o con espacios/guiones/
-// puntos separando grupos ("+58 412-123-4567", "0412 123 4567",
-// "12.345.678") -- no matcheaba nada y quedaba sin detectar. Ahora se
-// permite un separador razonable (espacio, guion, punto, parentesis) DENTRO
-// de un mismo numero, y se limpia antes de contar digitos. El limite de
-// longitud del "medio" (13 caracteres) evita, en la practica, que dos
-// numeros distintos separados solo por un espacio (sin ninguna palabra
-// entre medio) se fusionen en un solo token larguisimo -- ese caso puntual
-// (cedula y telefono pegados con un solo espacio, sin "y"/"telefono"/coma
-// entre medio) sigue siendo una limitacion conocida, no cubierta, pero es
-// un formato que casi nunca aparece en una conversacion real (la gente
-// suele separar esos datos con la palabra que los identifica, o con una
-// coma/salto de linea de por medio).
-// FASE (correccion regresion cierre secuencial, punto 3): reproduccion real
-// que esto arregla -- "Persona Ejemplo 12345678. 04121234567" devolvia
-// false. El "." seguido de un espacio y despues otro numero es, en la
-// practica, casi siempre el limite entre DOS numeros distintos (cedula.
-// telefono), no un punto de agrupacion dentro del MISMO numero (eso se
-// escribe sin espacio despues, ej. "12.345.678"). Sin distinguir ese caso,
-// el regex de tokens fusionaba la cedula y el telefono en un solo bloque
-// mas largo que ninguno de los dos rangos validos, y lo que quedaba
-// sueltro despues tampoco representaba ningun numero real. Se corta ahi
-// ANTES de tokenizar, insertando un caracter que no pertenece a la clase de
-// caracteres del regex de abajo, para que nunca pueda "pasar por encima" de
-// ese limite entre los dos numeros.
-function looksLikeCustomerDataProvided(text) {
-  const normalized = String(text || '').replace(/(\d)\.\s+(?=\d)/g, '$1| ');
-  const tokens = (normalized.match(/\+?\d[\d\s.\-()]{4,13}\d/g) || [])
-    .map((m) => m.replace(/\D/g, ''))
-    // +58 delante de un numero de 11+ digitos es el codigo de pais de
-    // Venezuela (ej. "+584121234567"): se descarta para que el resto se
-    // siga midiendo igual que el formato local (0412..., 10-11 digitos).
-    .map((d) => (d.startsWith('58') && d.length > 10 ? d.slice(2) : d));
-  const hasCedula = tokens.some((d) => d.length >= 6 && d.length <= 9);
-  // Un telefono solo (sin ningun otro numero en el mensaje) nunca cuenta
-  // tambien como cedula: los rangos de longitud (6-9 vs 10-11) no se
-  // superponen, asi que un unico token nunca puede satisfacer los dos a la
-  // vez -- esto ya es cierto por construccion, se deja explicito aca.
-  const hasTelefono = tokens.some((d) => d.length >= 10 && d.length <= 11);
-  return hasCedula && hasTelefono;
-}
-
-const QUANTITY_WORD_RE = /\b(un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/i;
-// Cantidad: el cliente la puede dar como numero junto a la unidad ("2
-// frascos", "3 potes"), como palabra ("dos frascos"), o como un numero
-// SOLO en su propio mensaje (respuesta tipica a "cuantos queres?": el
-// cliente contesta nada mas que "2"). Este ultimo caso se restringe a un
-// mensaje corto (nada mas que el numero, sin texto alrededor) para no
-// confundirlo con un fragmento de telefono o de cedula sueltos en medio de
-// un mensaje mas largo.
-// FASE (correccion regresion cierre secuencial, punto 7): el menu FIJO de
-// bienvenida (ver sendGreeting/matchTrigger, no es texto libre del negocio)
-// ofrece "1 Frasco" / "2 Frascos" / "Tengo una duda antes de pedir" y le
-// pide al cliente responder con el numero 1, 2 o 3. Reproduccion real: el
-// cliente contesta "3" (elige "tengo una duda"), y ese numero SOLO se
-// confundia con "cantidad: 3" porque el chequeo de abajo no distinguia una
-// eleccion de ESTE menu puntual de una respuesta a "cuantos queres".
-const MENU_OPTION_CONTEXT_RE =
-  /tengo una duda antes de pedir|responde(me)?\s+con\s+el\s+numero\s*1,?\s*2\s*(o|,)\s*3/i;
-
-function looksLikeQuantityMentioned(text, precedingAssistantText) {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  if (/^[123]$/.test(t) && MENU_OPTION_CONTEXT_RE.test(normalizeForMatch(precedingAssistantText))) {
-    return false;
-  }
-  if (/^\d{1,2}$/.test(t) && Number(t) >= 1 && Number(t) <= 30) return true;
-  if (/\b([1-9]|1\d|2\d|30)\b\s*(frasco|unidad|pote|combo|caja)/i.test(t)) return true;
-  if (QUANTITY_WORD_RE.test(t) && /(frasco|unidad|pote|combo|caja)/i.test(t)) return true;
-  // Palabra de cantidad SOLA, sin "frasco"/"unidad" al lado (mismo criterio
-  // que el numero suelto de arriba: mensaje corto, tipica respuesta directa
-  // a "cuantos queres?"). Reproduccion real: el cliente contesta solo "Dos"
-  // y no se reconocia porque el chequeo de arriba exige la palabra
-  // frasco/unidad/etc en el mismo mensaje.
-  if (/^(un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\.?$/i.test(t)) return true;
-  // Ademas: un numero SUELTO (1 o 2 digitos, con limite de palabra a los dos
-  // lados) en cualquier parte del mensaje -- cubre el caso muy comun de
-  // "quiero 2", "dale, 2", "mejor 3", sin la palabra "frasco"/"unidad" al
-  // lado. Antes de buscarlo se sacan del texto los tramos con forma de
-  // cedula/telefono (mismo patron que looksLikeCustomerDataProvided), para
-  // no confundir los primeros digitos de una cedula ("12.345.678" -> "12")
-  // con una cantidad. Tambien se saca una referencia a una AGENCIA por
-  // numero ("la agencia 1", "la 1", "opcion 2"): eso es una seleccion de
-  // destino (ver looksLikeAgencySelected), no una cantidad de producto -- sin
-  // esto, "la agencia 1 me sirve" contaba erroneamente como "cantidad: 1".
-  const sinIdentidad = t
-    .replace(/\+?\d[\d\s.\-()]{4,13}\d/g, ' ')
-    .replace(/\b(la\s+)?agencia\s*(numero\s*)?\d+\b/gi, ' ')
-    .replace(/\b(la|opcion|opci[oó]n)\s*(numero\s*)?\d+\b/gi, ' ');
-  if (/\b([1-9]|1\d|2\d|30)\b/.test(sinIdentidad)) return true;
-  return false;
-}
-
-// FASE (correccion validacion-cierre v3, punto 1 del pedido): saber la
-// CIUDAD del cliente (knownCity) NO es lo mismo que tener el DESTINO
-// resuelto. La v2 de esta validacion trataba knownCity solo como prueba
-// suficiente de "modalidad/destino resuelto", pero eso deja un agujero
-// real: el bot puede saber la ciudad (viene de la ficha, o del primer
-// mensaje) sin que el cliente haya elegido TODAVIA una agencia puntual (si
-// retira en agencia) ni haya dado una direccion de verdad (si es domicilio
-// en Caracas). Ahora "destino resuelto" exige evidencia mas especifica:
-//   - Agencia: una agencia YA CARGADA en la ficha (cardAgencia, que solo se
-//     llena cuando el cliente confirma cual le queda bien -- ver "COMO SE
-//     ARMA EL PEDIDO" paso 3 en el prompt), o una seleccion inequivoca de
-//     una agencia concreta en el texto reciente del cliente (por numero de
-//     lista, por nombre/zona puntual, o "esa me sirve"/"la de tal sector").
-//   - Domicilio: una direccion con datos reales (calle/avenida, sector,
-//     numero, punto de referencia), no solo la palabra "domicilio" suelta.
-// Simplemente decir "estoy en Caracas" o que knownCity ya este cargada NO
-// alcanza mas por si solo.
-function looksLikeAgencySelected(text) {
-  const t = String(text || '').toLowerCase();
-  if (!t.trim()) return false;
-  // Referencia a una agencia de la lista numerada que el bot ya mando antes
-  // (ver AGENCIAS Y COBERTURA en el prompt: "la 1", "la segunda", "opcion 2").
-  if (/\b(la|opcion|opci[oó]n)\s*(numero\s*)?\d+\b/.test(t)) return true;
-  if (/\bagencia\s*(numero\s*)?\d+\b/.test(t)) return true;
-  if (/\bla\s+(primera|segunda|tercera|cuarta|quinta|sexta)\b/.test(t)) return true;
-  // Confirmacion directa de una agencia puntual por nombre/zona (ej. "la
-  // agencia de La Candelaria", "la de El Junquito me queda bien").
-  if (/\bagencia\s+(de|en)\s+\S+/.test(t)) return true;
-  if (/\b(esa|esta)\s+(agencia\s+)?(me\s+(queda|sirve|conviene)|est[aá]\s+bien)\b/.test(t)) return true;
-  return false;
-}
-
-// FASE (correccion regresion cierre secuencial, punto 4): reproduccion real
-// -- el bot muestra UNA agencia puntual ("1. Carupano - Sucre..."), pregunta
-// "¿Te queda bien esta agencia para retirar tu pedido?" y el cliente
-// contesta solo "Si". Eso es una confirmacion valida de ESA agencia
-// concreta (looksLikeAgencySelected de arriba no lo reconoce: no dice "la
-// 1" ni nombra la agencia, solo "si"), pero SOLO cuenta como tal cuando
-// responde en el momento justo a esa pregunta puntual sobre UNA sola
-// agencia. Si el mensaje del bot mostro una LISTA de dos o mas agencias
-// numeradas, un "si" suelto es ambiguo (no dice cual eligio) y no puede
-// resolver el destino por si solo -- el negocio pidio explicitamente que un
-// "si" despues de varias agencias no elija ninguna de forma arbitraria.
-const AGENCY_CONFIRM_QUESTION_RE =
-  /te\s+queda\s+bien\s+esta\s+agencia|esta\s+agencia\s+(te\s+)?(queda|sirve|conviene)|confirma[s]?\s+esta\s+agencia/i;
-
-function looksLikeAgencyConfirmation(lastAssistantText, lastUserMessage) {
-  const bot = String(lastAssistantText || '');
-  if (!AGENCY_CONFIRM_QUESTION_RE.test(normalizeForMatch(bot))) return false;
-  const numbered = bot.match(/(^|\n)\s*\d+[.)]\s/g) || [];
-  if (numbered.length > 1) return false; // lista de varias agencias: un "si" ahi es ambiguo
-  const norm = normalizeForMatch(lastUserMessage);
-  if (!norm || norm === '[sticker]') return false;
-  if (looksLikeHoldOrRetraction(lastUserMessage)) return false;
-  if (PURE_PRICE_QUESTION_RE.test(norm.trim())) return false;
-  const tokens = norm.replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
-  if (tokens.length > 4) return false; // respuesta corta, no una frase larga aparte
-  return /\b(si|sip|dale|vale|ok|okay|perfecto|claro|correcto)\b/.test(norm);
-}
-
-// FASE (correccion regresion cierre secuencial, punto 3 de la ronda de
-// verificacion): looksLikeAgencyConfirmation solo mira el mensaje del bot y
-// del cliente de ESTE turno puntual -- si pasan varios turnos mas (pedir
-// nombre/cedula/telefono, preguntar el plazo de entrega) sin que nada
-// persista esa confirmacion, evaluateOrderCompleteness deja de verla (ya no
-// es "el ultimo mensaje del bot/cliente") y el sistema podria volver a
-// pedir la agencia. Esta funcion extrae una etiqueta legible de la agencia
-// que se acaba de confirmar (la primera linea numerada del mensaje del
-// bot), para que flow.js la guarde en la ficha (card.agenciaConfirmadaEnChat,
-// nunca en card.agencia -- ver el comentario en flow.js) y la confirmacion
-// sobreviva a los turnos siguientes.
-function extractConfirmedAgencyLabel(lastAssistantText) {
-  const raw = String(lastAssistantText || '');
-  const m = raw.match(/(?:^|\n)\s*(\d+[.)]\s*[^\n]+)/);
-  return m ? m[1].trim() : null;
-}
-
-const ADDRESS_DETAIL_RE = /\b(avenida|av\.|calle|carrera|urbanizaci[oó]n|urb\.|sector|edificio|edif\.|apto|apartamento|casa\s*(n[uú]mero|#|\d)|residencia|torre|manzana|vereda|punto de referencia|frente a|al lado de|cerca de|entre\s+\S+\s+y\s+\S+)/i;
-function looksLikeDeliveryAddressGiven(text) {
-  return ADDRESS_DETAIL_RE.test(String(text || ''));
-}
-
-// Chequeo laxo de TEXTO usado solo para casos donde ni cardAgencia ni una
-// direccion detallada estan presentes todavia, pero el cliente al menos
-// nombro la modalidad (agencia/domicilio/retiro/tienda propia): esto ya no
-// alcanza por si solo para marcar el destino como "resuelto" (ver arriba),
-// pero se mantiene exportado porque otras partes del codigo/tests lo usan
-// para detectar que el cliente esta hablando de la logistica del pedido.
-function looksLikeDeliveryModalityMentioned(text) {
-  return /\bagencia\b|\bdomicilio\b|tienda propia|\bretiro\b|direccion exacta|punto de referencia/i.test(String(text || ''));
-}
-
-// CORRECCION PRIORITARIA (delivery fuera de cobertura): el domicilio SOLO
-// esta autorizado en Caracas -- fuera de ahi, la unica modalidad real es
-// retiro en agencia Tealca (o, puntualmente en Maracaibo, la tienda
-// propia). Esto YA estaba pedido en el prompt (ver buildSystemPrompt, "SOLO
-// se retira en agencia... no ofrezcas ni prometas domicilio"), pero una
-// instruccion de prompt es probabilistica: el bot llego a ofrecer/confirmar
-// domicilio fuera de Caracas de todas formas. Esta es la fuente de verdad
-// DETERMINISTICA (no depende de que el modelo se acuerde) que se usa tanto
-// para corregir la respuesta por codigo (guardAgainstUnauthorizedDelivery)
-// como para bloquear un cierre que apruebe delivery sin cobertura real
-// (evaluateOrderCompleteness, mas abajo).
-//
-// FASE 2 (revertida a pedido explicito del negocio, 20260920): se probo una
-// variante que exigia una lista de zonas puntuales de Caracas confirmadas
-// una por una, dejando cualquier zona sin listar en un estado "pendiente de
-// un humano" en vez de autorizar domicilio. El negocio confirmo
-// explicitamente que ESO ESTA MAL para como opera de verdad: "ofrecemos
-// delivery a TODA CARACAS", sin excepcion de zona. Por eso domicilioAllowed
-// vuelve a ser simplemente "la ciudad cae dentro de Distrito Capital si o
-// no" -- no hace falta ninguna lista de zonas:
-//   - Ciudad conocida DENTRO de Caracas (Distrito Capital): domicilio
-//     autorizado, sin excepcion de zona/parroquia.
-//   - Ciudad conocida FUERA de Caracas (Carupano, Valencia, Barquisimeto,
-//     Maracaibo, etc.): regla de negocio definitiva y ya confirmada
-//     (retiro en agencia Tealca) -- domicilioAllowed=false.
-//   - Ciudad desconocida/ambigua: domicilioAllowed=false, cityKnown=false,
-//     se pide la ciudad -- nunca se asume cobertura sin saber la ciudad.
-function resolveDeliveryCoverage(knownCity, userText) {
-  // FASE (correccion cobertura -- cambio de ciudad en vivo): la ficha
-  // (knownCity, que viene de session.card.ciudad) recien se actualiza
-  // cuando el CLASIFICADOR corre, DESPUES de mandar la respuesta de este
-  // turno (ver flow.js) -- si el cliente acaba de decir una ciudad nueva
-  // en el MISMO mensaje que se esta evaluando ahora mismo, la ficha
-  // todavia tiene la vieja. Por eso una ciudad mencionada en el texto de
-  // ESTE turno (userText) tiene prioridad sobre la ciudad ya guardada: el
-  // cliente diciendo "ahora estoy en Valencia" tiene que dejar de ver
-  // domicilio de inmediato, no recien en el proximo turno cuando la ficha
-  // se ponga al dia.
-  const cityKey = agencies.findKnownCityKey(userText) || agencies.findKnownCityKey(knownCity);
-  return { domicilioAllowed: false, cityKnown: Boolean(cityKey), pendingHumanConfirmation: false };
-}
-
-const DOMICILIO_MENTION_RE =
-  /\bdomicilio\b|\bdelivery\b|hasta la puerta|puerta a puerta|en tu casa|a tu casa|te lo (llevamos|entregamos|mandamos|enviamos) (a|hasta) tu (casa|direccion)/i;
-// Si el propio texto YA es una negacion/derivacion correcta, o ya dice que
-// queda pendiente de confirmar con un humano, no hay nada que corregir --
-// séria al reves, estariamos reemplazando una respuesta correcta por otra.
-const DOMICILIO_DENIAL_RE =
-  /no\s+(hay|tenemos|ofrecemos|contamos con|hacemos)\s+(entrega\s+a\s+)?(domicilio|delivery)|solo\s+(se\s+)?(retira|retiro|retirar)\s+en\s+(la\s+)?agencia|unicamente\s+para\s+retiro\s+en\s+agencia|por\s+ahora\s+(no|solo)[^.]*agencia|necesito\s+saber\s+bien\s+tu\s+ciudad/i;
-
-function looksLikeOffersDomicilio(text) {
-  const norm = normalizeForMatch(text);
-  if (!DOMICILIO_MENTION_RE.test(norm)) return false;
-  return !DOMICILIO_DENIAL_RE.test(norm);
-}
-
-// Red de seguridad de codigo (ver comentario de resolveDeliveryCoverage):
-// si la respuesta que esta por mandarse ofrece o confirma domicilio sin
-// cobertura real, se reemplaza ANTES de mandarla -- nunca se deja pasar la
-// promesa. Conserva la conversacion tal cual esta (no toca cantidad,
-// producto ni datos personales: solo cambia el TEXTO de esta respuesta
-// puntual sobre la modalidad de entrega). Dos resultados posibles:
-//   - ciudad conocida, fuera de Caracas: se deriva a agencia (regla real
-//     del negocio, definitiva).
-//   - ciudad todavia sin confirmar: se pide la ciudad/zona (nunca se
-//     asume cobertura sin saber la ciudad).
-function guardAgainstUnauthorizedDelivery(text, knownCity, userText) {
-  if (!looksLikeOffersDomicilio(text)) return text;
-  const { domicilioAllowed, cityKnown } = resolveDeliveryCoverage(knownCity, userText);
-  if (domicilioAllowed) return text;
-  console.log(
-    '[coverage-guard] se corrigio una oferta de domicilio sin cobertura real. knownCity=',
-    knownCity,
-    'cityKnown=',
-    cityKnown
-  );
-  const correction = 'No ofrecemos entrega a domicilio; los envios son unicamente para retiro en agencia Tealca.';
-  const usefulParts = String(text || '')
-    .split(/(?<=[.!?])\s+|\n+/)
-    .filter((part) => part.trim() && !DOMICILIO_MENTION_RE.test(normalizeForMatch(part)));
-  if (usefulParts.length) return `${correction} ${usefulParts.join(' ')}`.trim();
-  return cityKnown
-    ? `${correction} ¿Te ayudo a elegir la agencia que te quede mejor?`
-    : `${correction} ¿En que ciudad retirarias?`;
-}
-
-// Aceptacion no ambigua: el pedido original de esta revision es "no
-// interpretar... un 'si' ambiguo como confirmacion del pedido". La v2 de
-// esta validacion solo rechazaba un "si"/"ok"/"dale" SUELTO (un solo
-// token), pero eso deja pasar otros dos casos reales que el negocio pidio
-// cubrir explicitamente (punto 2 de la segunda revision):
-//   1. Un mensaje con VARIAS palabras que sigue sin ser una aceptacion de
-//      compra: una pregunta de precio ("cuanto cuestan dos?"), o cualquier
-//      pregunta suelta que no confirma nada todavia.
-//   2. Un rechazo o retractacion EXPLICITA ("no me lo envies todavia",
-//      "antes queria dos, ahora solo estoy consultando"): esto tiene que
-//      bloquear el cierre aunque haya datos de un pedido mas atras en la
-//      misma ventana de mensajes recientes (ver evaluateOrderCompleteness).
-// Ninguno de los dos casos es "mas de un token", que era el unico criterio
-// de la v2; hace falta buscarlos explicitamente.
-const AMBIGUOUS_TOKENS = new Set(['si', 'ok', 'okay', 'dale', 'listo', 'bueno', 'vale', 'bien', 'sip']);
-
-function normalizeForMatch(text) {
-  return String(text || '')
-    .trim()
+function isClosingMessage(text) {
+  const norm = String(text || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    // El "\u00bf" de apertura no aporta nada para estos regex (todos anclan en el
-    // contenido, no en el signo de apertura) y si se deja, un regex anclado
-    // con ^ nunca matchea una pregunta real ("\u00bfcuanto cuesta...?"). Se saca
-    // aca, en un solo lugar, en vez de tener que acordarse de permitirlo en
-    // cada regex nuevo.
-    .replace(/\u00bf/g, '');
-}
-
-// Rechazo o retractacion explicita: si aparece en la ventana de mensajes
-// recientes del cliente, bloquea la aceptacion no ambigua sin importar que
-// otra cosa haya dicho antes en esa misma ventana. Se prefiere este falso
-// NEGATIVO (el pedido no cierra solo, hace falta que un humano lo revise)
-// antes que cerrar un pedido que el cliente acaba de frenar o retractar.
-const HOLD_OR_RETRACT_RE =
-  /\bno\s+(me\s+lo\s+)?(mandes|env[i\u00ed]es|proces[a-z]*|confirmes|cierres|pidas)\b|\btodav[i\u00ed]a\s+no\b|\ba[u\u00fa]n\s+no\b|\bespera(te)?\b|\bsolo\s+(estoy\s+)?consultando\b|\bsolo\s+(quiero|queria)\s+(saber|preguntar)\b|\bsolo\s+(era|estoy)\s+pregunt\w*|\bcancela(r|lo|me)?\b/i;
-
-// Pregunta pura sobre precio/costo, sin ninguna se\u00f1al de aceptacion: "y
-// cuanto cuestan dos?", "cuanto sale el combo?". Si el UNICO mensaje
-// reciente del cliente es esto, no hay aceptacion todavia, solo consulta.
-const PURE_PRICE_QUESTION_RE = /^(y\s+)?(cuanto|cu\u00e1nto)\s+(cuesta|cuestan|vale|valen|sale|salen|es|son)\b.*\?\s*$/i;
-
-function looksLikeHoldOrRetraction(text) {
-  return HOLD_OR_RETRACT_RE.test(normalizeForMatch(text));
-}
-
-function looksLikeUnambiguousEngagement(text) {
-  const norm = normalizeForMatch(text);
-  if (!norm || norm === '[sticker]') return false;
-  if (looksLikeHoldOrRetraction(text)) return false;
-  const tokens = norm.replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
-  if (tokens.length <= 1 && AMBIGUOUS_TOKENS.has(tokens[0])) return false;
-  if (PURE_PRICE_QUESTION_RE.test(norm.trim())) return false;
-  return true;
-}
-
-// FASE (correccion validacion-cierre v3, punto 2): un "si"/"dale" SUELTO
-// (un solo token ambiguo) SI cuenta como aceptacion cuando responde
-// DIRECTAMENTE a una pregunta de confirmacion explicita que el bot acaba de
-// hacer (el resumen del pedido, preguntando "\u00bfconfirmas?", "\u00bfasi queda
-// bien?", etc). Ahi el "si" no es ambiguo en contexto, aunque en aislamiento
-// lo sea. Esto es lo que el negocio pidio probar como "aceptacion valida
-// contextual despues del resumen".
-const CONFIRMATION_REQUEST_RE =
-  /\bconfirmas\b|\bconfirmame\b|\bconfirmamos\b|\bconfirmemos\b|\bte\s+parece\b|\bas[i\u00ed]\s+(qued(a|amos)|est[a\u00e1]\s+bien|te\s+lo\s+dejo)\b|\bcerramos\s+as[i\u00ed]\b|\bproced(o|emos)\s+(con|as[i\u00ed])\b|\bser[i\u00ed]a\s+(tu\s+pedido|entonces)\b|\bqued(a|arias)\s+as[i\u00ed]\b/i;
-
-function looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage) {
-  if (!CONFIRMATION_REQUEST_RE.test(normalizeForMatch(lastAssistantText))) return false;
-  const norm = normalizeForMatch(lastUserMessage);
-  if (!norm || norm === '[sticker]') return false;
-  if (looksLikeHoldOrRetraction(lastUserMessage)) return false;
-  if (PURE_PRICE_QUESTION_RE.test(norm.trim())) return false;
-  const tokens = norm.replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
-  return tokens.length >= 1;
-}
-
-// FASE (correccion validacion-cierre v3, punto 4): saber el PRODUCTO
-// vinculado y la CANTIDAD no alcanza cuando ese mismo producto "base" tiene
-// mas de una presentacion activa en el catalogo (ej. "Shilajit Gomitas" y
-// "Shilajit Resina", o dos tama\u00f1os distintos). Si hay mas de una
-// presentacion posible con esa misma palabra base y el cliente nunca
-// escribio ninguna palabra distintiva de alguna de ellas, la presentacion
-// se trata como NO confirmada (pudo haber quedado vinculada por un trigger
-// generico, no por una eleccion real del cliente).
-function normalizeProductWords(name) {
-  return normalizeForMatch(name).split(/\s+/).filter(Boolean);
-}
-
-function findProductPresentationSiblings(knownProductName) {
-  const target = String(knownProductName || '').trim();
-  if (!target) return [];
-  let products = [];
-  try {
-    products = loadProducts().filter((p) => p.active !== false);
-  } catch (err) {
-    products = [];
-  }
-  const targetBase = normalizeProductWords(target)[0];
-  if (!targetBase) return [];
-  return products.filter((p) => normalizeProductWords(p.name)[0] === targetBase);
-}
-
-function looksLikePresentationConfirmed(knownProductName, recentUserText) {
-  const siblings = findProductPresentationSiblings(knownProductName);
-  if (siblings.length <= 1) return true; // sin ambiguedad: una sola presentacion con esa base
-  const textNorm = normalizeForMatch(recentUserText);
-  return siblings.some((p) => {
-    const distintivas = normalizeProductWords(p.name).slice(1);
-    return distintivas.some((w) => w.length > 2 && textNorm.includes(w));
-  });
-}
-
-// FASE (correccion validacion-cierre v3, punto 4): "producto vinculado +
-// cantidad" tampoco alcanza si el mensaje de cierre no le dice al cliente un
-// TOTAL real en bolivares. El prompt actual (ver "Si te dice una cantidad
-// sin precio confirmado, nunca inventes ni calcules el precio total") NO
-// tiene un paso previo de "cotizar" antes del cierre: el total recien
-// aparece, si aparece, en el propio mensaje de cierre (el resumen final).
-// Por eso este chequeo mira el TEXTO DE CIERRE que se esta por mandar (no
-// una ventana de mensajes anteriores, que en el flujo real de este bot
-// normalmente no tiene ningun monto): si ese texto no menciona ningun monto
-// en Bs, el cierre se bloquea -- un pedido nunca se cierra sin que el
-// cliente sepa cuanto va a pagar. No intenta verificar que el numero sea
-// matematicamente exacto (precio x cantidad): eso requeriria un objeto de
-// pedido estructurado que hoy no existe (ver H08 en docs/contratos.md); esto
-// prueba que ALGUN monto real se puso sobre la mesa en el cierre, no que sea
-// el correcto -- limitacion documentada, no silenciosa. La "aceptacion" del
-// total queda cubierta por el chequeo de aceptacion_no_ambigua (el cliente
-// ya dio su ok DESPUES de conocer el producto/cantidad/destino que ese
-// mismo total describe); una confirmacion puntual del MONTO en si, turno a
-// turno, necesitaria el mismo objeto de pedido estructurado de H08.
-const MONEY_MENTION_RE = /\b\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?\s*(bs\.?|bol[i\u00ed]vares)\b|\bbs\.?\s*\d/i;
-function looksLikeTotalCommunicated(closingText, expectedTotal) {
-  const raw = String(closingText || '');
-  if (!MONEY_MENTION_RE.test(raw)) return false;
-  if (expectedTotal === null || expectedTotal === undefined || expectedTotal === '' || !Number.isFinite(Number(expectedTotal))) return true;
-  const matches = [
-    ...(raw.matchAll(/(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\s*(?:bs\.?|bol[ií]vares)/gi)),
-    ...(raw.matchAll(/(?:bs\.?|bol[ií]vares)\s*(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/gi)),
-  ];
-  const values = matches.map((match) => {
-    const value = match[1];
-    if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(value)) return Number(value.replace(/\./g, '').replace(',', '.'));
-    if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(value)) return Number(value.replace(/,/g, ''));
-    return Number(value.replace(',', '.'));
-  });
-  return values.some((value) => Math.abs(value - Number(expectedTotal)) < 0.01);
-}
-
-// Junta los chequeos de arriba. Devuelve {complete, missing}: missing lista,
-// en espanol, que le falta (util para logs/depuracion y para los tests,
-// nunca se le muestra al cliente asi tal cual -- ver
-// buildIncompleteOrderNotice mas abajo para la version que si se manda).
-function evaluateOrderCompleteness({
-  text,
-  knownCustomer,
-  recentUserText,
-  knownProduct,
-  knownCity,
-  cardAgencia,
-  lastAssistantText,
-  lastUserMessage,
-  knownQuantity,
-  orderModality,
-  orderCourier,
-  expectedTotal,
-  previouslyCommunicatedTotal,
-  orderAccepted,
-} = {}) {
-  const missing = [];
-  const nombre = String(knownCustomer && knownCustomer.nombre || '').trim();
-  const cedula = String(knownCustomer && knownCustomer.cedula || '').trim();
-  const telefono = String(knownCustomer && knownCustomer.telefono || '').trim();
-  const identidadPorFicha = Boolean(nombre && cedula && telefono);
-  const identidadPorTexto = looksLikeCustomerDataProvided(recentUserText);
-  if (!identidadPorFicha && !identidadPorTexto) missing.push('identidad_cliente');
-
-  if (!String(knownProduct || '').trim()) {
-    missing.push('producto');
-  } else if (!looksLikePresentationConfirmed(knownProduct, recentUserText)) {
-    missing.push('presentacion');
-  }
-
-  // OJO: la cantidad y la modalidad/destino se buscan SOLO en lo que
-  // escribio el CLIENTE (recentUserText), nunca en "text" (la respuesta que
-  // el propio bot esta por mandar). El resumen de cierre casi siempre
-  // repite la cantidad y menciona la agencia/domicilio por su cuenta -- si
-  // se aceptara eso como prueba, el bot podria "inventar" un pedido
-  // completo con solo escribir un resumen convincente, exactamente el
-  // problema que esta validacion tiene que evitar.
-  if (!Number(knownQuantity) && !looksLikeQuantityMentioned(recentUserText, lastAssistantText)) missing.push('cantidad');
-
-  // Ver looksLikeAgencySelected/looksLikeDeliveryAddressGiven arriba: ya no
-  // alcanza con knownCity sola (punto 1 de la segunda revision). Se suma
-  // looksLikeAgencyConfirmation (un "si" respondiendo a "¿te queda bien
-  // esta agencia?" sobre UNA sola agencia mostrada) porque src/classifier.js
-  // no completa cardAgencia durante la charla en vivo (solo se llena mucho
-  // despues, cuando se carga la guia de envio desde el panel -- ver
-  // orderGuard.js): no hay que depender de un campo que en la practica nadie
-  // completa en el momento del cierre.
-  const agenciaConfirmada =
-    Boolean(String(cardAgencia || '').trim()) ||
-    looksLikeAgencySelected(recentUserText) ||
-    looksLikeAgencyConfirmation(lastAssistantText, lastUserMessage);
-  // CORRECCION PRIORITARIA (delivery fuera de cobertura): una direccion de
-  // domicilio dada por el cliente solo resuelve el destino si la ciudad
-  // conocida esta realmente dentro de la cobertura de domicilio (ver
-  // resolveDeliveryCoverage mas abajo) -- una direccion completa en una
-  // ciudad fuera de esa cobertura (o con la ciudad todavia sin confirmar) NO
-  // puede aprobar un pedido de delivery.
-  const destinoYaResuelto = agenciaConfirmada && orderModality !== 'home_delivery';
-  if (!destinoYaResuelto) missing.push('modalidad_destino');
-
-  if (/^(MRW|Zoom)$/i.test(String(orderCourier || ''))) missing.push('coordinacion_humana_pago');
-
-  const aceptacionOk = orderAccepted === true || (
-    orderAccepted === undefined && (
-      looksLikeUnambiguousEngagement(recentUserText) ||
-      looksLikeContextualShortAcceptance(lastAssistantText, lastUserMessage)
-    )
-  );
-  if (!aceptacionOk) missing.push('aceptacion_no_ambigua');
-
-  const totalVigenteYaComunicado = previouslyCommunicatedTotal !== null && previouslyCommunicatedTotal !== undefined &&
-    expectedTotal !== null && expectedTotal !== undefined &&
-    Number.isFinite(Number(previouslyCommunicatedTotal)) && Number.isFinite(Number(expectedTotal)) &&
-    Math.abs(Number(previouslyCommunicatedTotal) - Number(expectedTotal)) < 0.01;
-  if (!looksLikeTotalCommunicated(text, expectedTotal) && !totalVigenteYaComunicado) missing.push('total_comunicado');
-
-  return { complete: missing.length === 0, missing };
-}
-
-// FASE (correccion validacion-cierre v3, punto 3): antes, el UNICO gatillo
-// para siquiera evaluar un cierre era que el texto trajera literalmente las
-// tres palabras "tealca"+"pago"+"guia" -- eso es fragil y depende 100% de
-// como este redactado el prompt (ya senalado como problema en la primera
-// revision). Un pedido de DELIVERY (domicilio en Caracas) puede cerrarse
-// con un texto que nunca menciona Tealca/agencia/guia (el mensajero no pasa
-// por una agencia), y ese cierre real quedaria sin detectar. Ahora el
-// gatillo es ESTRUCTURAL: el texto tiene que (a) no ser una pregunta (el
-// prompt dice que el mensaje de cierre nunca termina en pregunta), y (b)
-// mencionar tanto una forma de pago como un resumen de pedido o una senal
-// de seguimiento/entrega -- sin exigir palabras puntuales como "Tealca" o
-// "guia", que son de UN solo canal de entrega.
-// FASE (correccion regresion cierre secuencial, punto 6): antes se
-// descartaba el texto ENTERO si tenia un "?"/"\u00bf" en CUALQUIER parte, aunque
-// fuera solo una pregunta de CORTESIA agregada despues del resumen real
-// ("...pago contra entrega. \u00a1Listo! \u00bfHay algo mas en lo que te pueda
-// ayudar?"). Eso paso de verdad: un cierre valido con esa cortesia al final
-// nunca se reconocia como cierre (ni marcaba el pedido como vendido, ni
-// disparaba la validacion de completitud sobre ESE texto). Lo que el prompt
-// pide evitar es que el CIERRE EN SI quede sin confirmar por terminar en
-// pregunta -- una cortesia posterior ya cerrada no es eso. Se saca esa
-// cortesia reconocida ANTES de mirar si queda algun otro "?" en el texto.
-const COURTESY_TAIL_QUESTION_RE =
-  /\s*(?:[\u00a1!]listo[\u00a1!]?\s*)?[\u00bf?]\s*(?:hay algo m[a\u00e1]s(?:\s+en\s+(?:lo\s+)?que\s+(?:te\s+)?pueda\s+ayudar)?|te\s+(?:puedo|ayudo)\s+(?:en\s+)?algo\s+m[a\u00e1]s|necesitas\s+algo\s+m[a\u00e1]s|algo\s+m[a\u00e1]s\s+en\s+(?:lo\s+)?que\s+(?:te\s+)?pueda\s+ayudar)\s*\?\s*$/i;
-
-// FASE (correccion regresion cierre secuencial, punto 6, segunda parte):
-// mentionsPayment + mentionsTrackingOrPickup SIN ningun dato puntual del
-// pedido tambien daba falsos positivos -- reproduccion real: "Para Tealca
-// el pago es contra entrega y enviamos la guia cuando despachamos" es una
-// explicacion GENERAL de como funciona el envio (responde una duda), no un
-// resumen de UN pedido concreto, pero mencionaba "contra entrega" (pago) y
-// "guia"/"Tealca" (seguimiento) y por eso se detectaba como cierre, lo que
-// hacia que se le sustituyera esa respuesta util por el interrogatorio de
-// "te falta confirmar...". Ahora la rama de seguimiento/retiro (sin mencion
-// explicita de "tu pedido"/"el pedido") SOLO cuenta como cierre si ademas
-// trae algun dato puntual (una cantidad con su unidad, o un monto en Bs) --
-// una explicacion de politica general nunca trae eso.
-const ORDER_SPECIFICS_RE =
-  /\b([1-9]|1\d|2\d|30)\s*(frasco|unidad|pote|combo|caja)|\bbs\.?\s*\d|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?\s*(bs\.?|bol[i\u00ed]vares)/i;
-
-function looksLikeClosingSummaryText(text) {
-  const raw = String(text || '').replace(COURTESY_TAIL_QUESTION_RE, '');
-  if (raw.includes('?') || raw.includes('\u00bf')) return false;
-  const norm = normalizeForMatch(raw);
-  const mentionsPayment = /contra entrega|pagas? al recibir|pago (movil|anticipado)|\befectivo\b|\btransferencia\b/.test(norm);
-  if (!mentionsPayment) return false;
-  // FASE (correccion regresion cierre secuencial, punto 6, tercera parte):
-  // "tu pedido"/"el pedido" A SECAS (sin ningun dato puntual pegado, como
-  // "en cuanto tengamos la guia de tu pedido te aviso") es lenguaje
-  // generico que tambien aparece en una respuesta puramente informativa
-  // (consulta de cobertura/pago que el bot SI contesto bien): antes eso
-  // alcanzaba, por si solo, para activar la senal estructural de cierre y
-  // terminar reemplazando la respuesta real por el aviso generico de "me
-  // falta confirmar...", dejando la pregunta del cliente sin contestar de
-  // verdad. Ahora esa mencion generica ya NO cuenta sola: solo cuenta
-  // cuando trae un dato puntual pegado ("pedido de 2", "pedido queda
-  // listo/armado") o una accion de entrega concreta (te lo llevamos/va a
-  // tu direccion), nunca por la sola palabra "pedido".
-  const mentionsOrderRecap =
-    /pedido de \d|pedido (?:queda )?(?:listo|confirmado|procesado)|te (lo |los |la |las )?(llevamos|enviamos|mandamos|entregamos)|va (a|para|camino)/.test(norm);
-  const mentionsTrackingOrPickup =
-    /\bguia\b|\btealca\b|\bagencia\b|en camino|te aviso cuando|cuando (llegue|este listo)|mensajero/.test(norm);
-  const mentionsOrderSpecifics = ORDER_SPECIFICS_RE.test(norm);
-  return mentionsOrderRecap || (mentionsTrackingOrPickup && mentionsOrderSpecifics);
-}
-
-function isClosingMessage(text, ctx) {
-  if (!looksLikeClosingSummaryText(text)) return false;
-  return evaluateOrderCompleteness(Object.assign({ text: text }, ctx || {})).complete;
-}
-
-// Traduce la lista tecnica de "missing" de evaluateOrderCompleteness a un
-// mensaje que SI se le puede mandar al cliente (ver punto 6 de la segunda
-// revision: nunca decirle "confirmado"/cerrar el pedido si el sistema no lo
-// va a guardar como tal). Nunca se usa como sustituto de una respuesta real
-// del modelo: solo se manda cuando el propio texto del modelo YA sonaba a
-// cierre (ver looksLikeClosingSummaryText) pero la validacion estructural
-// dice que en realidad falta algo.
-const MISSING_LABELS = {
-  identidad_cliente: 'confirmar tu nombre, cedula y telefono',
-  producto: 'confirmar que producto queres',
-  presentacion: 'confirmar que presentacion queres',
-  cantidad: 'confirmar cuantos queres',
-  modalidad_destino: 'confirmar la agencia donde vas a retirar',
-  coordinacion_humana_pago: 'coordinar con una persona el pago anticipado y el retiro en agencia',
-  aceptacion_no_ambigua: 'que me confirmes el pedido',
-  total_comunicado: 'confirmarte el monto total',
-};
-
-function buildIncompleteOrderNotice(missing) {
-  const labels = (missing || []).map((k) => MISSING_LABELS[k]).filter(Boolean);
-  if (!labels.length) {
-    return 'Todavia me falta confirmar un par de cosas antes de dejar tu pedido armado, ya te aviso cuales. \ud83d\ude4f';
-  }
-  const lista =
-    labels.length === 1
-      ? labels[0]
-      : `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
-  return `Vamos bien, pero antes de dejar tu pedido armado del todo me falta ${lista}. \ud83d\ude4f`;
+    .replace(/[\u0300-\u036f]/g, '');
+  return norm.includes('tealca') && norm.includes('pago') && norm.includes('guia');
 }
 
 // Red de seguridad igual en espiritu a isClosingMessage: el prompt le pide al
@@ -1591,58 +923,6 @@ function scrubGenial(text) {
   });
 }
 
-// Red de seguridad de codigo: el negocio reporto encontrar, en las
-// plantillas/prompts de PRODUCTO configurados a mano en el panel (que viven
-// en products.json en el disco de produccion, fuera de este repositorio: no
-// hay forma de leerlos ni editarlos desde el codigo), frases como "la
-// energia se siente en los primeros dias" o "con uno solo te quedas a medio
-// camino" -- promesas de resultado / insinuaciones de que hace falta
-// comprar mas que no se pueden sostener (ver el pedido: "no prometas
-// resultados en los primeros dias ni afirmes que un frasco te deja a medio
-// camino"). Como esas plantillas de producto no estan en este repo (viven
-// en la config del panel), esto se corrige con un FILTRO DE CODIGO que
-// corre sobre CUALQUIER respuesta final, sin importar si la frase vino del
-// prompt de producto, de la base de conocimiento, o de que el modelo la
-// haya improvisado por su cuenta: si aparece, se saca la oracion completa
-// que la contiene (nunca se manda a medias ni se reemplaza por otra
-// afirmacion inventada).
-const UNVERIFIED_RESULT_CLAIM_RE =
-  /en\s+los?\s+primeros?\s+d[ií]as?\b.{0,40}\b(sient|not|efect|energ|result)|(?:sient|not|efect|energ|result).{0,40}\ben\s+los?\s+primeros?\s+d[ií]as?\b|a\s+medio\s+camino|te\s+deja\s+a\s+medias|resultados?\b.{0,25}\bdesde\s+el\s+primer\s+d[ií]a|desde\s+el\s+primer\s+d[ií]a\b.{0,25}\bresultados?/i;
-
-// Mensaje de repuesto SOLO para el caso limite de que la respuesta entera
-// (todas las oraciones/clausulas) fuera la promesa no sostenible: nunca se
-// puede volver a mostrar el texto original en ese caso (seria mandar
-// exactamente lo que se queria evitar), asi que se manda esto en su lugar.
-const UNVERIFIED_RESULT_CLAIM_FALLBACK = 'Eso varia de persona a persona, asi que no te puedo prometer un tiempo exacto 🙏';
-
-function scrubUnverifiedResultClaims(text) {
-  if (!text) return text;
-  // Primero se intenta sacar solo la CLAUSULA puntual (separada por comas),
-  // para no perder el resto de una oracion mas larga que si tiene contenido
-  // valido (ej. "Con uno solo te quedas a medio camino, mejor llevate dos"
-  // -> "mejor llevate dos"). Si una oracion entera es una sola clausula
-  // (no tiene coma) y matchea, se saca la oracion completa.
-  const sentences = String(text).split(/(?<=[.!?])\s+/);
-  const keptSentences = [];
-  let removedAlgo = false;
-  for (const sentence of sentences) {
-    if (!UNVERIFIED_RESULT_CLAIM_RE.test(sentence)) {
-      keptSentences.push(sentence);
-      continue;
-    }
-    removedAlgo = true;
-    const clauses = sentence.split(/,\s*/);
-    const keptClauses = clauses.filter((c) => !UNVERIFIED_RESULT_CLAIM_RE.test(c));
-    if (keptClauses.length) keptSentences.push(keptClauses.join(', '));
-  }
-  if (!removedAlgo) return text; // no habia nada que sacar
-  const result = keptSentences.join(' ').trim();
-  // Si no queda NADA (la respuesta entera era, clausula por clausula, la
-  // promesa no sostenible), se manda el mensaje de repuesto: nunca se puede
-  // volver al texto original aca, seria mandar justo lo que se queria evitar.
-  return result || UNVERIFIED_RESULT_CLAIM_FALLBACK;
-}
-
 // Red de seguridad de codigo: si el modelo NO llamo a buscar_agencias_por_zona
 // en este turno (por eso se usa desde la rama donde no hubo tool_calls) pero
 // igual escribio algo con forma de lista de agencias (numerada, mencionando
@@ -1671,7 +951,7 @@ function guardAgainstUnverifiedAgencyList(text, knownCity, userText) {
   return buildAgencyListMessage(scope, estado, ciudadCandidata, results);
 }
 
-async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, knownOrder) {
+async function getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) {
   const settings = getSettings();
   const model = settings.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const temperature = settings.openaiTemperature != null ? Number(settings.openaiTemperature) : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
@@ -1697,7 +977,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   }));
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, knownOrder) },
+    { role: 'system', content: buildSystemPrompt(knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer) },
     ...sanitizedHistory,
     { role: 'user', content: userText },
   ];
@@ -1714,8 +994,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
 
   if (!toolCalls || !toolCalls.length) {
     console.log('[agency-guard] el modelo NO llamo ninguna herramienta este turno. userText=', userText, 'knownCity=', knownCity);
-    const guarded = guardAgainstUnverifiedAgencyList(scrubUnverifiedResultClaims(scrubFakeImageLinks(scrubGenial(responseMessage.content.trim()))), knownCity, userText);
-    const text = guardAgainstUnauthorizedDelivery(guarded, knownCity, userText);
+    const text = guardAgainstUnverifiedAgencyList(scrubFakeImageLinks(scrubGenial(responseMessage.content.trim())), knownCity, userText);
     return { text, images: [] };
   }
   console.log('[agency-guard] el modelo SI llamo herramienta(s):', toolCalls.map((c) => c.function.name).join(', '));
@@ -1745,7 +1024,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
     tools: TOOLS,
   });
 
-  let text = scrubUnverifiedResultClaims(scrubFakeImageLinks(scrubGenial(followUp.choices[0].message.content.trim())));
+  let text = scrubFakeImageLinks(scrubGenial(followUp.choices[0].message.content.trim()));
 
   // Red de seguridad de codigo: si en este turno se busco una lista de
   // agencias por ciudad/estado y la herramienta encontro mas de una, pero el
@@ -1779,8 +1058,6 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
     text = text.trim() + MARACAIBO_TIENDA_PROPIA_NOTE;
   }
 
-  text = guardAgainstUnauthorizedDelivery(text, knownCity, userText);
-
   return { text, images };
 }
 
@@ -1792,20 +1069,6 @@ module.exports = {
   buildSystemPrompt,
   catalogText,
   isClosingMessage,
-  looksLikeClosingSummaryText,
-  buildIncompleteOrderNotice,
-  scrubUnverifiedResultClaims,
-  evaluateOrderCompleteness,
-  looksLikeCustomerDataProvided,
-  looksLikeQuantityMentioned,
-  looksLikeDeliveryModalityMentioned,
-  looksLikeAgencySelected,
-  looksLikeDeliveryAddressGiven,
-  looksLikeUnambiguousEngagement,
-  looksLikeHoldOrRetraction,
-  looksLikeContextualShortAcceptance,
-  looksLikePresentationConfirmed,
-  looksLikeTotalCommunicated,
   looksLikeEmptyDataRequest,
   mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,
@@ -1819,13 +1082,4 @@ module.exports = {
   libraryImagesText,
   findImageByName,
   runTool,
-  // FASE (correccion regresion cierre secuencial): exportadas para probar
-  // directamente los puntos 3, 4 y 7 del pedido de correccion.
-  looksLikeAgencyConfirmation,
-  extractConfirmedAgencyLabel,
-  // CORRECCION PRIORITARIA (delivery fuera de cobertura): exportadas para
-  // probar directamente la validacion operativa de cobertura de domicilio.
-  resolveDeliveryCoverage,
-  looksLikeOffersDomicilio,
-  guardAgainstUnauthorizedDelivery,
 };

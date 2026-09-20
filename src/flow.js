@@ -24,9 +24,6 @@ const {
   getAssistantReply,
   applySplitPolicy,
   isClosingMessage,
-  looksLikeClosingSummaryText,
-  evaluateOrderCompleteness,
-  buildIncompleteOrderNotice,
   looksLikeEmptyDataRequest,
   mentionsDataFieldsAsRequest,
   stripDuplicateDataRequest,
@@ -35,18 +32,14 @@ const {
   POST_CLOSE_REMINDER,
   buildDirectAgencyMessage,
   getDataRequestTemplate,
-  looksLikeAgencyConfirmation,
-  extractConfirmedAgencyLabel,
-  guardAgainstUnauthorizedDelivery,
 } = require('./ai');
 const { classifyConversation } = require('./classifier');
-const { matchTrigger, findProduct, resolveApplicableTotal } = require('./catalog');
+const { matchTrigger, findProduct } = require('./catalog');
 const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
 const { SOLD_STAGES, isAllowedAutoTransition } = require('./stageRules');
-const { applyOrderMessage } = require('./orderMemory');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -391,55 +384,6 @@ const pendingTimers = new Map(); // phone -> timeout handle
 // producto en un mensaje y algo mas (ej. "Precio") en otro casi seguido,
 // antes de que el bot llegue a contestar.
 const pendingRawTexts = new Map(); // phone -> string[]
-// Desde donde empieza el LOTE actual dentro de session.history (indice, no
-// contenido): se fija en handleIncomingMessage con el largo del historial
-// que habia ANTES de appendMessage del primer mensaje de este lote todavia
-// no contestado. Ver processReply mas abajo: reemplaza a "tomar el ultimo
-// elemento del historial como si siempre fuera del cliente" (bug real,
-// punto 2 del pedido de correccion).
-const pendingHistoryStart = new Map(); // phone -> number
-
-// FASE (correccion regresion cierre secuencial, punto 1): antes, cada
-// mensaje nuevo del cliente solo reiniciaba el TEMPORIZADOR (scheduleReply),
-// pero nada impedia que, si processReply de la tanda anterior todavia
-// segui corriendo (generando la respuesta con la IA, o mandandola de a
-// partes con las pausas de sendSplit -- eso puede tardar bastante mas que
-// el propio delay de espera), el temporizador de un mensaje nuevo disparara
-// OTRO processReply para el MISMO numero en paralelo. Eso paso de verdad:
-// dos respuestas concurrentes para la misma conversacion, leyendo/pisando
-// el historial y la sesion al mismo tiempo, con resultados mezclados
-// (ver el chat real reportado). Ahora se serializa el procesamiento POR
-// NUMERO: mientras haya una respuesta activa para un numero, un temporizador
-// que vence para ESE MISMO numero no dispara una segunda corrida en
-// paralelo -- solo marca que hace falta reprocesar el lote acumulado (que
-// se sigue actualizando igual, ver handleIncomingMessage) apenas la
-// respuesta activa termine, sin esperar un delay nuevo completo. Numeros
-// DISTINTOS nunca se bloquean entre si (cada uno tiene su propia entrada en
-// estos dos Map). El bloqueo se libera SIEMPRE al terminar processReply,
-// incluso si tira un error (.finally), para que una conversacion nunca
-// quede "trabada" sin poder volver a contestar.
-const activeProcessing = new Map(); // phone -> true mientras hay un processReply corriendo
-const rerunQueued = new Map(); // phone -> true si hay que reprocesar apenas termine el actual
-
-function runProcessReply(from) {
-  if (activeProcessing.get(from)) {
-    rerunQueued.set(from, true);
-    return;
-  }
-  activeProcessing.set(from, true);
-  processReply(from)
-    .catch((err) => console.error('Error procesando respuesta demorada:', err))
-    .finally(() => {
-      activeProcessing.delete(from);
-      if (rerunQueued.get(from)) {
-        rerunQueued.delete(from);
-        // Solo si sigue habiendo algo pendiente para este numero: pudo
-        // haberse vaciado (por ejemplo, si se apago el bot mientras tanto y
-        // processReply ya lo descarto sin dejar nada nuevo en pendingContext).
-        if (pendingContext.has(from)) runProcessReply(from);
-      }
-    });
-}
 
 function scheduleReply(from) {
   const settings = getSettings();
@@ -450,7 +394,7 @@ function scheduleReply(from) {
 
   const timer = setTimeout(() => {
     pendingTimers.delete(from);
-    runProcessReply(from);
+    processReply(from).catch((err) => console.error('Error procesando respuesta demorada:', err));
   }, delayMs);
 
   pendingTimers.set(from, timer);
@@ -612,21 +556,6 @@ async function handleIncomingMessage(from, message, profileName) {
   if (!getSettings().botEnabled) return;
   if (session.paused) return;
 
-  // FASE (correccion regresion cierre secuencial, punto 2): se guarda aca el
-  // largo del historial ANTES de este mensaje (y de cualquier otro de este
-  // mismo lote) -- pero solo la PRIMERA vez que arranca un lote nuevo
-  // (pendingContext todavia vacio para este numero). "session" es el
-  // snapshot que se leyo al principio de esta funcion, antes de los
-  // appendMessage de mas arriba, asi que session.history.length es
-  // exactamente el limite real de "todo lo de ANTES de este lote". Ver
-  // processReply mas abajo: de aca sale el userText/history reales, en vez
-  // de asumir que el ultimo elemento del historial siempre es del cliente
-  // (bug real: con respuestas fragmentadas, ese ultimo elemento podia ser
-  // una burbuja del propio bot).
-  if (!pendingContext.has(from)) {
-    pendingHistoryStart.set(from, session.history.length);
-  }
-
   pendingContext.set(from, {
     type,
     rawText,
@@ -652,8 +581,6 @@ async function processReply(from) {
 
   const batchTexts = pendingRawTexts.get(from) || [];
   pendingRawTexts.delete(from);
-  const historyStart = pendingHistoryStart.get(from) ?? 0;
-  pendingHistoryStart.delete(from);
 
   // Se revisa de nuevo por si algo cambio mientras se esperaba (un humano
   // tomo la conversacion desde el panel, o se apago el bot).
@@ -709,99 +636,22 @@ async function processReply(from) {
     const product = matchTrigger(batchTexts.length ? batchTexts.join(' ') : rawText);
     if (product && product.intro && product.intro.trim()) {
       updateSession(from, { linkedProductId: product.id });
-      const introRaw = product.intro.trim();
-      // FASE (correccion cobertura -- verificacion de TODOS los caminos de
-      // envio, no solo las respuestas de la IA): este mensaje inicial es
-      // texto fijo que escribio el negocio a mano y sale SIN pasar por la
-      // IA, pero si por error mencionara domicilio sin cobertura confirmada
-      // (o antes de saber la ciudad de este cliente puntual), tiene que
-      // corregirse igual que cualquier respuesta del modelo -- misma fuente
-      // de verdad (guardAgainstUnauthorizedDelivery), no una version aparte.
-      const intro = guardAgainstUnauthorizedDelivery(
-        introRaw,
-        session.card?.ciudad || null,
-        batchTexts.length ? batchTexts.join(' ') : rawText
-      );
+      const intro = product.intro.trim();
       await sendTextOrImage(from, intro, product.introImageIds);
       return;
     }
   }
 
   try {
-    // FASE (correccion regresion cierre secuencial, punto 2): antes se
-    // asumia que el ULTIMO elemento del historial siempre era del cliente
-    // (fullHistory.slice(-1)) -- bug real: con respuestas fragmentadas (o
-    // dos processReply superpuestos, ver punto 1), ese ultimo elemento podia
-    // ser una burbuja del propio bot, y userText terminaba siendo texto del
-    // bot en vez de lo que escribio el cliente. Ahora "el lote actual" se
-    // arma con lo que efectivamente llego en ESTE batch (batchTexts, ya
-    // acumulado en orden por handleIncomingMessage) y "history" es todo lo
-    // que habia ANTES de que arrancara ese lote (historyStart, el indice
-    // guardado en handleIncomingMessage antes de appendMessage del primer
-    // mensaje de este lote) -- nunca se infiere de la posicion del ultimo
-    // elemento.
+    // El historial para la IA incluye todo lo que el cliente mando mientras
+    // se esperaba (ya quedo persistido por appendMessage en cada mensaje):
+    // se relee la sesion y se usa el ultimo turno como userText, el resto
+    // como historial, exactamente lo mismo que ve el panel.
     const fullHistory = [...(getSession(from).history || [])].map((m) => ({ role: m.role, content: m.content }));
-    const history = fullHistory.slice(0, historyStart);
-    const userText = batchTexts.length ? batchTexts.join('\n') : rawText;
-    const explicitNewOrder = /\b(otro|nuevo|segunda)\s+pedido\b|\bquiero\s+pedir\s+de\s+nuevo\b/i.test(userText);
-    const startsFreshOrder = session.newOrderPending === true ||
-      (explicitNewOrder && (session.orderClosed === true || SOLD_STAGES.includes(session.stage)));
-    // linkedProductId no existe en todas las sesiones historicas: antes de
-    // currentOrder el clasificador solo guardaba el nombre en card.producto.
-    // Para validar el precio no podemos perder el catalogo por esa diferencia
-    // de esquema; se busca por id y, como respaldo, por el producto vigente.
-    const productLookup = session.linkedProductId || session.currentOrder?.product || session.card?.producto;
-    const productRecord = !explicitNewOrder && productLookup ? findProduct(productLookup) : null;
-    const knownProduct = productRecord?.name || null;
-    const memoryUpdate = applyOrderMessage({
-      currentOrder: startsFreshOrder ? null : session.currentOrder,
-      text: userText,
-      precedingAssistantText: session.lastAssistantText,
-      knownCustomer: session.card || {},
-    });
-    if (!memoryUpdate.order.product && (knownProduct || (!startsFreshOrder && session.card?.producto))) {
-      memoryUpdate.order.product = knownProduct || session.card.product;
-    }
-    const cardAfterMemory = { ...(session.card || {}), ...memoryUpdate.identity };
-    if (memoryUpdate.order.city) cardAfterMemory.ciudad = memoryUpdate.order.city;
-    if (startsFreshOrder || (session.currentOrder?.city && memoryUpdate.order.city !== session.currentOrder.city)) {
-      cardAfterMemory.agenciaConfirmadaEnChat = null;
-    }
-    const memoryPatch = { currentOrder: memoryUpdate.order, card: cardAfterMemory, newOrderPending: false };
-    if (startsFreshOrder) {
-      const previousOrders = [...(session.orderHistory || [])];
-      if (session.orderClosed === true || SOLD_STAGES.includes(session.stage)) {
-        previousOrders.push({
-          closedAt: session.soldAt || session.updatedAt || null,
-          stage: session.stage || null,
-          order: session.currentOrder || null,
-          card: {
-            producto: session.card?.producto || null,
-            guia: session.card?.guia || null,
-            agencia: session.card?.agencia || session.card?.agenciaConfirmadaEnChat || null,
-            monto: session.card?.monto ?? null,
-          },
-        });
-      }
-      memoryPatch.orderHistory = previousOrders;
-      memoryPatch.orderClosed = false;
-      memoryPatch.orderDataRequested = false;
-      memoryPatch.soldAt = null;
-      if (!session.stageLocked) {
-        memoryPatch.stage = 'interesado';
-        memoryPatch.stageReason = 'Pedido nuevo iniciado por el cliente';
-      }
-    }
-    updateSession(from, memoryPatch);
-    session.currentOrder = memoryUpdate.order;
-    session.card = cardAfterMemory;
-    if (startsFreshOrder) {
-      session.orderClosed = false;
-      session.orderDataRequested = false;
-      session.soldAt = null;
-      if (!session.stageLocked) session.stage = 'interesado';
-    }
-    const knownCity = memoryUpdate.order.city || (!startsFreshOrder ? session.card?.ciudad : null) || null;
+    const history = fullHistory.slice(0, -1);
+    const userText = fullHistory.length ? fullHistory[fullHistory.length - 1].content : rawText;
+    const knownCity = session.card?.ciudad || null;
+    const knownProduct = session.linkedProductId ? findProduct(session.linkedProductId)?.name || null : null;
     // OJO: antes esto se sacaba SOLO de session.stage (puesto por el
     // clasificador por IA, que corre aparte y despues de mandar la
     // respuesta). En la practica eso resulto poco confiable: hubo
@@ -820,7 +670,7 @@ async function processReply(from) {
     // reportado por el negocio). Por eso ahora se toman las DOS señales: el
     // flag de deteccion de texto, O la etapa real que ya tiene el pedido en
     // el panel.
-    const orderClosed = startsFreshOrder ? false : (session.orderClosed === true || SOLD_STAGES.includes(session.stage));
+    const orderClosed = session.orderClosed === true || SOLD_STAGES.includes(session.stage);
     // Mismo criterio que orderClosed, pero para el bloque de "pedime tu
     // nombre, cedula y telefono": se detecto que a veces el modelo lo manda
     // dos veces en la misma conversacion (por ejemplo si el cliente contesta
@@ -851,7 +701,7 @@ async function processReply(from) {
       cedula: session.card?.cedula || null,
       telefono: session.card?.telefono || null,
     };
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, memoryUpdate.order);
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer);
 
     // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
     // habia pedido nombre/cedula/telefono antes y el modelo igual intento
@@ -859,28 +709,14 @@ async function processReply(from) {
     // corto en su lugar (o el resto del mensaje, si tenia algo mas aparte del
     // bloque repetido).
     let finalReply = reply;
-    const missingIdentity = [
-      !knownCustomer.nombre && 'nombre y apellido',
-      !knownCustomer.cedula && 'cedula',
-      !knownCustomer.telefono && 'telefono',
-    ].filter(Boolean);
-    if (missingIdentity.length > 0 && missingIdentity.length < 3 && looksLikeEmptyDataRequest(reply)) {
-      const withoutFullRequest = stripDuplicateDataRequest(reply, {
-        nombre: knownCustomer.nombre || 'ya recibido',
-        cedula: knownCustomer.cedula || '0000000',
-        telefono: knownCustomer.telefono || '04120000000',
-      });
-      const requestOnlyMissing = `Solo me falta ${missingIdentity.join(' y ')} para completar tus datos.`;
-      finalReply = withoutFullRequest ? `${withoutFullRequest}\n\n${requestOnlyMissing}` : requestOnlyMissing;
-    }
     // Ver mentionsDataFieldsAsRequest en ai.js: ademas del formato de
     // plantilla (looksLikeEmptyDataRequest), esto tambien detecta cuando el
     // modelo repite el mismo pedido de datos pero en prosa propia, sin dos
     // puntos ni salto de linea (bug real: paso 5 horas despues de que el
     // cliente ya habia dado y confirmado sus datos, y el modelo se los pidio
     // de nuevo con otras palabras que no matcheaban el regex original).
-    if (dataAlreadyRequested && (looksLikeEmptyDataRequest(finalReply) || mentionsDataFieldsAsRequest(finalReply, knownCustomer))) {
-      const stripped = stripDuplicateDataRequest(finalReply, knownCustomer);
+    if (dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || mentionsDataFieldsAsRequest(reply, knownCustomer))) {
+      const stripped = stripDuplicateDataRequest(reply, knownCustomer);
       finalReply = stripped === null ? DATA_REQUEST_REMINDER : stripped;
     }
 
@@ -898,105 +734,6 @@ async function processReply(from) {
       finalReply = strippedClose === null ? POST_CLOSE_REMINDER : strippedClose;
     }
 
-    // FASE (correccion validacion-cierre v3, punto 5): la version anterior
-    // usaba una ventana FIJA de los ultimos 6 mensajes del cliente para
-    // decidir si un cierre era real. Eso tenia un problema real en las dos
-    // direcciones: (a) en una conversacion mas larga, un dato real del
-    // pedido actual (la cantidad, la ciudad) dicho hace mas de 6 mensajes se
-    // "perdia" solo y el cierre valido no se reconocia (falso negativo
-    // silencioso, que el negocio dijo explicitamente que no acepta como
-    // solucion); y (b) si simplemente se agrandara la ventana a lo bruto, un
-    // pedido NUEVO podria heredar la cantidad o la aceptacion de una compra
-    // YA CERRADA anterior en la misma conversacion (reutilizar datos de una
-    // compra vieja para "inflar" una nueva, el error contrario).
-    //
-    // La solucion: en vez de un numero fijo de mensajes, se busca el ULTIMO
-    // mensaje del bot que funciona como resumen de cierre de una compra
-    // anterior (ver looksLikeClosingSummaryText en ai.js) y se toma TODO lo
-    // que el cliente escribio DESPUES de ese punto -- sin tope arbitrario de
-    // mensajes, pero nunca cruzando para atras del cierre anterior. Si
-    // todavia no hubo ningun cierre en esta conversacion, se toma desde el
-    // principio (es la primera compra, no hay nada que excluir).
-    // FASE (correccion regresion cierre secuencial, punto 5): la version
-    // anterior buscaba el corte por ESTILO de texto (looksLikeClosingSummaryText
-    // sobre el historial), lo que tiene el mismo problema de fondo que el
-    // punto 6 de abajo: una explicacion normal de pago/envio puede "sonar" a
-    // cierre sin serlo, y activaba el corte sin que hubiera una venta
-    // realmente registrada -- descartando de punta datos reales del pedido
-    // actual (identidad, cantidad, agencia ya dados) que quedaban ANTES de
-    // esa explicacion. Ahora el corte se ancla a un cierre REALMENTE
-    // persistido: session.lastOrderCloseHistoryIndex, el indice que se
-    // guarda mas abajo en el momento exacto en que isNewClose detecta un
-    // cierre real (no una heuristica de texto). Se mantiene el heuristico
-    // viejo SOLO como respaldo para sesiones de ANTES de que existiera este
-    // indice (compatibilidad: session.orderClosed ya en true pero sin el
-    // indice todavia guardado).
-    let cierreAnteriorIdx = -1;
-    if (typeof session.lastOrderCloseHistoryIndex === 'number') {
-      cierreAnteriorIdx = session.lastOrderCloseHistoryIndex;
-    } else if (session.orderClosed) {
-      for (let i = fullHistory.length - 1; i >= 0; i--) {
-        const m = fullHistory[i];
-        if (m.role === 'assistant' && looksLikeClosingSummaryText(m.content)) {
-          cierreAnteriorIdx = i;
-          break;
-        }
-      }
-    }
-    const segmentoPedidoActual = fullHistory.slice(cierreAnteriorIdx + 1);
-    const recentUserText = segmentoPedidoActual
-      .filter((m) => m.role === 'user')
-      .map((m) => m.content)
-      .join(' ');
-    const closingCtx = {
-      knownCustomer,
-      recentUserText,
-      // El producto puede venir del catalogo (gatillo de intro, linkedProductId)
-      // O de la ficha (el clasificador lo detecto en la charla libre, sin que
-      // haya un gatillo de producto formal): cualquiera de los dos cuenta
-      // como "producto identificado" para la validacion de cierre.
-      knownProduct: knownProduct || memoryUpdate.order.product || (!startsFreshOrder ? session.card?.producto : null) || null,
-      knownCity,
-      // agenciaConfirmadaEnChat es la persistencia de una confirmacion de
-      // agencia dada EN LA CONVERSACION (ver el bloque que arma "patch" mas
-      // abajo): distinta de card.agencia, que solo la carga el operador
-      // desde el panel al confirmar la guia real (ver orderGuard.js). Sin
-      // esto, una confirmacion como "Si" a "esta agencia te queda bien?"
-      // solo cuenta en el turno exacto en que paso; unos turnos despues (dar
-      // nombre/cedula/telefono, preguntar el plazo) dejaria de verse.
-      cardAgencia: memoryUpdate.order.agency || (!startsFreshOrder ? (session.card?.agenciaConfirmadaEnChat || session.card?.agencia) : null) || null,
-      // Para reconocer una aceptacion corta ("si"/"dale") como valida SOLO
-      // cuando responde de verdad a una pregunta de confirmacion del bot
-      // (ver looksLikeContextualShortAcceptance en ai.js): lastAssistantText
-      // es el mensaje que el bot mando ANTES de este turno (el que el
-      // cliente esta contestando ahora con userText).
-      lastAssistantText: session.lastAssistantText || null,
-      lastUserMessage: userText,
-      knownQuantity: memoryUpdate.order.quantity,
-      orderModality: memoryUpdate.order.modality,
-      orderCourier: memoryUpdate.order.courier,
-      expectedTotal: resolveApplicableTotal(productRecord, memoryUpdate.order.quantity),
-      previouslyCommunicatedTotal: memoryUpdate.order.total,
-      orderAccepted: memoryUpdate.order.accepted === true,
-    };
-
-    // FASE (correccion validacion-cierre v3, punto 6): si el propio texto
-    // del modelo YA suena a un cierre de pedido (resumen + pago + entrega,
-    // ver looksLikeClosingSummaryText) pero la validacion estructural de
-    // arriba dice que en realidad todavia falta algo real, NUNCA se le
-    // manda ese texto al cliente tal cual: quedaria diciendole "confirmado"
-    // mientras el sistema NO lo guarda como pedido cerrado, una
-    // inconsistencia bot-dice-cerrado / sistema-sigue-abierto que el
-    // negocio pidio explicitamente evitar. Se reemplaza por un aviso
-    // honesto de que falta confirmar tal o cual dato, ANTES de mandarlo
-    // (esta red de seguridad no sirve de nada si corre despues del envio).
-    if (!orderClosed && looksLikeClosingSummaryText(finalReply)) {
-      const completeness = evaluateOrderCompleteness({ ...closingCtx, text: finalReply });
-      if (!completeness.complete) {
-        finalReply = buildIncompleteOrderNotice(completeness.missing);
-      }
-    }
-
     // Ver NOT_ARRIVED_CLAIM_RE arriba: ultima red de seguridad antes de
     // mandar, para que un pedido que ya llego (o ya se entrego) nunca salga
     // diciendo que todavia falta que llegue. OJO: se vuelve a leer la etapa
@@ -1010,19 +747,6 @@ async function processReply(from) {
     if (['esperando_retiro', 'entregado'].includes(stageAtSendTime) && looksLikeSaysNotArrivedYet(finalReply)) {
       finalReply = ALREADY_ARRIVED_CORRECTION;
     }
-
-    // FASE (correccion regresion cierre secuencial, punto 9): isNewClose se
-    // calcula ACA, con finalReply (despues de TODAS las correcciones de
-    // arriba: datos duplicados, pregunta post-cierre, aviso de incompleto,
-    // correccion de "todavia no llego"), nunca con el texto original "reply"
-    // que salio de la IA. Bug real que esto arregla: si "reply" sonaba a un
-    // cierre pero la validacion de completitud lo bajaba a un aviso de
-    // "todavia falta confirmar tal cosa" (el bloque de arriba), antes igual
-    // se podia marcar el pedido como cerrado/vendido usando el texto
-    // ORIGINAL, aunque al cliente en definitiva le llego el aviso de
-    // incompleto -- una contradiccion entre lo que de verdad se mando y lo
-    // que quedo guardado.
-    const isNewClose = !orderClosed && isClosingMessage(finalReply, closingCtx);
 
     if (images.length) await sendConversationImages(from, images);
     await sendReply(from, finalReply);
@@ -1054,12 +778,7 @@ async function processReply(from) {
     let formFollowUpSent = false;
     if (!dataAlreadyRequested && looksLikePendingFormPromise(finalReply)) {
       await sleep(randomGap());
-      // getDataRequestTemplate() es configurable desde el panel
-      // (Configuracion > "Texto para pedir los datos del pedido"): el
-      // default es seguro (menciona Tealca, no domicilio), pero si el
-      // negocio la edita y menciona domicilio sin cobertura confirmada,
-      // tiene que corregirse igual que cualquier otro camino de envio.
-      await sendReply(from, guardAgainstUnauthorizedDelivery(getDataRequestTemplate(), knownCity, userText));
+      await sendReply(from, getDataRequestTemplate());
       formFollowUpSent = true;
     }
 
@@ -1067,50 +786,9 @@ async function processReply(from) {
     if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || formFollowUpSent)) {
       patch.orderDataRequested = true;
     }
-    // FASE (correccion cobertura/agencia, punto 3 de la ronda de
-    // verificacion): si el cliente confirma AHORA una agencia puntual
-    // (looksLikeAgencyConfirmation, con el mensaje del bot y el mensaje del
-    // cliente de ESTE turno), esa confirmacion se guarda para los turnos
-    // siguientes. Sin esto, evaluateOrderCompleteness solo la ve en el
-    // turno exacto en que paso (via lastAssistantText/lastUserMessage de
-    // ESTE turno nada mas): unos turnos despues (dar nombre/cedula/
-    // telefono, preguntar el plazo de entrega) volveria a pedir la agencia
-    // de nuevo aunque el cliente ya la haya confirmado. Se guarda en un
-    // campo PROPIO (card.agenciaConfirmadaEnChat), separado de
-    // card.agencia -- ese es el campo que usa shipping.js para el mensaje
-    // REAL de envio cuando el operador carga la guia desde el panel (mucho
-    // despues, ver orderGuard.js): no se toca aca, para no contaminar ese
-    // mensaje con el texto crudo de esta confirmacion conversacional.
-    if (
-      !session.card?.agencia &&
-      !session.card?.agenciaConfirmadaEnChat &&
-      looksLikeAgencyConfirmation(closingCtx.lastAssistantText, closingCtx.lastUserMessage)
-    ) {
-      const agenciaLabel = extractConfirmedAgencyLabel(closingCtx.lastAssistantText);
-      if (agenciaLabel) {
-        patch.card = { ...(session.card || {}), agenciaConfirmadaEnChat: agenciaLabel };
-        patch.currentOrder = { ...(session.currentOrder || {}), agency: agenciaLabel, modality: 'agency_pickup' };
-      }
-    }
+    const isNewClose = !orderClosed && isClosingMessage(reply);
     if (isNewClose) {
       patch.orderClosed = true;
-      patch.currentOrder = {
-        ...(patch.currentOrder || session.currentOrder || {}),
-        total: closingCtx.expectedTotal,
-        quotedQuantity: memoryUpdate.order.quantity,
-        accepted: true,
-        closed: true,
-      };
-      // Ver punto 5 mas arriba (segmentoPedidoActual): este es el indice
-      // REAL que las conversaciones futuras van a usar como limite del
-      // pedido cerrado, en vez de tener que adivinarlo de nuevo por estilo
-      // de texto. fullHistory.length es el largo del historial ANTES de que
-      // se le agregue el mensaje de cierre que se esta por mandar ahora
-      // (fullHistory es una copia local, no se ve afectada por los
-      // appendMessage de sendReply que vienen despues en esta misma
-      // funcion), asi que coincide exactamente con el indice que va a tener
-      // ese mensaje de cierre una vez guardado.
-      patch.lastOrderCloseHistoryIndex = fullHistory.length;
       // El cierre del pedido ES la venta: la marcamos como "vendido" en el
       // mismo momento deterministico en que se detecta el cierre (arriba),
       // en vez de esperar al clasificador por IA de mas abajo. En la
@@ -1136,37 +814,7 @@ async function processReply(from) {
     if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
       push.notifySale(from, getSession(from));
     }
-  } catch (err) {
-    console.error('Error llamando a la IA (diagnostico):', {
-      message: err.message,
-      name: err.name,
-      status: err.status,
-      code: err.code,
-      cause: err.cause ? String(err.cause) : undefined,
-      causeCode: err.cause && err.cause.code,
-      stack: err.stack,
-    });
-    const reply = 'Disculpa, tuve un problema para responderte. Me repetis eso en un momento?';
-    await sendText(from, reply);
-    appendMessage(from, 'assistant', reply);
-    // La respuesta al cliente ya fallo y ya se le aviso: no tiene sentido
-    // seguir a la clasificacion de abajo (usaria variables de una respuesta
-    // que nunca se genero). Se corta aca.
-    return;
-  }
 
-  // FASE (correccion regresion cierre secuencial, punto 8): este bloque
-  // corre en su PROPIO try/catch, separado del de arriba a proposito. Bug
-  // real que esto arregla: la respuesta al cliente ya se genero y se mando
-  // BIEN (el bloque de arriba ya termino sin error), pero si algo de ESTE
-  // bloque (la clasificacion por IA, o el guardado de la ficha/etapa que
-  // sigue) tiraba una excepcion, quedaba adentro del MISMO try/catch de
-  // arriba, y el catch de arriba le mandaba al cliente "tuve un problema,
-  // repetime eso" -- un mensaje confuso, pidiendole que repita una pregunta
-  // que en realidad YA se le habia contestado bien segundos antes. Ahora un
-  // fallo aca solo se registra: la etapa/ficha simplemente no se actualiza
-  // este turno, sin tocar para nada la respuesta que el cliente ya recibio.
-  try {
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
     // etapa/ficha simplemente no se actualiza este turno. Si la etapa esta
@@ -1193,7 +841,6 @@ async function processReply(from) {
         const mergedCard = { ...(current.card || {}) };
         for (const [key, value] of Object.entries(classification.card || {})) {
           if (value !== null && value !== undefined && String(value).trim() !== '') {
-            if (key === 'ciudad' && current.currentOrder?.city) continue;
             mergedCard[key] = value;
           }
         }
@@ -1210,9 +857,7 @@ async function processReply(from) {
         // implicaria retroceder un rango logistico ya alcanzado; "devolucion"
         // es la unica excepcion (ver esa funcion), porque es evidencia nueva
         // legitima sin importar en que etapa logistica estaba el pedido.
-        const classifierWouldSell = SOLD_STAGES.includes(classification.stage) && !SOLD_STAGES.includes(current.stage);
-        const stageChangeAllowed = isAllowedAutoTransition(current.stage, classification.stage) &&
-          (!classifierWouldSell || current.orderClosed === true);
+        const stageChangeAllowed = isAllowedAutoTransition(current.stage, classification.stage);
         if (stageChangeAllowed) {
           classPatch.stage = classification.stage;
           classPatch.stageReason = classification.razon || null;
@@ -1238,11 +883,18 @@ async function processReply(from) {
       }
     }
   } catch (err) {
-    // OJO: este catch NUNCA le manda nada al cliente ni toca la respuesta ya
-    // enviada arriba -- ver el comentario de mas arriba (punto 8). Solo se
-    // registra para diagnostico; la etapa/ficha de este turno queda sin
-    // actualizar, nada mas.
-    console.error('Error clasificando la conversacion despues de responder (no afecta la respuesta ya enviada al cliente):', err.message);
+    console.error('Error llamando a la IA (diagnostico):', {
+      message: err.message,
+      name: err.name,
+      status: err.status,
+      code: err.code,
+      cause: err.cause ? String(err.cause) : undefined,
+      causeCode: err.cause && err.cause.code,
+      stack: err.stack,
+    });
+    const reply = 'Disculpa, tuve un problema para responderte. Me repetis eso en un momento?';
+    await sendText(from, reply);
+    appendMessage(from, 'assistant', reply);
   }
 }
 
