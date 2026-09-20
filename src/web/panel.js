@@ -888,6 +888,44 @@ router.get('/api/dropanas-api/status', (_req, res) => {
   });
 });
 
+// Vista de control para el panel. A diferencia de /sync, este endpoint NO
+// consulta ni modifica DroPanas: solo presenta el estado local que dejaron
+// los webhooks ya recibidos. Asi puede mantenerse abierto con seguridad.
+router.get('/api/dropanas-api/dashboard', (_req, res) => {
+  try {
+    const status = dropanasMonitor.status();
+    const pending = dropanasMonitor.listPending();
+    const orderRows = pending
+      .filter((change) => change.order)
+      .map((change) => ({
+        ...change.order,
+        _pendingKey: change.key,
+        _changeKind: change.kind,
+        _detectedAt: change.detectedAt,
+      }));
+    res.json({
+      ok: true,
+      status,
+      guideDownload: dropanasGuide.status(),
+      automaticSend: dropanasAuto.status(),
+      guideRows: dropanas.matchRows(orderRows.filter((row) => row.guia)),
+      trackingItems: seguimiento.buildPreview(orderRows),
+      novelties: pending.filter((change) => change.novelty).map((change) => ({
+        key: change.key,
+        kind: change.kind,
+        id: change.novelty.id,
+        orderId: change.novelty.orderId,
+        status: change.novelty.status,
+        type: change.novelty.type,
+        detectedAt: change.detectedAt,
+      })),
+      allCandidates: dropanas.listAllCandidates(),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/api/dropanas-api/sync', async (_req, res) => {
   try {
     const sync = await dropanasMonitor.sync();

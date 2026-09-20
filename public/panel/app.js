@@ -143,6 +143,7 @@ function showView(viewId) {
   if (viewId === 'view-metrics') pollMetrics()
   if (viewId === 'view-products') pollProducts()
   if (viewId === 'view-library') pollLibrary()
+  if (viewId === 'view-dropanas-auto') loadDropanasAutomation()
   if (viewId === 'view-broadcast') loadBroadcastView()
   if (viewId === 'view-sim') pollSimulator()
   if (viewId === 'view-coupons') pollCoupons()
@@ -152,6 +153,129 @@ function showView(viewId) {
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => showView(tab.dataset.view))
 })
+
+/* ---------- centro de automatización DroPanas ---------- */
+
+let dropanasAutomationData = null
+
+function automationDate(value) {
+  if (!value) return 'Todavía no llegó ningún evento real'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Fecha no disponible' : date.toLocaleString('es-VE', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function pendingAutomationRow(row) {
+  const exact = row.matchType === 'exacto' && row.phone
+  const badge = exact
+    ? '<span class="badge">Cliente identificado</span>'
+    : '<span class="badge badge-warning">Requiere revisión</span>'
+  const detected = row._detectedAt ? automationDate(row._detectedAt) : 'Evento recibido'
+  return `<div class="dp-auto-pending-row">
+    <div class="dp-auto-event-icon">${row.guia ? '🏷️' : '📦'}</div>
+    <div class="dp-auto-event-body">
+      <div class="dp-auto-event-title">
+        <strong>${esc(row.cliente || 'Pedido sin nombre')}</strong>
+        ${badge}
+      </div>
+      <div class="dp-auto-event-meta">
+        Guía ${esc(row.guia || 'pendiente')} · ${esc(String(row.carrier || 'transportadora').toUpperCase())}
+        ${row.producto ? ` · ${esc(row.producto)}` : ''}
+      </div>
+      <small>${esc(detected)}</small>
+    </div>
+    <button class="btn da-review-one" type="button">Revisar</button>
+  </div>`
+}
+
+function renderDropanasAutomation(data) {
+  dropanasAutomationData = data
+  const status = data.status || {}
+  const automatic = data.automaticSend || {}
+  const guideDownload = data.guideDownload || {}
+  const rows = data.guideRows || []
+  const tracking = data.trackingItems || []
+  const novelties = data.novelties || []
+  const totalPending = Math.max(Number(status.pending || 0), rows.length + novelties.length)
+
+  $('da_connection').textContent = status.enabled ? 'Conectado' : 'Configuración incompleta'
+  $('da_connection').className = status.enabled ? 'is-good' : 'is-warn'
+  $('da_connectionHelp').textContent = status.tokenMode === 'live'
+    ? 'Producción · lectura segura'
+    : status.tokenMode === 'sandbox' ? 'Sandbox' : 'Revisá las variables de Render'
+
+  $('da_webhook').textContent = status.lastWebhookAt ? 'Evento recibido' : 'Esperando evento'
+  $('da_webhook').className = status.lastWebhookAt ? 'is-good' : ''
+  $('da_webhookHelp').textContent = automationDate(status.lastWebhookAt)
+  $('da_pending').textContent = String(totalPending)
+  $('da_pending').className = totalPending ? 'is-warn' : 'is-good'
+  $('da_mode').textContent = automatic.enabled ? 'Automático' : 'Modo revisión'
+  $('da_mode').className = automatic.enabled ? 'is-good' : ''
+  $('da_modeHelp').textContent = automatic.enabled ? 'Envía coincidencias exactas' : 'No envía sin confirmación'
+  $('da_flowBadge').textContent = automatic.enabled ? 'AUTOMÁTICO' : 'SEGURO'
+
+  $('da_modeNote').innerHTML = automatic.enabled
+    ? '<strong>Envío automático activo</strong><span>Solo procesa coincidencias exactas por teléfono; el resto queda aquí.</span>'
+    : '<strong>Modo revisión activo</strong><span>La activación automática se hará después de comprobar una guía real.</span>'
+
+  const warnings = [status.lastError, status.lastWarning]
+    .filter(Boolean)
+    .map((message) => esc(message))
+  const alert = $('da_alert')
+  alert.hidden = !warnings.length
+  alert.innerHTML = warnings.length ? `<strong>Atención</strong><span>${warnings.join('<br>')}</span>` : ''
+
+  const list = $('da_pendingList')
+  if (rows.length) {
+    list.innerHTML = rows.map(pendingAutomationRow).join('')
+  } else if (tracking.length || novelties.length) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">📍</div><div class="title">${tracking.length + novelties.length} cambio(s) logístico(s) pendiente(s)</div><div class="desc">Abrí Envíos masivos para revisar el seguimiento.</div></div>`
+  } else {
+    list.innerHTML = emptyState('✓', 'Todo al día', 'Las próximas guías aparecerán acá automáticamente para que puedas revisarlas.')
+  }
+
+  $('da_reviewAll').hidden = !(rows.length || tracking.length || novelties.length)
+  $('da_updated').textContent = `Actualizado ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })} · Descarga oficial ${guideDownload.enabled ? 'lista' : 'pendiente de configuración'}`
+  document.querySelectorAll('.da-review-one').forEach((button) => {
+    button.addEventListener('click', openDropanasReview)
+  })
+}
+
+async function loadDropanasAutomation() {
+  const refresh = $('da_refresh')
+  if (refresh) refresh.disabled = true
+  try {
+    renderDropanasAutomation(await api('/dropanas-api/dashboard'))
+  } catch (err) {
+    $('da_pendingList').innerHTML = emptyState('!', 'No se pudo consultar DroPanas', err.message)
+    $('da_connection').textContent = 'Sin conexión'
+    $('da_connection').className = 'is-danger'
+  } finally {
+    if (refresh) refresh.disabled = false
+  }
+}
+
+function openDropanasReview() {
+  if (dropanasAutomationData) {
+    dpRows = dropanasAutomationData.guideRows || []
+    dpAllCandidates = dropanasAutomationData.allCandidates || []
+    sgItems = dropanasAutomationData.trackingItems || []
+  }
+  showView('view-broadcast')
+  renderDpResults()
+  renderSgResults()
+  $('dp_msg').textContent = dpRows.length
+    ? `${dpRows.length} guía(s) recibida(s) por webhook; revisá antes de enviar`
+    : 'No hay guías nuevas pendientes'
+  $('sg_msg').textContent = sgItems.length
+    ? `${sgItems.length} cambio(s) logístico(s) pendiente(s) de revisión`
+    : 'No hay cambios logísticos pendientes'
+  $('dp_results')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+$('da_refresh')?.addEventListener('click', loadDropanasAutomation)
+$('da_reviewAll')?.addEventListener('click', openDropanasReview)
 
 /* ---------- reloj ---------- */
 
@@ -1689,7 +1813,7 @@ function matchPhotosToRows(rows, files) {
 }
 
 function dpRowHtml(row, idx) {
-  const canDownloadOriginal = Boolean(row.dropanasId && row.carrier === 'tealca')
+  const canDownloadOriginal = Boolean(row.dropanasId && ['tealca', 'zoom', 'mrw'].includes(row.carrier))
   const badge = row.matchType === 'exacto'
     ? '<span class="badge">Coincide</span>'
     : row.matchType === 'ambiguo'
@@ -1863,7 +1987,7 @@ $('dp_results').addEventListener('click', async (e) => {
     form.append('producto', row.producto || '')
     form.append('guia', row.guia || '')
     form.append('agencia', row.bodegaDestino || row.ciudad || '')
-    if (row.dropanasId && row.carrier === 'tealca') form.append('dropanasId', row.dropanasId)
+    if (row.dropanasId && ['tealca', 'zoom', 'mrw'].includes(row.carrier)) form.append('dropanasId', row.dropanasId)
     if (row.photoFile) form.append('imagen', row.photoFile)
     try {
       const res = await fetch('/panel/api/dropanas/test-send', { method: 'POST', body: form })
@@ -1908,7 +2032,7 @@ $('dp_confirm').addEventListener('click', async () => {
     // preciso; si esa columna no vino, se usa la ciudad como respaldo.
     const agencia = String(row.bodegaDestino || row.ciudad || '').trim()
     if (agencia) form.append('agencia', agencia)
-    if (row.dropanasId && row.carrier === 'tealca') {
+    if (row.dropanasId && ['tealca', 'zoom', 'mrw'].includes(row.carrier)) {
       form.append('dropanasId', row.dropanasId)
       form.append('autoFetchImage', 'true')
     }

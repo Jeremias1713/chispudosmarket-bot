@@ -201,6 +201,7 @@ body {
 .tab[data-view="view-pipeline"], #view-pipeline { --view: var(--c-pipeline); --view-soft: var(--c-pipeline-soft); --view-ink: var(--c-pipeline-ink); }
 .tab[data-view="view-autos"],    #view-autos    { --view: var(--c-autos);    --view-soft: var(--c-autos-soft);    --view-ink: var(--c-autos-ink); }
 .tab[data-view="view-library"],  #view-library  { --view: var(--c-library);  --view-soft: var(--c-library-soft);  --view-ink: var(--c-library-ink); }
+.tab[data-view="view-dropanas-auto"], #view-dropanas-auto { --view: var(--c-pipeline); --view-soft: var(--c-pipeline-soft); --view-ink: var(--c-pipeline-ink); }
 .tab[data-view="view-products"], #view-products { --view: var(--c-products); --view-soft: var(--c-products-soft); --view-ink: var(--c-products-ink); }
 .tab[data-view="view-config"],   #view-config   { --view: var(--c-config);   --view-soft: var(--c-config-soft);   --view-ink: var(--c-config-ink); }
 .tab[data-view="view-offices"],  #view-offices  { --view: var(--c-offices);  --view-soft: var(--c-offices-soft);  --view-ink: var(--c-offices-ink); }
@@ -1716,6 +1717,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible,
 .app-shell[data-view="view-pipeline"] { --view: var(--c-pipeline); --view-soft: var(--c-pipeline-soft); --view-ink: var(--c-pipeline-ink); }
 .app-shell[data-view="view-autos"]    { --view: var(--c-autos);    --view-soft: var(--c-autos-soft);    --view-ink: var(--c-autos-ink); }
 .app-shell[data-view="view-library"]  { --view: var(--c-library);  --view-soft: var(--c-library-soft);  --view-ink: var(--c-library-ink); }
+.app-shell[data-view="view-dropanas-auto"] { --view: var(--c-pipeline); --view-soft: var(--c-pipeline-soft); --view-ink: var(--c-pipeline-ink); }
 .app-shell[data-view="view-products"] { --view: var(--c-products); --view-soft: var(--c-products-soft); --view-ink: var(--c-products-ink); }
 .app-shell[data-view="view-config"]   { --view: var(--c-config);   --view-soft: var(--c-config-soft);   --view-ink: var(--c-config-ink); }
 .app-shell[data-view="view-offices"]  { --view: var(--c-offices);  --view-soft: var(--c-offices-soft);  --view-ink: var(--c-offices-ink); }
@@ -2054,6 +2056,105 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 .coupon-desc { flex: 1; min-width: 0; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coupon-actions { display: flex; align-items: center; gap: var(--s2); flex-shrink: 0; }
 #resCustomPhraseList .res-phrase-row:first-child { border-top: none; }
+
+/* ============================================================
+   Centro de control DroPanas
+   ============================================================ */
+.dp-auto-page { max-width: 1080px; display: flex; flex-direction: column; gap: var(--s5); }
+
+.dp-auto-hero {
+  display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s5);
+  padding: var(--s6); border-radius: var(--radius-card);
+  color: #fff;
+  background:
+    radial-gradient(circle at 85% 10%, rgba(255,255,255,.18), transparent 34%),
+    linear-gradient(135deg, #087b78, #0ea5a5 55%, #4bc0b9);
+  box-shadow: 0 16px 34px rgba(10, 122, 121, .18);
+}
+.dp-auto-hero h2 { margin: var(--s1) 0; font-size: 26px; letter-spacing: -.02em; }
+.dp-auto-hero p { margin: 0; color: rgba(255,255,255,.82); max-width: 620px; }
+.dp-auto-hero .btn { background: rgba(255,255,255,.14); color: #fff; border-color: rgba(255,255,255,.4); }
+.dp-auto-hero .btn:hover { background: rgba(255,255,255,.23); }
+.dp-auto-kicker { font-size: 11px; font-weight: 800; letter-spacing: .12em; color: rgba(255,255,255,.72); }
+
+.dp-auto-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }
+.dp-auto-stat {
+  display: flex; flex-direction: column; gap: 3px;
+  min-height: 108px; padding: var(--s4);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+}
+.dp-auto-stat-label { color: var(--text-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.dp-auto-stat strong { margin-top: auto; font-size: 19px; line-height: 1.2; }
+.dp-auto-stat small { color: var(--text-muted); font-size: 11px; }
+.dp-auto-stat strong.is-good { color: var(--c-orders-ink); }
+.dp-auto-stat strong.is-warn { color: var(--warning-strong); }
+.dp-auto-stat strong.is-danger { color: var(--danger-strong); }
+
+.dp-auto-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: var(--s4); }
+.dp-auto-card { padding: var(--s5); }
+.dp-auto-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); margin-bottom: var(--s4); }
+.dp-auto-card h3 { margin: 2px 0 0; font-size: 17px; }
+.dp-auto-eyebrow { color: var(--view-ink); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+
+.dp-auto-flow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dp-auto-flow li { display: flex; gap: var(--s3); position: relative; padding-bottom: var(--s4); }
+.dp-auto-flow li:last-child { padding-bottom: 0; }
+.dp-auto-flow li:not(:last-child)::after { content: ''; position: absolute; left: 14px; top: 31px; bottom: 3px; width: 2px; background: var(--view-soft); }
+.dp-auto-flow li > span {
+  width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--view-soft); color: var(--view-ink); font-size: 12px; font-weight: 800;
+}
+.dp-auto-flow li > div { display: flex; flex-direction: column; padding-top: 2px; }
+.dp-auto-flow strong { font-size: 13px; }
+.dp-auto-flow small { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+
+.dp-auto-checks { display: flex; flex-direction: column; gap: var(--s3); }
+.dp-auto-check { display: flex; gap: var(--s3); align-items: center; }
+.dp-auto-check > span {
+  width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted); font-size: 12px; font-weight: 800;
+}
+.dp-auto-check.is-done > span { color: var(--c-orders-ink); background: var(--c-orders-soft); border-color: transparent; }
+.dp-auto-check > div { display: flex; flex-direction: column; }
+.dp-auto-check strong { font-size: 13px; }
+.dp-auto-check small { font-size: 11px; color: var(--text-muted); }
+.dp-auto-mode-note {
+  display: flex; flex-direction: column; gap: 2px; margin-top: var(--s5); padding: var(--s3);
+  border-radius: var(--radius-control); background: var(--warning-soft); color: var(--warning-strong);
+}
+.dp-auto-mode-note strong { font-size: 12px; }
+.dp-auto-mode-note span { font-size: 11px; }
+
+.dp-auto-pending-card { min-height: 210px; }
+.dp-auto-pending-list { display: flex; flex-direction: column; }
+.dp-auto-pending-row {
+  display: flex; align-items: center; gap: var(--s3); padding: var(--s3) 0;
+  border-top: 1px solid var(--border);
+}
+.dp-auto-event-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: var(--radius-control); background: var(--view-soft); }
+.dp-auto-event-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dp-auto-event-title { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.dp-auto-event-title strong { font-size: 13px; }
+.dp-auto-event-meta { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-auto-event-body small { color: var(--text-muted); font-size: 11px; }
+.dp-auto-alert { display: flex; flex-direction: column; gap: 2px; padding: var(--s3); margin-bottom: var(--s3); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--danger-strong); font-size: 12px; }
+.dp-auto-updated { margin: calc(-1 * var(--s2)) 0 0; text-align: right; color: var(--text-muted); font-size: 11px; }
+
+@media (max-width: 900px) {
+  .dp-auto-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dp-auto-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .dp-auto-hero { align-items: stretch; flex-direction: column; }
+  .dp-auto-hero .btn { width: 100%; }
+  .dp-auto-stats { grid-template-columns: 1fr; }
+  .dp-auto-stat { min-height: 90px; }
+  .dp-auto-card-head { align-items: stretch; flex-direction: column; }
+  .dp-auto-pending-row { align-items: flex-start; flex-wrap: wrap; }
+  .dp-auto-pending-row .btn { margin-left: 50px; }
+}
 
 /* ============================================================
    Guias por lote (Dropanas)

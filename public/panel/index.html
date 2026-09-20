@@ -54,6 +54,12 @@
         <span class="rail-tip">Imágenes</span>
       </button>
 
+      <button class="tab" role="tab" data-view="view-dropanas-auto" data-label="Automatización DroPanas"
+              aria-selected="false" aria-label="Automatización DroPanas">
+        <svg viewBox="0 0 24 24"><path d="M12 2a4 4 0 0 0-4 4v1.1A7 7 0 0 0 5 13v3l-2 2v1h18v-1l-2-2v-3a7 7 0 0 0-3-5.9V6a4 4 0 0 0-4-4zm0 2a2 2 0 0 1 2 2v.3a7.4 7.4 0 0 0-4 0V6a2 2 0 0 1 2-2zm-1.8 17h3.6a2 2 0 0 1-3.6 0z"/></svg>
+        <span class="rail-tip">Automatización DroPanas</span>
+      </button>
+
       <button class="tab" role="tab" data-view="view-broadcast" data-label="Envíos masivos"
               aria-selected="false" aria-label="Envíos masivos">
         <svg viewBox="0 0 24 24"><path d="M13.5 2 4 13.2c-.4.48-.06 1.2.57 1.2H10l-1.4 7.4c-.13.7.77 1.1 1.2.54L20 11.14c.4-.48.06-1.2-.57-1.2H14l1.4-7.4c.13-.7-.77-1.1-1.2-.54z"/></svg>
@@ -445,6 +451,97 @@
             </div>
 
             <div class="lib-grid" id="libGrid"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Centro de control de la integración oficial con DroPanas -->
+      <section class="view" id="view-dropanas-auto">
+        <div class="autos-scroll">
+          <div class="autos-inner dp-auto-page">
+            <div class="dp-auto-hero">
+              <div>
+                <div class="dp-auto-kicker">INTEGRACIÓN OFICIAL · API + WEBHOOK</div>
+                <h2>Automatización DroPanas</h2>
+                <p>Supervisá las guías nuevas antes de activar el envío automático a clientes.</p>
+              </div>
+              <button class="btn" id="da_refresh" type="button">Actualizar estado</button>
+            </div>
+
+            <div class="dp-auto-stats" aria-label="Estado de la automatización">
+              <article class="dp-auto-stat">
+                <span class="dp-auto-stat-label">Conexión</span>
+                <strong id="da_connection">Comprobando…</strong>
+                <small id="da_connectionHelp">API de DroPanas</small>
+              </article>
+              <article class="dp-auto-stat">
+                <span class="dp-auto-stat-label">Webhook</span>
+                <strong id="da_webhook">Sin eventos</strong>
+                <small id="da_webhookHelp">Esperando una guía nueva</small>
+              </article>
+              <article class="dp-auto-stat">
+                <span class="dp-auto-stat-label">Pendientes</span>
+                <strong id="da_pending">0</strong>
+                <small>Requieren revisión</small>
+              </article>
+              <article class="dp-auto-stat">
+                <span class="dp-auto-stat-label">Envío automático</span>
+                <strong id="da_mode">Modo revisión</strong>
+                <small id="da_modeHelp">No envía sin confirmación</small>
+              </article>
+            </div>
+
+            <div class="dp-auto-grid">
+              <article class="card dp-auto-card">
+                <div class="dp-auto-card-head">
+                  <div>
+                    <span class="dp-auto-eyebrow">Flujo de una guía</span>
+                    <h3>Así funcionará</h3>
+                  </div>
+                  <span class="badge" id="da_flowBadge">SEGURO</span>
+                </div>
+                <ol class="dp-auto-flow">
+                  <li><span>1</span><div><strong>DroPanas genera la guía</strong><small>El webhook avisa al instante.</small></div></li>
+                  <li><span>2</span><div><strong>Se descarga la etiqueta oficial</strong><small>PDF de Tealca, ZOOM o MRW; sin capturas.</small></div></li>
+                  <li><span>3</span><div><strong>Se verifica el cliente</strong><small>Solo una coincidencia exacta por teléfono puede automatizarse.</small></div></li>
+                  <li><span>4</span><div><strong>Se envía y avanza a En camino</strong><small>Por ahora requiere tu confirmación.</small></div></li>
+                </ol>
+              </article>
+
+              <article class="card dp-auto-card">
+                <div class="dp-auto-card-head">
+                  <div>
+                    <span class="dp-auto-eyebrow">Preparación</span>
+                    <h3>Antes de activarlo</h3>
+                  </div>
+                </div>
+                <div class="dp-auto-checks">
+                  <div class="dp-auto-check is-done"><span>✓</span><div><strong>Webhook firmado</strong><small>DroPanas puede entregar eventos con seguridad.</small></div></div>
+                  <div class="dp-auto-check is-done"><span>✓</span><div><strong>Plantillas de WhatsApp</strong><small>El bot conserva el envío y los estados.</small></div></div>
+                  <div class="dp-auto-check" id="da_realGuideCheck"><span>3</span><div><strong>Primera guía real</strong><small>Pendiente de validación de punta a punta.</small></div></div>
+                </div>
+                <div class="dp-auto-mode-note" id="da_modeNote">
+                  <strong>Modo revisión activo</strong>
+                  <span>La activación automática se hará después de comprobar una guía real.</span>
+                </div>
+              </article>
+            </div>
+
+            <article class="card dp-auto-card dp-auto-pending-card">
+              <div class="dp-auto-card-head">
+                <div>
+                  <span class="dp-auto-eyebrow">Bandeja de revisión</span>
+                  <h3>Guías y eventos pendientes</h3>
+                </div>
+                <button class="btn btn-primary" id="da_reviewAll" type="button" hidden>Revisar en Envíos masivos</button>
+              </div>
+              <div id="da_alert" class="dp-auto-alert" hidden></div>
+              <div id="da_pendingList" class="dp-auto-pending-list">
+                <div class="empty-state"><div class="icon">⌛</div><div class="title">Cargando estado…</div></div>
+              </div>
+            </article>
+
+            <p class="dp-auto-updated" id="da_updated"></p>
           </div>
         </div>
       </section>
