@@ -40,7 +40,7 @@ const {
   guardAgainstUnauthorizedDelivery,
 } = require('./ai');
 const { classifyConversation } = require('./classifier');
-const { matchTrigger, findProduct } = require('./catalog');
+const { matchTrigger, findProduct, resolveApplicableTotal } = require('./catalog');
 const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
@@ -746,7 +746,12 @@ async function processReply(from) {
     const explicitNewOrder = /\b(otro|nuevo|segunda)\s+pedido\b|\bquiero\s+pedir\s+de\s+nuevo\b/i.test(userText);
     const startsFreshOrder = session.newOrderPending === true ||
       (explicitNewOrder && (session.orderClosed === true || SOLD_STAGES.includes(session.stage)));
-    const productRecord = !explicitNewOrder && session.linkedProductId ? findProduct(session.linkedProductId) : null;
+    // linkedProductId no existe en todas las sesiones historicas: antes de
+    // currentOrder el clasificador solo guardaba el nombre en card.producto.
+    // Para validar el precio no podemos perder el catalogo por esa diferencia
+    // de esquema; se busca por id y, como respaldo, por el producto vigente.
+    const productLookup = session.linkedProductId || session.currentOrder?.product || session.card?.producto;
+    const productRecord = !explicitNewOrder && productLookup ? findProduct(productLookup) : null;
     const knownProduct = productRecord?.name || null;
     const memoryUpdate = applyOrderMessage({
       currentOrder: startsFreshOrder ? null : session.currentOrder,
@@ -970,9 +975,9 @@ async function processReply(from) {
       knownQuantity: memoryUpdate.order.quantity,
       orderModality: memoryUpdate.order.modality,
       orderCourier: memoryUpdate.order.courier,
-      expectedTotal: productRecord && memoryUpdate.order.quantity
-        ? Number(productRecord.price) * Number(memoryUpdate.order.quantity)
-        : null,
+      expectedTotal: resolveApplicableTotal(productRecord, memoryUpdate.order.quantity),
+      previouslyCommunicatedTotal: memoryUpdate.order.total,
+      orderAccepted: memoryUpdate.order.accepted === true,
     };
 
     // FASE (correccion validacion-cierre v3, punto 6): si el propio texto
@@ -1089,7 +1094,13 @@ async function processReply(from) {
     }
     if (isNewClose) {
       patch.orderClosed = true;
-      patch.currentOrder = { ...(patch.currentOrder || session.currentOrder || {}), closed: true };
+      patch.currentOrder = {
+        ...(patch.currentOrder || session.currentOrder || {}),
+        total: closingCtx.expectedTotal,
+        quotedQuantity: memoryUpdate.order.quantity,
+        accepted: true,
+        closed: true,
+      };
       // Ver punto 5 mas arriba (segmentoPedidoActual): este es el indice
       // REAL que las conversaciones futuras van a usar como limite del
       // pedido cerrado, en vez de tener que adivinarlo de nuevo por estilo

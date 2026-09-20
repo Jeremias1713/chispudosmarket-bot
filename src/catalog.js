@@ -23,6 +23,7 @@ function loadProducts() {
   return products.map((p) => ({
     ...p,
     introImageIds: normalizeImageIds(p.introImageIds && p.introImageIds.length ? p.introImageIds : p.introImageId),
+    quantityPrices: normalizeQuantityPrices(p.quantityPrices),
   }));
 }
 
@@ -36,6 +37,10 @@ function blankProduct() {
     name: '',
     sku: '',
     price: 0,
+    // Totales promocionales verificables por cantidad. Ejemplo:
+    // [{ quantity: 2, total: 51900 }]. El texto libre de prompt/intro puede
+    // anunciar una promo, pero nunca se usa como fuente matematica.
+    quantityPrices: [],
     currency: 'Bs',
     description: '',
     active: true,
@@ -64,6 +69,27 @@ function blankProduct() {
     remarketing2h: '',
     remarketing5h: '',
   };
+}
+
+function normalizeQuantityPrices(value) {
+  const rows = Array.isArray(value) ? value : [];
+  const byQuantity = new Map();
+  for (const row of rows) {
+    const quantity = Number(row && row.quantity);
+    const total = Number(row && row.total);
+    if (!Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(total) || total <= 0) continue;
+    byQuantity.set(quantity, { quantity, total });
+  }
+  return [...byQuantity.values()].sort((a, b) => a.quantity - b.quantity);
+}
+
+function resolveApplicableTotal(product, quantity) {
+  const qty = Number(quantity);
+  if (!product || !Number.isInteger(qty) || qty < 1) return null;
+  const rule = normalizeQuantityPrices(product.quantityPrices).find((item) => item.quantity === qty);
+  if (rule) return rule.total;
+  const unitPrice = Number(product.price);
+  return Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice * qty : null;
 }
 
 // Siempre devuelve un array de palabras limpias, venga como venga (array ya
@@ -232,6 +258,7 @@ function createProduct(data) {
   const product = { ...blankProduct(), ...data, id: blankProduct().id };
   product.triggers = normalizeTriggers(product.triggers);
   product.introImageIds = normalizeImageIds(product.introImageIds);
+  product.quantityPrices = normalizeQuantityPrices(product.quantityPrices);
   products.push(product);
   saveProducts(products);
   return product;
@@ -244,6 +271,7 @@ function updateProduct(id, patch) {
   const merged = { ...products[i], ...patch, id };
   if (patch.triggers !== undefined) merged.triggers = normalizeTriggers(patch.triggers);
   if (patch.introImageIds !== undefined) merged.introImageIds = normalizeImageIds(patch.introImageIds);
+  if (patch.quantityPrices !== undefined) merged.quantityPrices = normalizeQuantityPrices(patch.quantityPrices);
   products[i] = merged;
   saveProducts(products);
   return products[i];
@@ -267,4 +295,6 @@ module.exports = {
   createProduct,
   updateProduct,
   deleteProduct,
+  normalizeQuantityPrices,
+  resolveApplicableTotal,
 };
