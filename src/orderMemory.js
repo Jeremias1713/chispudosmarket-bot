@@ -128,6 +128,71 @@ function agencyOptions(assistantText) {
   }).filter(Boolean);
 }
 
+function editDistance(a, b) {
+  const left = String(a || '');
+  const right = String(b || '');
+  const row = Array.from({ length: right.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= left.length; i += 1) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const previous = row[j];
+      row[j] = Math.min(
+        row[j] + 1,
+        row[j - 1] + 1,
+        diagonal + (left[i - 1] === right[j - 1] ? 0 : 1),
+      );
+      diagonal = previous;
+    }
+  }
+  return row[right.length];
+}
+
+const AGENCY_SELECTION_FILLERS = new Set([
+  'a', 'agencia', 'ahi', 'esa', 'ese', 'esta', 'este', 'de', 'del', 'en',
+  'el', 'la', 'las', 'los', 'me', 'oficina', 'por', 'favor', 'prefiero',
+  'queda', 'quedo', 'quiero', 'sirve', 'voy',
+]);
+
+function selectionWords(value) {
+  return fold(value)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word && !AGENCY_SELECTION_FILLERS.has(word));
+}
+
+function fuzzyPhraseMatches(left, right) {
+  if (!left || !right || Math.min(left.length, right.length) < 4) return false;
+  const tolerance = Math.min(2, Math.max(1, Math.floor(Math.max(left.length, right.length) / 9)));
+  return editDistance(left, right) <= tolerance;
+}
+
+function directAgencyNameSelection(userText, options) {
+  if (!options.length) return null;
+  const answerWords = selectionWords(userText);
+  if (!answerWords.length || answerWords.length > 5) return null;
+  const answer = answerWords.join(' ');
+
+  const scored = options.map((option) => {
+    const primary = fold(option.label).split(/\s+(?:—|-)\s+|,/)[0];
+    const optionWords = selectionWords(primary);
+    const optionName = optionWords.join(' ');
+    let score = 0;
+    if (answer === optionName) score = 100;
+    else if (fuzzyPhraseMatches(answer, optionName)) score = 90;
+    else if (answerWords.every((word) => optionWords.includes(word))) score = 70;
+    else if (optionWords.every((word) => answerWords.includes(word))) score = 65;
+    return { option, score };
+  }).filter((candidate) => candidate.score > 0).sort((a, b) => b.score - a.score);
+
+  if (!scored.length) return null;
+  // Una respuesta parcial como "Merida" puede parecerse a "Merida" y a
+  // "Merida Norte". Solo se elige automaticamente cuando el mejor match
+  // es claramente superior; los empates quedan para aclaracion humana.
+  if (scored[1] && scored[0].score === scored[1].score) return null;
+  return scored[0].option.label;
+}
+
 function extractAgencySelection(userText, assistantText) {
   const options = agencyOptions(assistantText);
   const normalized = fold(userText).trim();
@@ -135,7 +200,7 @@ function extractAgencySelection(userText, assistantText) {
   if (numbered) return options.find((option) => option.index === Number(numbered[1]))?.label || null;
   const yes = /^(si|sip|dale|ok|okay|perfecto|claro|correcto)[.!\s]*$/.test(normalized);
   if (yes && options.length === 1 && /agencia/.test(fold(assistantText))) return options[0].label;
-  return null;
+  return directAgencyNameSelection(userText, options);
 }
 
 function applyOrderMessage({ currentOrder, text, precedingAssistantText, knownCustomer }) {
@@ -161,7 +226,16 @@ function applyOrderMessage({ currentOrder, text, precedingAssistantText, knownCu
   }
 
   const agency = extractAgencySelection(text, precedingAssistantText);
-  if (agency) order.agency = agency;
+  if (agency) {
+    order.agency = agency;
+    // Las opciones numeradas que presenta el bot provienen del directorio
+    // de agencias Tealca. Si el cliente primero pregunto por MRW/Zoom y
+    // despues eligio una de estas oficinas, esa eleccion posterior resuelve
+    // el transportista y no debe dejar activo el bloqueo de pago humano.
+    order.courier = 'Tealca';
+    order.modality = 'agency_pickup';
+    order.needsHumanPayment = false;
+  }
 
   const norm = fold(text);
   if (isRetraction(norm)) order.accepted = false;

@@ -66,6 +66,56 @@ test('cambio explicito de cantidad actualiza el pedido', () => {
   assert.equal(next.accepted, false);
 });
 
+test('caso real: "En el vijia" elige por nombre la agencia mostrada y reemplaza MRW/Zoom por Tealca', () => {
+  const previous = {
+    ...blankOrder(),
+    quantity: 1,
+    city: 'el vigia',
+    courier: 'MRW',
+    needsHumanPayment: true,
+    accepted: true,
+  };
+  const assistant = `En Vigía, tienes la siguiente agencia disponible:
+
+1. El Vigía — Mérida
+CALLE 9, CASA NRO 19 38, BARRIO SAN ISIDRO EL VIGÍA
+
+También hay otras agencias en el estado Mérida:
+
+2. Merida — Mérida
+3. Merida Norte — Mérida
+
+¿Te queda bien alguna de estas agencias?`;
+  const result = applyOrderMessage({
+    currentOrder: previous,
+    text: 'En el vijia',
+    precedingAssistantText: assistant,
+    knownCustomer: {},
+  });
+
+  assert.match(result.order.agency, /^El Vigía/);
+  assert.equal(result.order.courier, 'Tealca');
+  assert.equal(result.order.needsHumanPayment, false);
+  assert.equal(result.order.accepted, true);
+});
+
+test('elegir una agencia por nombre tolera un error ortografico corto, pero exige una coincidencia unica', () => {
+  const assistant = '1. Carupano — Sucre\n2. Carora — Lara\n3. Merida — Mérida\n4. Merida Norte — Mérida\n¿Te queda bien alguna de estas agencias?';
+  const cases = [
+    ['en caropano', /^Carupano/],
+    ['prefiero la oficina de Carupano', /^Carupano/],
+    ['esa de carupano me sirve', /^Carupano/],
+    ['quiero Mérida Norte', /^Merida Norte/],
+    ['la de merida nort por favor', /^Merida Norte/],
+  ];
+  for (const [answer, expected] of cases) {
+    assert.match(extractAgencySelection(answer, assistant), expected, answer);
+  }
+  assert.equal(extractAgencySelection('en caro', assistant), null, 'un fragmento corto no elige una agencia');
+  assert.match(extractAgencySelection('merida', assistant), /^Merida —/, 'el nombre exacto gana sobre una opcion mas larga');
+  assert.equal(extractAgencySelection('la del centro', assistant), null, 'si no coincide con ninguna opcion, no inventa');
+});
+
 test('conserva un total cotizado y una aceptacion contextual para las condiciones vigentes', () => {
   const previous = { ...blankOrder(), quantity: 2 };
   const next = applyOrderMessage({
