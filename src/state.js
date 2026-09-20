@@ -129,6 +129,10 @@ function blankSession() {
     paused: false,
     pausedReason: null,
     card: { nombre: null, ciudad: null, telefono: null, cedula: null, producto: null, notas: null },
+    // Datos del pedido en curso. Se separan de `card`, que conserva datos
+    // historicos y personales del cliente entre compras.
+    currentOrder: null,
+    newOrderPending: false,
     // Codigo de anuncio (I1C1, I2C3...) que el negocio precarga en el texto
     // del link de cada anuncio, para saber de que anuncio salio cada venta.
     // Se captura UNA sola vez, del primer mensaje de la conversacion (ver
@@ -175,6 +179,10 @@ function resetSession(phone) {
   sessions[phone] = {
     ...previous,
     step: 'START',
+    currentOrder: null,
+    newOrderPending: true,
+    linkedProductId: null,
+    orderDataRequested: false,
     updatedAt: new Date().toISOString(),
   };
   saveAll(sessions);
