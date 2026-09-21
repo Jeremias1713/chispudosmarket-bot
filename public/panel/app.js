@@ -408,8 +408,10 @@ function renderDropanasAutomation(data) {
   $('da_flowBadge').textContent = automatic.enabled ? 'AUTOMÁTICO' : 'SEGURO'
 
   $('da_modeNote').innerHTML = automatic.enabled
-    ? '<strong>Envío automático activo</strong><span>Solo procesa coincidencias exactas por teléfono; el resto queda aquí.</span>'
-    : '<strong>Modo revisión activo</strong><span>La activación automática se hará después de comprobar una guía real.</span>'
+    ? `<strong>Envío automático activo</strong><span>Guías reales validadas: ${Number(automatic.validatedGuideCount || 0)}. También avisará “ya llegó” solo con teléfono exacto y pedidos que estén En camino.</span>`
+    : automatic.realGuideValidated
+      ? `<strong>Validación real completada</strong><span>${Number(automatic.validatedGuideCount || 0)} guía(s) se enviaron correctamente. Falta activar el modo automático en Render.</span>`
+      : '<strong>Modo revisión activo</strong><span>La activación automática se hará después de comprobar una guía real.</span>'
 
   const warnings = [status.lastError, status.lastWarning]
     .filter(Boolean)

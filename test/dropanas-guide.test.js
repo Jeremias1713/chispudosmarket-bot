@@ -163,3 +163,69 @@ test('el automático no envía si el cliente ya no está esperando guía', async
   assert.equal(result.results[0].reason, 'estado_no_esperando_guia');
   assert.equal(captured, false);
 });
+
+test('en oficina avisa llegada y solo después mueve de en camino a esperando retiro', async () => {
+  const updates = [];
+  const session = { phone: '584120000003', stage: 'en_camino', card: { guia: 'ABC13' } };
+  const result = await auto.processChanges(
+    [{ key: 'k4', order: { dropanasId: '13', guia: 'ABC13', telefono: '04120000003', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [session],
+      maybeNotifyArrival: async () => ({ sent: true, viaTemplate: true }),
+      updateSession: (_phone, patch) => { updates.push(patch); },
+    }
+  );
+  assert.equal(result.results[0].sent, true);
+  assert.deepEqual(result.acknowledged, ['k4']);
+  assert.equal(updates[0].stage, 'esperando_retiro');
+});
+
+test('en oficina no avisa si el teléfono no es exacto o el pedido no está en camino', async () => {
+  let sends = 0;
+  const base = [{ key: 'k5', order: { dropanasId: '14', guia: 'ABC14', telefono: '04120000004', estadoPedido: 'En oficina', carrier: 'tealca' } }];
+  const result = await auto.processChanges(base, {
+    env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+    matchRows: (rows) => rows,
+    listSessions: () => [{ phone: '584120000004', stage: 'esperando_guia', card: { guia: 'ABC14' } }],
+    maybeNotifyArrival: async () => { sends++; return { sent: true }; },
+  });
+  assert.equal(result.results[0].reason, 'estado_no_en_camino');
+  assert.equal(sends, 0);
+  assert.deepEqual(result.acknowledged, []);
+});
+
+test('si falla el aviso de llegada conserva en camino y deja el cambio pendiente', async () => {
+  let updated = false;
+  const result = await auto.processChanges(
+    [{ key: 'k6', order: { dropanasId: '15', guia: 'ABC15', telefono: '04120000005', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [{ phone: '584120000005', stage: 'en_camino', card: { guia: 'ABC15' } }],
+      maybeNotifyArrival: async () => ({ sent: false, reason: 'error', error: 'Meta rechazó la plantilla' }),
+      updateSession: () => { updated = true; },
+    }
+  );
+  assert.equal(result.results[0].notice.reason, 'error');
+  assert.equal(updated, false);
+  assert.deepEqual(result.acknowledged, []);
+});
+
+test('un aviso de llegada ya registrado no se duplica y termina de actualizar la etapa', async () => {
+  let updated = null;
+  const result = await auto.processChanges(
+    [{ key: 'k7', order: { dropanasId: '16', guia: 'ABC16', telefono: '04120000006', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [{ phone: '584120000006', stage: 'en_camino', arrivalNotifiedAt: '2026-09-21T00:00:00Z', card: { guia: 'ABC16' } }],
+      maybeNotifyArrival: async () => ({ sent: false, reason: 'ya_avisado' }),
+      updateSession: (_phone, patch) => { updated = patch; },
+    }
+  );
+  assert.equal(result.results[0].sent, false);
+  assert.equal(updated.stage, 'esperando_retiro');
+  assert.deepEqual(result.acknowledged, ['k7']);
+});

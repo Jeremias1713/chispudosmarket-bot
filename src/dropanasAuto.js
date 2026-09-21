@@ -7,7 +7,7 @@
 // nombre siguen apareciendo en el panel para revision manual.
 const dropanas = require('./dropanas');
 const dropanasGuide = require('./dropanasGuide');
-const { getSession, updateSession } = require('./state');
+const { getSession, updateSession, listSessions } = require('./state');
 const { mediaUrl } = require('./flow');
 const { detectOrderConflict, buildGuiaPatch } = require('./orderGuard');
 const shipping = require('./shipping');
@@ -20,7 +20,34 @@ function configFromEnv(env = process.env) {
 
 function status() {
   const config = configFromEnv();
-  return { enabled: config.enabled, running: Boolean(running) };
+  const validatedGuideCount = listSessions().filter((session) => (
+    session.shippingNotifiedAt && session.card?.guia && session.card?.guiaImageUrl
+  )).length;
+  return {
+    enabled: config.enabled,
+    running: Boolean(running),
+    validatedGuideCount,
+    realGuideValidated: validatedGuideCount > 0,
+  };
+}
+
+function foldStatus(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+function isArrival(row) {
+  return ['en oficina', 'en agencia', 'listo para retirar'].includes(foldStatus(row?.estadoPedido));
+}
+
+function matchArrivalByPhone(row, sessions) {
+  const phone = require('./dropanasApi').normalizePhone(row?.telefono);
+  if (!phone) return { reason: 'requiere_revision' };
+  const matches = sessions.filter((session) => {
+    const candidate = require('./dropanasApi').normalizePhone(session.phone || session.card?.telefono);
+    return candidate && candidate === phone;
+  });
+  if (matches.length !== 1) return { reason: 'requiere_revision' };
+  return { phone: matches[0].phone, session: matches[0] };
 }
 
 async function processChanges(changes, overrides = {}) {
@@ -37,6 +64,8 @@ async function processChanges(changes, overrides = {}) {
       detectOrderConflict,
       buildGuiaPatch,
       maybeNotifyShipping: shipping.maybeNotifyShipping,
+      maybeNotifyArrival: shipping.maybeNotifyArrival,
+      listSessions,
       ...overrides,
     };
     const results = [];
@@ -46,6 +75,38 @@ async function processChanges(changes, overrides = {}) {
       .map((change) => ({ ...change.order, _pendingKey: change.key }));
 
     for (const row of deps.matchRows(rows)) {
+      if (isArrival(row)) {
+        const matched = matchArrivalByPhone(row, deps.listSessions());
+        if (!matched.session) {
+          results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
+          continue;
+        }
+        const { phone, session } = matched;
+        if (session.stage !== 'en_camino') {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_no_en_camino' });
+          continue;
+        }
+        if (!session.card?.guia || (row.guia && String(session.card.guia) !== String(row.guia))) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'guia_no_coincide' });
+          continue;
+        }
+        try {
+          const notice = await deps.maybeNotifyArrival(phone, session);
+          if (notice?.sent || notice?.reason === 'ya_avisado') {
+            deps.updateSession(phone, {
+              stage: 'esperando_retiro',
+              stageLocked: true,
+              stageReason: 'DroPanas: pedido en oficina',
+            });
+            if (row._pendingKey) acknowledged.push(row._pendingKey);
+          }
+          results.push({ orderId: row.dropanasId, phone, sent: Boolean(notice?.sent), notice });
+        } catch (error) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'error', error: error.message });
+        }
+        continue;
+      }
+
       if (!['tealca', 'zoom', 'mrw'].includes(row.carrier)) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'transportista_sin_descarga_automatica' });
         continue;
