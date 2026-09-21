@@ -49,6 +49,18 @@ function headerValue(headers, name) {
   return String(headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()] ?? '').trim().toLowerCase();
 }
 
+function extractLabelMetadata(text) {
+  const clean = String(text || '').replace(/\r/g, '');
+  const phoneSection = clean.match(/TEL[EÉ]FONO\s*([+\d][\d\s().-]{8,24})/i);
+  const phone = dropanasApi.normalizePhone(phoneSection?.[1]);
+  const nameSection = clean.match(/NOMBRE\s+([^\n]{2,80})/i);
+  const client = String(nameSection?.[1] || '')
+    .replace(/\s{2,}.*$/, '')
+    .replace(/\bENTREGA\b.*$/i, '')
+    .trim();
+  return { phone, client };
+}
+
 async function renderVerifiedPdf(pdfBuffer, expectedTracking) {
   if (!Buffer.isBuffer(pdfBuffer) || !pdfBuffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
     throw new Error('Dropanas no devolvió un PDF de etiqueta válido');
@@ -66,7 +78,7 @@ async function renderVerifiedPdf(pdfBuffer, expectedTracking) {
   const pixmap = page.toPixmap(mupdf.Matrix.scale(2, 2), mupdf.ColorSpace.DeviceRGB, false);
   const png = Buffer.from(pixmap.asPNG());
   if (png.length < 1000) throw new Error('La imagen generada de la etiqueta está incompleta');
-  return { png, pages };
+  return { png, pages, text, ...extractLabelMetadata(text) };
 }
 
 async function capture({ orderId, expectedTracking, expectedCarrier, config = configFromEnv(), client = axios } = {}) {
@@ -114,7 +126,9 @@ async function capture({ orderId, expectedTracking, expectedCarrier, config = co
     carrier: guideCarrier || null,
     origin: guideOrigin || null,
     mode: responseMode,
+    phone: rendered.phone,
+    client: rendered.client,
   };
 }
 
-module.exports = { OUTPUT_DIR, configFromEnv, status, renderVerifiedPdf, capture };
+module.exports = { OUTPUT_DIR, configFromEnv, status, extractLabelMetadata, renderVerifiedPdf, capture };

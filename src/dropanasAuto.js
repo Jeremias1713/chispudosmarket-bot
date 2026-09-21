@@ -63,11 +63,13 @@ async function processChanges(changes, overrides = {}) {
           continue;
         }
 
-        const captured = await deps.capture({
-          orderId: row.dropanasId,
-          expectedTracking: row.guia,
-          expectedCarrier: row.carrier,
-        });
+        const captured = row.guideImageFilename
+          ? { filename: row.guideImageFilename }
+          : await deps.capture({
+            orderId: row.dropanasId,
+            expectedTracking: row.guia,
+            expectedCarrier: row.carrier,
+          });
         const guiaImageUrl = deps.mediaUrl(captured.filename);
         if (!guiaImageUrl) throw new Error('Falta configurar PUBLIC_URL');
 

@@ -233,6 +233,48 @@ function recordWebhook(deliveryId) {
   return true;
 }
 
+// Cuando GET /ordenes/{id} no está autorizado, la etiqueta oficial sigue
+// trayendo el teléfono impreso. Se usa únicamente ese teléfono para asociar
+// la guía; nunca se adivina por nombre ni por posición en la cola.
+async function enrichPendingGuides(options = {}) {
+  const guide = options.guide || require('./dropanasGuide');
+  const state = loadState();
+  let enriched = 0;
+  let failed = 0;
+  const candidates = (state.pending || []).filter((change) => {
+    const order = change?.order;
+    return order?.guia && !order.telefono && !order.guideImageFilename
+      && ['tealca', 'zoom', 'mrw'].includes(order.carrier);
+  });
+  let next = 0;
+  async function worker() {
+    while (next < candidates.length) {
+      const change = candidates[next++];
+      const order = change.order;
+      try {
+        const captured = await guide.capture({
+          orderId: order.dropanasId,
+          expectedTracking: order.guia,
+          expectedCarrier: order.carrier,
+          ...(options.captureOptions || {}),
+        });
+        order.telefono = api.normalizePhone(captured.phone);
+        if (!order.cliente && captured.client) order.cliente = captured.client;
+        order.guideImageFilename = captured.filename;
+        order.guideEnrichedAt = new Date().toISOString();
+        if (order.telefono) enriched += 1;
+        else failed += 1;
+      } catch (error) {
+        order.guideEnrichmentError = error.message;
+        failed += 1;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, worker));
+  saveState(state);
+  return { total: (state.pending || []).length, enriched, failed };
+}
+
 function webhookOrder(payload) {
   const data = payload?.datos || {};
   const summary = data.pedido || {};
@@ -313,6 +355,23 @@ async function processWebhook(payload, options = {}) {
     // falla, se conserva como pendiente para revision, pero nunca se envia a
     // ciegas sin un telefono exacto.
     detailWarning = error.message;
+    try {
+      const captured = await require('./dropanasGuide').capture({
+        orderId: announced.dropanasId,
+        expectedTracking: announced.guia,
+        expectedCarrier: announced.carrier,
+        ...(options.captureOptions || {}),
+      });
+      order = {
+        ...announced,
+        telefono: api.normalizePhone(captured.phone),
+        cliente: captured.client || announced.cliente,
+        guideImageFilename: captured.filename,
+        guideEnrichedAt: new Date().toISOString(),
+      };
+    } catch (guideError) {
+      detailWarning = `${detailWarning}; etiqueta: ${guideError.message}`;
+    }
   }
 
   const now = new Date().toISOString();
@@ -365,6 +424,7 @@ module.exports = {
   status,
   listPending,
   acknowledge,
+  enrichPendingGuides,
   recordWebhook,
   webhookOrder,
   queueWebhookOrder,

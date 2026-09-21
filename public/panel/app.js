@@ -438,6 +438,7 @@ async function loadDropanasAutomation() {
   const refresh = $('da_refresh')
   if (refresh) refresh.disabled = true
   try {
+    await api('/dropanas-api/enrich-guides', { method: 'POST', body: '{}' })
     const [dashboard] = await Promise.all([
       api('/dropanas-api/dashboard'),
       loadDropanasOrders(),

@@ -962,6 +962,16 @@ router.get('/api/dropanas-api/dashboard', (_req, res) => {
   }
 });
 
+// Recupera teléfono/nombre desde el PDF oficial para webhooks cuyo endpoint
+// de detalle responde 403. No envía mensajes ni confirma filas.
+router.post('/api/dropanas-api/enrich-guides', async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await dropanasMonitor.enrichPendingGuides()) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/api/dropanas-api/sync', async (_req, res) => {
   try {
     const sync = await dropanasMonitor.sync();

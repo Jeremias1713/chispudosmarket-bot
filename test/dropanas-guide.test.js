@@ -50,6 +50,13 @@ test('rechaza un PDF que no contiene la guia esperada', async () => {
   );
 });
 
+test('extrae nombre y teléfono de una etiqueta oficial', () => {
+  assert.deepEqual(
+    guide.extractLabelMetadata('NOMBRE  JUAN BRANGER\nTELEFONO\n+58 4244587770\nENTREGA  CIUDAD VALENCIA'),
+    { phone: '584244587770', client: 'JUAN BRANGER' }
+  );
+});
+
 test('descarga, verifica y convierte la etiqueta PDF en PNG', async () => {
   const fakeClient = {
     get: async (url, options) => ({
