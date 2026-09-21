@@ -114,6 +114,18 @@ test('un borrador base no inventa advertencias antes de consultar DroPanas', () 
   assert.deepEqual(draft.issues, []);
 });
 
+test('omite oficina_id cuando DroPanas debe asignar la oficina al despachar', () => {
+  const draft = automation.baseDraft('584227167341', soldSession());
+  draft.official = {
+    office: { id: null, state_id: 2, city_id: 10, nombre: 'Barcelona', direccion: 'Nueva Barcelona', assignedByDropanas: true },
+  };
+  const payload = automation.buildPayload(draft, 'CHISPUDOS-SIN-OFICINA');
+  assert.equal(payload.direccion.state_id, 2);
+  assert.equal(payload.direccion.city_id, 10);
+  assert.equal(Object.hasOwn(payload, 'oficina_id'), false);
+  assert.equal(payload.tipo_entrega, 'oficina');
+});
+
 test('incluye Shilajit Resina 20448 en la configuración inicial', () => {
   const resin = automation.defaultMappings().find((row) => row.productId === 20448);
   assert.ok(resin);

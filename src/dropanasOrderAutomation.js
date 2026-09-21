@@ -6,10 +6,13 @@ const { getSession, updateSession, listSessions } = require('./state');
 const settingsStore = require('./settings');
 const dropanasApi = require('./dropanasApi');
 const { SOLD_STAGES } = require('./stageRules');
+const agencies = require('./agencies');
 
 const CACHE_MS = 5 * 60 * 1000;
 let cache = null;
 let cachePromise = null;
+let geoStatesPromise = null;
+const geoCitiesPromises = new Map();
 const locks = new Set();
 
 function fold(value) {
@@ -93,6 +96,8 @@ function saveConfig(input) {
   });
   cache = null;
   cachePromise = null;
+  geoStatesPromise = null;
+  geoCitiesPromises.clear();
   return settings();
 }
 
@@ -264,9 +269,12 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
         }
       }
     })();
-    const [productResult, offices, inventoryResults] = await Promise.all([
+    const officePromise = apiGet('oficinas', config, { carrier: 'tealca' })
+      .then((rows) => ({ rows, warning: null }))
+      .catch((error) => ({ rows: [], warning: error.message }));
+    const [productResult, officeResult, inventoryResults] = await Promise.all([
       productPromise,
-      apiGet('oficinas', config, { carrier: 'tealca' }),
+      officePromise,
       Promise.all(warehouseIds.map(async (id) => {
         try {
           return { warehouseId: id, rows: await apiGet(`bodegas/${id}/inventario`, config), warning: null };
@@ -278,7 +286,8 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
     const value = {
       products: productResult.rows,
       productWarning: productResult.warning,
-      offices: Array.isArray(offices) ? offices : [],
+      offices: Array.isArray(officeResult.rows) ? officeResult.rows : [],
+      officeWarning: officeResult.warning,
       inventories: inventoryResults,
     };
     cache = { at: Date.now(), value };
@@ -300,6 +309,37 @@ function resolveOffice(label, offices) {
     return (name && (query.includes(name) || name.includes(query))) || (address && query.length > 8 && address.includes(query));
   });
   return matches.length === 1 ? matches[0] : null;
+}
+
+async function apiGeoOffice(label, config) {
+  const localMatches = agencies.searchByText(label, 10);
+  if (localMatches.length !== 1) return null;
+  const local = localMatches[0];
+  const stateName = agencies.resolveStateForCity(`${local.name} ${local.address}`) || local.region;
+  if (!stateName) return null;
+  if (!geoStatesPromise) geoStatesPromise = apiGet('geo/estados', config);
+  const states = await geoStatesPromise;
+  const state = (Array.isArray(states) ? states : []).find((row) => fold(row.nombre) === fold(stateName));
+  if (!state) return null;
+  const stateId = Number(state.id);
+  if (!geoCitiesPromises.has(stateId)) {
+    geoCitiesPromises.set(stateId, apiGet(`geo/estados/${stateId}/ciudades`, config));
+  }
+  const cities = await geoCitiesPromises.get(stateId);
+  const cityQuery = fold(local.name);
+  const cityMatches = (Array.isArray(cities) ? cities : []).filter((row) => {
+    const name = fold(row.nombre);
+    return name && (name === cityQuery || name.includes(cityQuery) || cityQuery.includes(name));
+  });
+  if (cityMatches.length !== 1) return null;
+  return {
+    id: null,
+    state_id: stateId,
+    city_id: Number(cityMatches[0].id),
+    nombre: local.name,
+    direccion: local.address || local.name,
+    assignedByDropanas: true,
+  };
 }
 
 async function prepareDraft(phone, session = getSession(phone)) {
@@ -324,8 +364,18 @@ async function prepareDraft(phone, session = getSession(phone)) {
       }
       return { ...item, product, stock };
     });
-    const office = resolveOffice(draft.agency, live.offices);
+    let office = resolveOffice(draft.agency, live.offices);
+    if (!office && live.officeWarning) {
+      try {
+        office = await apiGeoOffice(draft.agency, dropanasApi.configFromEnv());
+      } catch (error) {
+        draft.warnings.push(`DroPanas no permitió validar la oficina (${live.officeWarning}; ${error.message}).`);
+      }
+    }
     if (!office) draft.issues.push('La oficina mencionada no coincide de forma única con el catálogo oficial de Tealca.');
+    else if (office.assignedByDropanas) {
+      draft.warnings.push('DroPanas no permite leer oficinas con esta clave: se enviará la ciudad confirmada y DroPanas asignará la oficina al despachar. Revísala antes de aprobar.');
+    }
     draft.official = { items: officialItems, office };
   } catch (error) {
     draft.issues.push(`No se pudo validar con DroPanas: ${error.message}`);
@@ -346,7 +396,7 @@ function externalReference(draft) {
 
 function buildPayload(draft, reference) {
   const office = draft.official.office;
-  return {
+  const payload = {
     external_reference: reference,
     cliente: { ...draft.identity, telefono: draft.customerPhone, documento: { tipo: 'V', numero: draft.cedula } },
     direccion: {
@@ -359,10 +409,12 @@ function buildPayload(draft, reference) {
       precio_venta_ves: item.total / item.quantity,
     })),
     bodega_origen_id: Number(draft.items[0].mapping.warehouseId),
-    tipo_entrega: 'oficina', shipping_type_id: 3, oficina_id: Number(office.id),
+    tipo_entrega: 'oficina', shipping_type_id: 3,
     tipo_pago: 'con_recaudo', requiere_aprobacion: true,
     nota_cliente: 'Pedido creado por ChispudosMarket. Revisar antes de aprobar.',
   };
+  if (office.id != null) payload.oficina_id = Number(office.id);
+  return payload;
 }
 
 async function createForPhone(phone, { automatic = false } = {}) {
