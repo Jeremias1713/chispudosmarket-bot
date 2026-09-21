@@ -40,6 +40,7 @@ const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
 const { SOLD_STAGES, isAllowedAutoTransition } = require('./stageRules');
+const dropanasOrderAutomation = require('./dropanasOrderAutomation');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
 const SPLIT_GAP_MAX_MS = parseInt(process.env.SPLIT_GAP_MAX_MS || '9500', 10);
@@ -814,6 +815,7 @@ async function processReply(from) {
     if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
       push.notifySale(from, getSession(from));
     }
+    if (isNewClose) dropanasOrderAutomation.maybeCreate(from);
 
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
@@ -879,6 +881,9 @@ async function processReply(from) {
         const updated = updateSession(from, classPatch);
         if (stageChangeAllowed && classification.stage === 'vendido' && current.stage !== 'vendido') {
           push.notifySale(from, updated);
+        }
+        if (stageChangeAllowed && SOLD_STAGES.includes(classification.stage) && !SOLD_STAGES.includes(current.stage)) {
+          dropanasOrderAutomation.maybeCreate(from);
         }
       }
     }

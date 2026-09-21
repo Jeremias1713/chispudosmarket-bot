@@ -111,6 +111,16 @@ const DEFAULTS = {
   // puesto, etc), solo se registra en los logs: nunca rompe el flujo de la
   // venta ni la notificacion push del panel.
   saleNotifyPhone: null,
+  // Creación de órdenes en DroPanas. Son dos interruptores separados:
+  // upload habilita el botón manual del panel y autoCreate permite que una
+  // venta nueva se suba sola. La API siempre recibe requiere_aprobacion=true;
+  // no existe una opción para aprobar automáticamente desde este bot.
+  dropanasOrderUploadEnabled: false,
+  dropanasOrderAutoCreateEnabled: false,
+  dropanasOrderActivatedAt: null,
+  // Mapeos editables producto del catálogo/bot -> ID real de DroPanas.
+  // Si está vacío, dropanasOrderAutomation usa sus valores iniciales seguros.
+  dropanasOrderMappings: [],
 };
 
 function load() {

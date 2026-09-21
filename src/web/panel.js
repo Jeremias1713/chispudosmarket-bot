@@ -42,6 +42,7 @@ const { matchesConversation } = require('../conversationSearch');
 const dropanasMonitor = require('../dropanasMonitor');
 const dropanasGuide = require('../dropanasGuide');
 const dropanasAuto = require('../dropanasAuto');
+const dropanasOrderAutomation = require('../dropanasOrderAutomation');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -894,6 +895,33 @@ router.get('/api/dropanas-api/status', (_req, res) => {
     guideDownload: dropanasGuide.status(),
     automaticSend: dropanasAuto.status(),
   });
+});
+
+// Cola de ventas listas (o bloqueadas con una explicación concreta) para
+// crear órdenes reales. La creación siempre queda pendiente de aprobación;
+// esta interfaz nunca aprueba pedidos por sí sola.
+router.get('/api/dropanas-orders', async (_req, res) => {
+  try {
+    res.json({ config: dropanasOrderAutomation.settings(), drafts: await dropanasOrderAutomation.listDrafts() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/api/dropanas-orders/config', (req, res) => {
+  try {
+    res.json({ ok: true, config: dropanasOrderAutomation.saveConfig(req.body || {}) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/api/dropanas-orders/:phone/create', async (req, res) => {
+  try {
+    res.json(await dropanasOrderAutomation.createForPhone(req.params.phone, { automatic: false }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // Vista de control para el panel. A diferencia de /sync, este endpoint NO

@@ -497,6 +497,44 @@
               </article>
             </div>
 
+            <article class="card dp-auto-card dp-order-config-card">
+              <div class="dp-auto-card-head">
+                <div>
+                  <span class="dp-auto-eyebrow">Creación de pedidos</span>
+                  <h3>Pedidos pendientes de aprobación</h3>
+                  <p class="help">El bot puede subir ventas completas, pero nunca aprobarlas. Todo queda esperando tu revisión en DroPanas.</p>
+                </div>
+                <button class="btn btn-primary" id="do_saveConfig" type="button">Guardar configuración</button>
+              </div>
+              <div class="dp-order-switches">
+                <label><input type="checkbox" id="do_uploadEnabled"> Permitir subir pedidos desde este panel</label>
+                <label><input type="checkbox" id="do_autoEnabled"> Subir automáticamente las ventas nuevas completas</label>
+              </div>
+              <div class="dp-auto-alert" id="do_activationWarning">
+                Al activar el modo automático solo se procesarán ventas cerradas desde ese momento. Las anteriores no se subirán en lote.
+              </div>
+              <div class="dp-order-mapping-head">
+                <div><strong>Productos y precios</strong><small>Cada fila conecta el nombre que usa el bot con el ID real de DroPanas.</small></div>
+                <button class="btn" id="do_addMapping" type="button">Agregar producto</button>
+              </div>
+              <div class="dp-order-mappings" id="do_mappings"></div>
+              <p class="help" id="do_configMessage"></p>
+            </article>
+
+            <article class="card dp-auto-card dp-order-queue-card">
+              <div class="dp-auto-card-head">
+                <div>
+                  <span class="dp-auto-eyebrow">Bandeja de pedidos</span>
+                  <h3>Ventas para subir a DroPanas</h3>
+                  <p class="help">“Listo” significa que producto, cantidad, precio, cliente, inventario y oficina oficial fueron validados.</p>
+                </div>
+                <strong class="dp-auto-orders-total" id="do_queueTotal">0 listos</strong>
+              </div>
+              <div class="dp-auto-orders-list" id="do_queue">
+                <div class="empty-state"><div class="icon">⌛</div><div class="title">Validando ventas…</div></div>
+              </div>
+            </article>
+
             <div class="dp-auto-grid">
               <article class="card dp-auto-card">
                 <div class="dp-auto-card-head">

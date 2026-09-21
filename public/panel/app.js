@@ -159,6 +159,108 @@ document.querySelectorAll('.tab').forEach((tab) => {
 let dropanasAutomationData = null
 let dropanasOrders = []
 let dropanasOrderFilter = 'active'
+let dropanasOrderData = { config: null, drafts: [] }
+
+function mappingPricesText(prices) {
+  return Object.entries(prices || {}).map(([quantity, total]) => `${quantity}=${total}`).join(', ')
+}
+
+function mappingRow(mapping = {}) {
+  return `<div class="dp-order-mapping" data-id="${esc(mapping.id || '')}">
+    <label>Nombre visible<input class="do-map-label" value="${esc(mapping.label || '')}" placeholder="Shilajit Viking"></label>
+    <label>Alias del bot<input class="do-map-aliases" value="${esc((mapping.aliases || []).join(', '))}" placeholder="shilajit, shilajit viking"></label>
+    <label>ID DroPanas<input class="do-map-product" type="number" min="1" value="${esc(mapping.productId || '')}" placeholder="20343"></label>
+    <label>Bodega<input class="do-map-warehouse" type="number" min="1" value="${esc(mapping.warehouseId || 1)}"></label>
+    <label>Precios por cantidad<input class="do-map-prices" value="${esc(mappingPricesText(mapping.prices))}" placeholder="1=36900, 2=51900"></label>
+    <label class="dp-order-map-enabled"><input class="do-map-enabled" type="checkbox" ${mapping.enabled !== false ? 'checked' : ''}> Activo</label>
+    <button class="btn do-map-remove" type="button">Quitar</button>
+  </div>`
+}
+
+function parseMappingPrices(value) {
+  const prices = {}
+  String(value || '').split(/[,\n]+/).forEach((part) => {
+    const [quantity, total] = part.split('=').map((item) => Number(String(item || '').trim()))
+    if (Number.isInteger(quantity) && quantity > 0 && Number.isFinite(total) && total > 0) prices[quantity] = total
+  })
+  return prices
+}
+
+function renderOrderConfig(config) {
+  $('do_uploadEnabled').checked = Boolean(config?.uploadEnabled)
+  $('do_autoEnabled').checked = Boolean(config?.autoCreateEnabled)
+  $('do_autoEnabled').disabled = !config?.uploadEnabled
+  $('do_mappings').innerHTML = (config?.mappings || []).map(mappingRow).join('')
+  $('do_activationWarning').hidden = !config?.autoCreateEnabled
+}
+
+function orderDraftRow(draft) {
+  const created = draft.current?.id
+  const ready = !created && !(draft.issues || []).length
+  const canUpload = ready && Boolean(dropanasOrderData.config?.uploadEnabled)
+  const badge = created
+    ? `<span class="badge">Subido #${esc(draft.current.id)}</span>`
+    : ready ? '<span class="badge">Listo para subir</span>' : '<span class="badge badge-warning">Requiere revisión</span>'
+  const detail = [draft.mapping?.label || draft.productName || 'Producto pendiente', draft.quantity ? `${draft.quantity} unidad(es)` : null, draft.total ? `${Number(draft.total).toLocaleString('es-VE')} Bs` : null, draft.agency || null].filter(Boolean).join(' · ')
+  const issues = (draft.issues || []).filter((issue) => !created || !issue.startsWith('Ya fue subido'))
+  return `<div class="dp-order-draft">
+    <div class="dp-auto-event-body">
+      <div class="dp-auto-event-title"><strong>${esc(draft.name || `+${draft.phone}`)}</strong>${badge}</div>
+      <div class="dp-auto-event-meta">${esc(detail)}</div>
+      ${issues.length ? `<small class="is-missing">${issues.map(esc).join(' ')}</small>` : '<small>Se creará pendiente de aprobación.</small>'}
+    </div>
+    <div class="dp-order-draft-actions">
+      <button class="btn do-open-chat" data-phone="${esc(draft.phone)}" type="button">Ver chat</button>
+      ${canUpload ? `<button class="btn btn-primary do-create-order" data-phone="${esc(draft.phone)}" type="button">Subir pedido</button>` : ''}
+    </div>
+  </div>`
+}
+
+function renderOrderQueue(data) {
+  dropanasOrderData = data || { config: null, drafts: [] }
+  renderOrderConfig(dropanasOrderData.config || {})
+  const drafts = dropanasOrderData.drafts || []
+  const ready = drafts.filter((draft) => !draft.current?.id && !(draft.issues || []).length).length
+  $('do_queueTotal').textContent = `${ready} listo${ready === 1 ? '' : 's'}`
+  $('do_queue').innerHTML = drafts.length ? drafts.map(orderDraftRow).join('') : emptyState('📦', 'Todavía no hay ventas cerradas', 'Las ventas nuevas aparecerán aquí para validación.')
+  document.querySelectorAll('.do-open-chat').forEach((button) => button.addEventListener('click', () => {
+    showView('view-convos')
+    selectConversation(button.dataset.phone)
+  }))
+  document.querySelectorAll('.do-create-order').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm('Se creará este pedido real en DroPanas y quedará pendiente de tu aprobación. ¿Continuar?')) return
+    button.disabled = true
+    try {
+      const result = await api(`/dropanas-orders/${encodeURIComponent(button.dataset.phone)}/create`, { method: 'POST', body: '{}' })
+      alert(`Pedido #${result.order.id} creado pendiente de aprobación.`)
+      await loadDropanasOrderQueue()
+    } catch (err) {
+      showError(err)
+    } finally {
+      button.disabled = false
+    }
+  }))
+}
+
+async function loadDropanasOrderQueue() {
+  try {
+    renderOrderQueue(await api('/dropanas-orders'))
+  } catch (err) {
+    $('do_queue').innerHTML = emptyState('!', 'No se pudo validar la cola', err.message)
+  }
+}
+
+function collectOrderMappings() {
+  return [...document.querySelectorAll('.dp-order-mapping')].map((row, index) => ({
+    id: row.dataset.id || `producto-${index + 1}`,
+    label: row.querySelector('.do-map-label').value.trim(),
+    aliases: row.querySelector('.do-map-aliases').value.split(',').map((item) => item.trim()).filter(Boolean),
+    productId: Number(row.querySelector('.do-map-product').value),
+    warehouseId: Number(row.querySelector('.do-map-warehouse').value),
+    prices: parseMappingPrices(row.querySelector('.do-map-prices').value),
+    enabled: row.querySelector('.do-map-enabled').checked,
+  }))
+}
 
 function automationDate(value) {
   if (!value) return 'Todavía no llegó ningún evento real'
@@ -332,6 +434,7 @@ async function loadDropanasAutomation() {
     const [dashboard] = await Promise.all([
       api('/dropanas-api/dashboard'),
       loadDropanasOrders(),
+      loadDropanasOrderQueue(),
     ])
     renderDropanasAutomation(dashboard)
   } catch (err) {
@@ -363,6 +466,39 @@ function openDropanasReview() {
 
 $('da_refresh')?.addEventListener('click', loadDropanasAutomation)
 $('da_reviewAll')?.addEventListener('click', openDropanasReview)
+$('do_uploadEnabled')?.addEventListener('change', () => {
+  $('do_autoEnabled').disabled = !$('do_uploadEnabled').checked
+  if (!$('do_uploadEnabled').checked) $('do_autoEnabled').checked = false
+})
+$('do_addMapping')?.addEventListener('click', () => {
+  $('do_mappings').insertAdjacentHTML('beforeend', mappingRow({ enabled: true, warehouseId: 1, prices: {} }))
+})
+$('do_mappings')?.addEventListener('click', (event) => {
+  const button = event.target.closest('.do-map-remove')
+  if (button) button.closest('.dp-order-mapping').remove()
+})
+$('do_saveConfig')?.addEventListener('click', async () => {
+  const button = $('do_saveConfig')
+  button.disabled = true
+  $('do_configMessage').textContent = 'Guardando…'
+  try {
+    const body = {
+      uploadEnabled: $('do_uploadEnabled').checked,
+      autoCreateEnabled: $('do_autoEnabled').checked,
+      mappings: collectOrderMappings(),
+    }
+    const result = await api('/dropanas-orders/config', { method: 'POST', body: JSON.stringify(body) })
+    renderOrderConfig(result.config)
+    $('do_configMessage').textContent = result.config.autoCreateEnabled
+      ? 'Guardado. Solo se subirán automáticamente ventas nuevas desde este momento.'
+      : 'Configuración guardada.'
+    await loadDropanasOrderQueue()
+  } catch (err) {
+    $('do_configMessage').textContent = err.message
+  } finally {
+    button.disabled = false
+  }
+})
 $('da_ordersSearch')?.addEventListener('input', renderDropanasOrders)
 $('da_orderFilters')?.addEventListener('click', (event) => {
   const button = event.target.closest('.dp-auto-filter')
