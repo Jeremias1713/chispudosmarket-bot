@@ -279,9 +279,11 @@ function webhookOrder(payload) {
   const data = payload?.datos || {};
   const summary = data.pedido || {};
   const orderId = data.orden_id ?? summary.numero_dropanas;
-  const guide = summary.numero_guia ?? data.numero_guia;
+  const guide = summary.numero_guia ?? data.numero_guia ?? data.tracking_number ?? data.tracking;
   if (!/^\d+$/.test(String(orderId || ''))) throw new Error('Webhook Dropanas sin orden_id valido');
-  if (!String(guide || '').trim()) throw new Error('Webhook de guia Dropanas sin numero_guia');
+  if (payload?.evento === 'order.guide_generated' && !String(guide || '').trim()) {
+    throw new Error('Webhook de guia Dropanas sin numero_guia');
+  }
   const client = data.cliente || {};
   const carrierName = String(summary.transportadora || data.transportadora || '').trim().toLowerCase();
   const carrier = carrierName.includes('tealca') ? 'tealca'
@@ -295,7 +297,11 @@ function webhookOrder(payload) {
     telefono: api.normalizePhone(client.telefono),
     ciudad: '',
     producto: '',
-    estadoPedido: String(summary.estado || data.status_nuevo || data.status || '').trim(),
+    estadoPedido: String(
+      payload?.evento === 'order.delivered' ? 'Entregado'
+        : payload?.evento === 'incident.created' ? 'En novedad'
+          : summary.estado || data.status_nuevo || data.status || ''
+    ).trim(),
     totalVentaBs: '',
     bodegaDestino: '',
     carrier,
@@ -308,12 +314,12 @@ function webhookOrder(payload) {
   };
 }
 
-function queueWebhookOrder(order, now = new Date().toISOString()) {
+function queueWebhookOrder(order, now = new Date().toISOString(), kind = 'order.guide_generated') {
   const state = loadState();
   const hash = api.fingerprint(orderComparable(order));
   const change = {
     key: pendingKey('order', order.dropanasId, hash),
-    kind: 'order_guide_generated',
+    kind,
     detectedAt: now,
     order,
   };
@@ -331,7 +337,13 @@ function queueWebhookOrder(order, now = new Date().toISOString()) {
 // listado GET /ordenes, que algunas cuentas no tienen autorizado, y sigue
 // descargando el PDF oficial: nunca abre una pagina ni toma capturas.
 async function processWebhook(payload, options = {}) {
-  if (payload?.evento !== 'order.guide_generated') {
+  const supportedEvents = new Set([
+    'order.guide_generated',
+    'order.status_changed',
+    'order.delivered',
+    'incident.created',
+  ]);
+  if (!supportedEvents.has(payload?.evento)) {
     return { ok: true, ignored: true, event: payload?.evento || null };
   }
   const announced = webhookOrder(payload);
@@ -347,7 +359,10 @@ async function processWebhook(payload, options = {}) {
     const detail = await api.fetchOrder(announced.dropanasId, { ...options, config });
     order = detail.order;
     if (!order.guia) order.guia = announced.guia;
-    if (announced.guia && order.guia !== announced.guia) {
+    // El detalle puede tardar unos segundos en reflejar el webhook. El estado
+    // anunciado y firmado es la fuente de verdad para esta transición.
+    if (announced.estadoPedido) order.estadoPedido = announced.estadoPedido;
+    if (payload.evento === 'order.guide_generated' && announced.guia && order.guia !== announced.guia) {
       throw new Error('La guia del detalle no coincide con la anunciada por el webhook');
     }
   } catch (error) {
@@ -355,27 +370,29 @@ async function processWebhook(payload, options = {}) {
     // falla, se conserva como pendiente para revision, pero nunca se envia a
     // ciegas sin un telefono exacto.
     detailWarning = error.message;
-    try {
-      const captured = await require('./dropanasGuide').capture({
-        orderId: announced.dropanasId,
-        expectedTracking: announced.guia,
-        expectedCarrier: announced.carrier,
-        ...(options.captureOptions || {}),
-      });
-      order = {
-        ...announced,
-        telefono: api.normalizePhone(captured.phone),
-        cliente: captured.client || announced.cliente,
-        guideImageFilename: captured.filename,
-        guideEnrichedAt: new Date().toISOString(),
-      };
-    } catch (guideError) {
-      detailWarning = `${detailWarning}; etiqueta: ${guideError.message}`;
+    if (payload.evento === 'order.guide_generated') {
+      try {
+        const captured = await require('./dropanasGuide').capture({
+          orderId: announced.dropanasId,
+          expectedTracking: announced.guia,
+          expectedCarrier: announced.carrier,
+          ...(options.captureOptions || {}),
+        });
+        order = {
+          ...announced,
+          telefono: api.normalizePhone(captured.phone),
+          cliente: captured.client || announced.cliente,
+          guideImageFilename: captured.filename,
+          guideEnrichedAt: new Date().toISOString(),
+        };
+      } catch (guideError) {
+        detailWarning = `${detailWarning}; etiqueta: ${guideError.message}`;
+      }
     }
   }
 
   const now = new Date().toISOString();
-  const change = queueWebhookOrder(order, now);
+  const change = queueWebhookOrder(order, now, payload.evento);
   let automatic = null;
   if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true') {
     automatic = await require('./dropanasAuto').processChanges([change]);

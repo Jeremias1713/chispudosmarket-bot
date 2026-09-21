@@ -217,3 +217,39 @@ test('si falla el detalle, el webhook firmado conserva la guía sin enviarla a c
   assert.equal(pending.order.carrier, 'zoom');
   assert.equal(pending.order.telefono, '');
 });
+
+for (const scenario of [
+  { event: 'order.status_changed', announced: 'Pendiente de devolución', expected: 'Pendiente de devolución' },
+  { event: 'order.delivered', announced: '', expected: 'Entregado' },
+  { event: 'incident.created', announced: '', expected: 'En novedad' },
+]) {
+  test(`webhook ${scenario.event} conserva el estado anunciado y lo deja listo para automatizar`, async () => {
+    delete process.env.DROPANAS_AUTO_SEND_ENABLED;
+    const client = { get: async () => ({
+      headers: { 'x-dropanas-mode': 'live' },
+      data: { data: {
+        id: 880,
+        tipo_entrega: 'oficina',
+        cliente: { nombre: 'Ana', apellido: 'Abreu', telefono: '04125550880' },
+        productos: [{ nombre: 'Shilajit', cantidad: 1 }],
+        tracking: { numero_guia: 'GUIA-880', status: 'En camino' },
+      } },
+    }) };
+    const result = await monitor.processWebhook({
+      evento: scenario.event,
+      sandbox: false,
+      datos: {
+        orden_id: 880,
+        status_nuevo: scenario.announced,
+        pedido: { numero_dropanas: 880, numero_guia: 'GUIA-880', transportadora: 'Tealca' },
+      },
+    }, { config, client });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.event, scenario.event);
+    const pending = monitor.listPending().find((item) => item.order?.dropanasId === '880');
+    assert.equal(pending.kind, scenario.event);
+    assert.equal(pending.order.estadoPedido, scenario.expected);
+    assert.equal(pending.order.telefono, '584125550880');
+  });
+}
