@@ -128,6 +128,8 @@ function matchRow(row) {
         matchEvidence: 'telefono',
         phone: session.phone,
         matchedName: session.card?.nombre || session.name,
+        shippingStage: session.stage,
+        sendEligible: session.stage === 'esperando_guia',
         candidates: [candidateInfo(session)],
       };
     }
@@ -151,7 +153,14 @@ function matchRow(row) {
 
   if (exactas.length === 1) {
     const s = exactas[0];
-    return { matchType: 'exacto', phone: s.phone, matchedName: s.card?.nombre || s.name, candidates: [candidateInfo(s)] };
+    return {
+      matchType: 'exacto',
+      phone: s.phone,
+      matchedName: s.card?.nombre || s.name,
+      shippingStage: s.stage,
+      sendEligible: s.stage === 'esperando_guia',
+      candidates: [candidateInfo(s)],
+    };
   }
 
   // Dos o mas coincidencias "exactas" a la vez (mismo nombre en dos

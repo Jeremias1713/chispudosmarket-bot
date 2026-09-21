@@ -2058,8 +2058,11 @@ function matchPhotosToRows(rows, files) {
 
 function dpRowHtml(row, idx) {
   const canDownloadOriginal = Boolean(row.dropanasId && ['tealca', 'zoom', 'mrw'].includes(row.carrier))
-  const badge = row.matchType === 'exacto'
-    ? '<span class="badge">Coincide</span>'
+  const eligible = row.sendEligible === true && row.shippingStage === 'esperando_guia'
+  const badge = row.matchType === 'exacto' && eligible
+    ? '<span class="badge">Coincide · Esperando guía</span>'
+    : row.matchType === 'exacto'
+      ? `<span class="badge badge-warning">No se enviará · ${esc(row.shippingStage || 'sin etapa')}</span>`
     : row.matchType === 'ambiguo'
       ? '<span class="badge badge-warning">Revisar</span>'
       : '<span class="badge badge-danger">Sin coincidencia</span>'
@@ -2089,8 +2092,8 @@ function dpRowHtml(row, idx) {
   // "sin_match" puede tener telefono si el negocio lo eligio a mano en el
   // desplegable de arriba, asi que lo que manda es si hay telefono elegido
   // (row.phone), no el tipo de match original.
-  const disabled = !row.phone ? 'disabled' : ''
-  const checked = row.matchType === 'exacto' ? 'checked' : ''
+  const disabled = (!row.phone || !eligible) ? 'disabled' : ''
+  const checked = row.matchType === 'exacto' && eligible ? 'checked' : ''
   // El link de "ver" abre un blob local del propio archivo que ya elegiste
   // en tu computadora: no se sube a ningun lado solo por mirarlo, es nada
   // mas una vista previa antes de mandarlo de verdad.

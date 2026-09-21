@@ -131,6 +131,7 @@ test('el automatico descarga y envia solo con telefono unico exacto', async () =
       env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
       matchRows: (rows) => rows.map((row) => ({
         ...row, matchType: 'exacto', matchEvidence: 'telefono', phone: '584120000001',
+        shippingStage: 'esperando_guia', sendEligible: true,
       })),
       getSession: () => ({ stage: 'vendido', stageLocked: false, card: {} }),
       detectOrderConflict: () => null,
@@ -144,4 +145,21 @@ test('el automatico descarga y envia solo con telefono unico exacto', async () =
   assert.deepEqual(result.acknowledged, ['k2']);
   assert.equal(stored.card.guiaImageUrl, 'https://bot.example/media/guias/etiqueta.png');
   assert.equal(stored.stage, 'en_camino');
+});
+
+test('el automático no envía si el cliente ya no está esperando guía', async () => {
+  let captured = false;
+  const result = await auto.processChanges(
+    [{ key: 'k3', order: { dropanasId: '12', guia: 'ABC12', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows.map((row) => ({
+        ...row, matchType: 'exacto', matchEvidence: 'telefono', phone: '584120000002',
+        shippingStage: 'en_camino', sendEligible: false,
+      })),
+      capture: async () => { captured = true; },
+    }
+  );
+  assert.equal(result.results[0].reason, 'estado_no_esperando_guia');
+  assert.equal(captured, false);
 });

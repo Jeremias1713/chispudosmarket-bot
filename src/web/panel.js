@@ -1089,6 +1089,11 @@ router.post('/api/dropanas/confirm', async (req, res) => {
     }
     try {
       const s = getSession(phone);
+      if (!item?.confirmNewOrder && s.stage !== 'esperando_guia') {
+        results.push({ phone, guia, ok: false, error: `No se envió: el cliente está en ${s.stage || 'sin etapa'}, no en Esperando guía.` });
+        if (items.length > 1) await sleep(BULK_GUIA_DELAY_MS);
+        continue;
+      }
 
       // FASE 3 (H08, solucion intermedia): mismo chequeo que la carga de
       // guia una por una — si ya hay un pedido distinto avisado con exito,

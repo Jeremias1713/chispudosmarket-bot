@@ -54,6 +54,10 @@ async function processChanges(changes, overrides = {}) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'requiere_revision' });
         continue;
       }
+      if (!row.sendEligible || row.shippingStage !== 'esperando_guia') {
+        results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'estado_no_esperando_guia' });
+        continue;
+      }
 
       try {
         const session = deps.getSession(row.phone);
