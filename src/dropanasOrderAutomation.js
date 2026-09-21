@@ -246,8 +246,26 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
     const current = settings();
     const productIds = [...new Set(current.mappings.filter((m) => m.enabled).map((m) => Number(m.productId)).filter(Boolean))];
     const warehouseIds = [...new Set(current.mappings.filter((m) => m.enabled).map((m) => Number(m.warehouseId)).filter(Boolean))];
-    const [products, offices, inventoryResults] = await Promise.all([
-      Promise.all(productIds.map(async (id) => apiGet(`productos/${id}`, config))),
+    const productPromise = (async () => {
+      try {
+        return {
+          rows: await Promise.all(productIds.map(async (id) => apiGet(`productos/${id}`, config))),
+          warning: null,
+        };
+      } catch (detailError) {
+        try {
+          const catalog = await dropanasApi.fetchAll('productos', { config });
+          return { rows: catalog.rows.filter((row) => productIds.includes(Number(row?.id))), warning: null };
+        } catch (catalogError) {
+          return {
+            rows: [],
+            warning: `DroPanas no permite validar el catálogo con esta clave (${detailError.message}; ${catalogError.message}). Los IDs configurados se comprobarán al crear el pedido pendiente.`,
+          };
+        }
+      }
+    })();
+    const [productResult, offices, inventoryResults] = await Promise.all([
+      productPromise,
       apiGet('oficinas', config, { carrier: 'tealca' }),
       Promise.all(warehouseIds.map(async (id) => {
         try {
@@ -257,7 +275,12 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
         }
       })),
     ]);
-    const value = { products, offices: Array.isArray(offices) ? offices : [], inventories: inventoryResults };
+    const value = {
+      products: productResult.rows,
+      productWarning: productResult.warning,
+      offices: Array.isArray(offices) ? offices : [],
+      inventories: inventoryResults,
+    };
     cache = { at: Date.now(), value };
     return value;
   })();
@@ -285,9 +308,10 @@ async function prepareDraft(phone, session = getSession(phone)) {
   if (draft.current?.id || draft.items.some((item) => !item.mapping) || !draft.agency) return draft;
   try {
     const live = await snapshot();
+    if (live.productWarning) draft.warnings.push(live.productWarning);
     const officialItems = draft.items.map((item) => {
       const product = live.products.find((row) => Number(row?.id) === Number(item.mapping.productId));
-      if (!product) draft.issues.push(`${item.mapping.label}: el producto ${item.mapping.productId} ya no existe en DroPanas.`);
+      if (!product && !live.productWarning) draft.issues.push(`${item.mapping.label}: el producto ${item.mapping.productId} ya no existe en DroPanas.`);
       const inventory = live.inventories.find((row) => Number(row.warehouseId) === Number(item.mapping.warehouseId));
       let stock = null;
       if (Array.isArray(inventory?.rows)) {
