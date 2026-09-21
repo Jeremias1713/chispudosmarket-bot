@@ -208,11 +208,13 @@ function orderDraftRow(draft) {
   }).join(' + ')
   const detail = [itemDetail || draft.productName || 'Producto pendiente', draft.total ? `Total ${Number(draft.total).toLocaleString('es-VE')} Bs` : null, draft.agency || null].filter(Boolean).join(' · ')
   const issues = (draft.issues || []).filter((issue) => !created || !issue.startsWith('Ya fue subido'))
+  const warnings = draft.warnings || []
   return `<div class="dp-order-draft">
     <div class="dp-auto-event-body">
       <div class="dp-auto-event-title"><strong>${esc(draft.name || `+${draft.phone}`)}</strong>${badge}</div>
       <div class="dp-auto-event-meta">${esc(detail)}</div>
       ${issues.length ? `<small class="is-missing">${issues.map(esc).join(' ')}</small>` : '<small>Se creará pendiente de aprobación.</small>'}
+      ${warnings.length ? `<small class="is-warning">${warnings.map(esc).join(' ')}</small>` : ''}
     </div>
     <div class="dp-order-draft-actions">
       <button class="btn do-open-chat" data-phone="${esc(draft.phone)}" type="button">Ver chat</button>

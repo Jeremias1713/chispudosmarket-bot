@@ -2167,6 +2167,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 .dp-order-draft:last-child { border-bottom: 0; }
 .dp-order-draft-actions { display: flex; gap: var(--s2); flex-shrink: 0; }
 .dp-order-draft .is-missing { color: var(--danger, #b42318); }
+.dp-order-draft .is-warning { color: var(--warning-strong, #9a6700); }
 @media (max-width: 1100px) {
   .dp-order-mapping { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dp-order-draft { align-items: flex-start; flex-direction: column; }

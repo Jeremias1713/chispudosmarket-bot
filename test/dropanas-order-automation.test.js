@@ -108,6 +108,12 @@ test('arma un solo pedido con varios productos y precios independientes', () => 
   assert.equal(payload.requiere_aprobacion, true);
 });
 
+test('un borrador base no inventa advertencias antes de consultar DroPanas', () => {
+  const draft = automation.baseDraft('584227167341', soldSession());
+  assert.equal(draft.warnings, undefined);
+  assert.deepEqual(draft.issues, []);
+});
+
 test('incluye Shilajit Resina 20448 en la configuración inicial', () => {
   const resin = automation.defaultMappings().find((row) => row.productId === 20448);
   assert.ok(resin);

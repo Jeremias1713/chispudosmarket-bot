@@ -222,10 +222,17 @@ function baseDraft(phone, session, config = settings()) {
 }
 
 async function apiGet(endpoint, config, params) {
-  const response = await axios.get(`${config.baseUrl}/${endpoint}`, {
-    headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' }, params,
-    timeout: config.timeoutMs, validateStatus: (status) => status >= 200 && status < 300,
-  });
+  let response;
+  try {
+    response = await axios.get(`${config.baseUrl}/${endpoint}`, {
+      headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' }, params,
+      timeout: config.timeoutMs, validateStatus: (status) => status >= 200 && status < 300,
+    });
+  } catch (error) {
+    const status = error.response?.status;
+    const detail = error.response?.data?.message || error.response?.data?.error || error.response?.data?.code;
+    throw new Error(`GET /${endpoint}: ${status || error.code || 'error'}${detail ? ` — ${detail}` : ''}`);
+  }
   const mode = String(response.headers['x-dropanas-mode'] || '').toLowerCase();
   if (mode !== config.tokenMode) throw new Error(`Modo DroPanas inesperado: ${mode || 'sin identificar'}`);
   return response.data?.data ?? response.data;
@@ -239,12 +246,18 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
     const current = settings();
     const productIds = [...new Set(current.mappings.filter((m) => m.enabled).map((m) => Number(m.productId)).filter(Boolean))];
     const warehouseIds = [...new Set(current.mappings.filter((m) => m.enabled).map((m) => Number(m.warehouseId)).filter(Boolean))];
-    const [products, offices, inventories] = await Promise.all([
+    const [products, offices, inventoryResults] = await Promise.all([
       Promise.all(productIds.map(async (id) => apiGet(`productos/${id}`, config))),
       apiGet('oficinas', config, { carrier: 'tealca' }),
-      Promise.all(warehouseIds.map(async (id) => ({ warehouseId: id, rows: await apiGet(`bodegas/${id}/inventario`, config) }))),
+      Promise.all(warehouseIds.map(async (id) => {
+        try {
+          return { warehouseId: id, rows: await apiGet(`bodegas/${id}/inventario`, config), warning: null };
+        } catch (error) {
+          return { warehouseId: id, rows: null, warning: error.message };
+        }
+      })),
     ]);
-    const value = { products, offices: Array.isArray(offices) ? offices : [], inventories };
+    const value = { products, offices: Array.isArray(offices) ? offices : [], inventories: inventoryResults };
     cache = { at: Date.now(), value };
     return value;
   })();
@@ -268,6 +281,7 @@ function resolveOffice(label, offices) {
 
 async function prepareDraft(phone, session = getSession(phone)) {
   const draft = baseDraft(phone, session);
+  draft.warnings = [];
   if (draft.current?.id || draft.items.some((item) => !item.mapping) || !draft.agency) return draft;
   try {
     const live = await snapshot();
@@ -275,9 +289,15 @@ async function prepareDraft(phone, session = getSession(phone)) {
       const product = live.products.find((row) => Number(row?.id) === Number(item.mapping.productId));
       if (!product) draft.issues.push(`${item.mapping.label}: el producto ${item.mapping.productId} ya no existe en DroPanas.`);
       const inventory = live.inventories.find((row) => Number(row.warehouseId) === Number(item.mapping.warehouseId));
-      const stock = (inventory?.rows || []).filter((row) => Number(row?.producto?.id) === Number(item.mapping.productId))
-        .reduce((sum, row) => sum + Number(row.cantidad || 0), 0);
-      if (stock < item.quantity) draft.issues.push(`${item.mapping.label}: inventario insuficiente; quedan ${stock}.`);
+      let stock = null;
+      if (Array.isArray(inventory?.rows)) {
+        stock = inventory.rows.filter((row) => Number(row?.producto?.id) === Number(item.mapping.productId))
+          .reduce((sum, row) => sum + Number(row.cantidad || 0), 0);
+        if (stock < item.quantity) draft.issues.push(`${item.mapping.label}: inventario insuficiente; quedan ${stock}.`);
+      } else {
+        const warning = 'DroPanas no permite consultar el inventario con esta clave; el stock se comprobará al aprobar el pedido.';
+        if (!draft.warnings.includes(warning)) draft.warnings.push(warning);
+      }
       return { ...item, product, stock };
     });
     const office = resolveOffice(draft.agency, live.offices);
