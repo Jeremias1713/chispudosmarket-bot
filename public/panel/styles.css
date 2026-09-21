@@ -416,6 +416,8 @@ code {
 .badge[data-stage="en_camino"]         { background: var(--stage-en-camino-soft);         color: var(--stage-en-camino-strong); }
 .badge[data-stage="entregado"]         { background: var(--stage-entregado-soft);         color: var(--stage-entregado-strong); }
 .badge[data-stage="devolucion"]        { background: var(--stage-devolucion-soft);        color: var(--stage-devolucion-strong); }
+.badge[data-stage="novedad"]           { background: #FEF3C7; color: #92400E; }
+.badge[data-stage="pendiente_devolucion"] { background: #FFE4E6; color: #9F1239; }
 .badge[data-stage="necesita_atencion"] { background: var(--stage-necesita-atencion-soft); color: var(--stage-necesita-atencion-strong); }
 .badge[data-stage="perdido"]           { background: var(--stage-perdido-soft);           color: var(--stage-perdido-strong); }
 

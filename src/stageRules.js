@@ -20,7 +20,7 @@
 // conversion), aunque haya pasado por "vendido"/"entregado" antes de
 // devolverse. Sigue existiendo como etapa (classifier.js), solo que a partir
 // de ahi las metricas ya no lo suman.
-const SOLD_STAGES = ['vendido', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'entregado'];
+const SOLD_STAGES = ['vendido', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'novedad', 'pendiente_devolucion', 'entregado'];
 
 // Orden logistico real de un pedido ya cerrado, de "recien cerrado" a
 // "entregado". Un rango mayor siempre significa "mas avanzado en el
@@ -37,6 +37,8 @@ const LOGISTIC_RANK = {
   tienda_maracaibo: 1,
   en_camino: 2,
   esperando_retiro: 3,
+  novedad: 3,
+  pendiente_devolucion: 3,
   entregado: 4,
 };
 

@@ -41,6 +41,8 @@ const STAGES = [
   'tienda_maracaibo',
   'esperando_retiro',
   'en_camino',
+  'novedad',
+  'pendiente_devolucion',
   'entregado',
   // "devolucion" es para un pedido que YA se habia cerrado/entregado pero el
   // cliente lo devolvio (o el negocio confirmo que se va a devolver/reembolsar).

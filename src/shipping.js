@@ -230,6 +230,57 @@ async function maybeNotifyArrival(phone, session) {
   return { sent: true, viaTemplate: !abierta };
 }
 
+async function notifyStatusTemplate(phone, session, options) {
+  const s = session || getSession(phone);
+  if (s[options.marker]) return { sent: false, reason: 'ya_avisado' };
+  const values = placeholderValues(s);
+  const params = [values.nombre, values.producto];
+  try {
+    const { wamid, snapshot } = await sendTemplateWithSnapshot({
+      to: phone,
+      templateName: options.templateName,
+      languageCode: options.languageCode || 'es',
+      values: params,
+    });
+    appendMessage(phone, 'human', `[plantilla automatica] ${options.templateName}`, {
+      template: { name: options.templateName, origin: 'dropanas', params, snapshot, wamid, status: 'sent' },
+    });
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
+    console.error(`No se pudo mandar ${options.templateName} a`, phone, detail);
+    return { sent: false, reason: 'error', error: detail };
+  }
+  updateSession(phone, { [options.marker]: new Date().toISOString() });
+  return { sent: true, viaTemplate: true };
+}
+
+function maybeNotifyDelivered(phone, session) {
+  const settings = getSettings();
+  return notifyStatusTemplate(phone, session, {
+    marker: 'deliveredNotifiedAt',
+    templateName: settings.deliveredTemplateName || 'pedido_entregado_gracias',
+    languageCode: settings.deliveredTemplateLanguage || 'es',
+  });
+}
+
+function maybeNotifyNovelty(phone, session) {
+  const settings = getSettings();
+  return notifyStatusTemplate(phone, session, {
+    marker: 'noveltyNotifiedAt',
+    templateName: settings.noveltyTemplateName || 'novedad_no_contactado',
+    languageCode: settings.noveltyTemplateLanguage || 'es',
+  });
+}
+
+function maybeNotifyReturnPending(phone, session) {
+  const settings = getSettings();
+  return notifyStatusTemplate(phone, session, {
+    marker: 'returnPendingNotifiedAt',
+    templateName: settings.returnPendingTemplateName || 'pedido_pendiente_devolucion',
+    languageCode: settings.returnPendingTemplateLanguage || 'es',
+  });
+}
+
 // Manda una prueba REAL de la plantilla (siempre la plantilla, no el texto
 // libre, porque es la que tiene mas variables y mas riesgo de salir mal si
 // falta un dato) a CUALQUIER numero que se le pase — sin leer ni tocar
@@ -282,6 +333,9 @@ async function testSend(phone, datos) {
 module.exports = {
   maybeNotifyShipping,
   maybeNotifyArrival,
+  maybeNotifyDelivered,
+  maybeNotifyNovelty,
+  maybeNotifyReturnPending,
   testSend,
   // FASE 3 (H12): expuestas para poder probar directo que se prioriza el
   // monto real de la ficha sobre el precio de catalogo.

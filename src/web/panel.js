@@ -54,6 +54,8 @@ const STAGE_LABELS = {
   tienda_maracaibo: 'Tienda Maracaibo',
   esperando_retiro: 'Esperando retiro',
   en_camino: 'En camino',
+  novedad: 'Novedad',
+  pendiente_devolucion: 'Pendiente de devolución',
   entregado: 'Entregado',
   devolucion: 'Devolución',
   necesita_atencion: 'Necesita atención',
@@ -1423,6 +1425,12 @@ router.post('/api/settings', (req, res) => {
     'shippingFreeText',
     'pickupTemplateName',
     'pickupTemplateLanguage',
+    'deliveredTemplateName',
+    'deliveredTemplateLanguage',
+    'noveltyTemplateName',
+    'noveltyTemplateLanguage',
+    'returnPendingTemplateName',
+    'returnPendingTemplateLanguage',
   ];
   for (const f of fields) if (body[f] != null) patch[f] = String(body[f]);
   if (body.welcomeImageIds !== undefined) {

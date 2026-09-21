@@ -169,3 +169,28 @@ test('lo mismo para el aviso de llegada: un fallo no marca arrivalNotifiedAt', a
   const updated = getSession(phone);
   assert.ok(!updated.arrivalNotifiedAt, 'BUG si esto quedo marcado: un envio fallido no debe registrarse como avisado');
 });
+
+test('entregado, novedad y pendiente de devolución usan plantillas de dos variables y marcas separadas', async () => {
+  const calls = [];
+  whatsapp.sendTemplate = async (to, name, language, values) => {
+    calls.push({ to, name, language, values });
+    return { wamid: `wamid.${name}` };
+  };
+  metaTemplates._setCacheForTests([
+    ...[PLANTILLA_GUIA, PLANTILLA_LLEGADA],
+    ...['pedido_entregado_gracias', 'novedad_no_contactado', 'pedido_pendiente_devolucion'].map((name) => ({
+      name, language: 'es', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hola {{1}}, pedido {{2}}.' }],
+    })),
+  ]);
+  const phone = seedSesionCerrada();
+  await shipping.maybeNotifyDelivered(phone, getSession(phone));
+  await shipping.maybeNotifyNovelty(phone, getSession(phone));
+  await shipping.maybeNotifyReturnPending(phone, getSession(phone));
+
+  assert.deepEqual(calls.map((call) => call.name), [
+    'pedido_entregado_gracias', 'novedad_no_contactado', 'pedido_pendiente_devolucion',
+  ]);
+  assert.ok(calls.every((call) => call.values.length === 2));
+  const updated = getSession(phone);
+  assert.ok(updated.deliveredNotifiedAt && updated.noveltyNotifiedAt && updated.returnPendingNotifiedAt);
+});

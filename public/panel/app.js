@@ -2339,6 +2339,8 @@ let sgItems = []
 const SG_ETAPA_LABEL = {
   esperando_retiro: 'Esperando retiro',
   en_camino: 'En camino',
+  novedad: 'Novedad',
+  pendiente_devolucion: 'Pendiente de devolución',
   entregado: 'Entregado',
   devolucion: 'Devolución',
 }

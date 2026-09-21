@@ -229,3 +229,46 @@ test('un aviso de llegada ya registrado no se duplica y termina de actualizar la
   assert.equal(updated.stage, 'esperando_retiro');
   assert.deepEqual(result.acknowledged, ['k7']);
 });
+
+for (const scenario of [
+  { status: 'Entregado', stage: 'entregado', notify: 'maybeNotifyDelivered' },
+  { status: 'En novedad', stage: 'novedad', notify: 'maybeNotifyNovelty' },
+  { status: 'Pendiente de devolución', stage: 'pendiente_devolucion', notify: 'maybeNotifyReturnPending' },
+]) {
+  test(`${scenario.status} envía su plantilla y después actualiza la etapa`, async () => {
+    let notified = 0;
+    let updated = null;
+    const overrides = {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [{ phone: '584120000007', stage: 'en_camino', card: { guia: 'ABC17' } }],
+      updateSession: (_phone, patch) => { updated = patch; },
+    };
+    overrides[scenario.notify] = async () => { notified++; return { sent: true, viaTemplate: true }; };
+    const result = await auto.processChanges(
+      [{ key: `k-${scenario.stage}`, order: { dropanasId: '17', guia: 'ABC17', telefono: '04120000007', estadoPedido: scenario.status, carrier: 'tealca' } }],
+      overrides
+    );
+    assert.equal(notified, 1);
+    assert.equal(updated.stage, scenario.stage);
+    assert.equal(result.results[0].sent, true);
+    assert.equal(result.acknowledged.length, 1);
+  });
+}
+
+test('si falla una plantilla de estado no cambia la etapa ni confirma el evento', async () => {
+  let updated = false;
+  const result = await auto.processChanges(
+    [{ key: 'k8', order: { dropanasId: '18', guia: 'ABC18', telefono: '04120000008', estadoPedido: 'Entregado', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [{ phone: '584120000008', stage: 'esperando_retiro', card: { guia: 'ABC18' } }],
+      maybeNotifyDelivered: async () => ({ sent: false, reason: 'error', error: 'plantilla no aprobada' }),
+      updateSession: () => { updated = true; },
+    }
+  );
+  assert.equal(updated, false);
+  assert.equal(result.results[0].notice.reason, 'error');
+  assert.deepEqual(result.acknowledged, []);
+});

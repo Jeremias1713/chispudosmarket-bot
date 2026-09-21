@@ -39,6 +39,16 @@ function isArrival(row) {
   return ['en oficina', 'en agencia', 'listo para retirar'].includes(foldStatus(row?.estadoPedido));
 }
 
+function statusAction(row) {
+  const value = foldStatus(row?.estadoPedido);
+  if (value === 'entregado') return { stage: 'entregado', notify: 'maybeNotifyDelivered' };
+  if (['en novedad', 'novedad'].includes(value)) return { stage: 'novedad', notify: 'maybeNotifyNovelty' };
+  if (['pendiente devolucion', 'pendiente de devolucion'].includes(value)) {
+    return { stage: 'pendiente_devolucion', notify: 'maybeNotifyReturnPending' };
+  }
+  return null;
+}
+
 function matchArrivalByPhone(row, sessions) {
   const phone = require('./dropanasApi').normalizePhone(row?.telefono);
   if (!phone) return { reason: 'requiere_revision' };
@@ -65,6 +75,9 @@ async function processChanges(changes, overrides = {}) {
       buildGuiaPatch,
       maybeNotifyShipping: shipping.maybeNotifyShipping,
       maybeNotifyArrival: shipping.maybeNotifyArrival,
+      maybeNotifyDelivered: shipping.maybeNotifyDelivered,
+      maybeNotifyNovelty: shipping.maybeNotifyNovelty,
+      maybeNotifyReturnPending: shipping.maybeNotifyReturnPending,
       listSessions,
       ...overrides,
     };
@@ -75,6 +88,39 @@ async function processChanges(changes, overrides = {}) {
       .map((change) => ({ ...change.order, _pendingKey: change.key }));
 
     for (const row of deps.matchRows(rows)) {
+      const action = statusAction(row);
+      if (action) {
+        const matched = matchArrivalByPhone(row, deps.listSessions());
+        if (!matched.session) {
+          results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
+          continue;
+        }
+        const { phone, session } = matched;
+        if (!['en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion'].includes(session.stage)) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_logistico_invalido' });
+          continue;
+        }
+        if (!session.card?.guia || (row.guia && String(session.card.guia) !== String(row.guia))) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'guia_no_coincide' });
+          continue;
+        }
+        try {
+          const notice = await deps[action.notify](phone, session);
+          if (notice?.sent || notice?.reason === 'ya_avisado') {
+            deps.updateSession(phone, {
+              stage: action.stage,
+              stageLocked: true,
+              stageReason: `DroPanas: ${row.estadoPedido}`,
+            });
+            if (row._pendingKey) acknowledged.push(row._pendingKey);
+          }
+          results.push({ orderId: row.dropanasId, phone, stage: action.stage, sent: Boolean(notice?.sent), notice });
+        } catch (error) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'error', error: error.message });
+        }
+        continue;
+      }
+
       if (isArrival(row)) {
         const matched = matchArrivalByPhone(row, deps.listSessions());
         if (!matched.session) {

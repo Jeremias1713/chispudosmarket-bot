@@ -97,6 +97,12 @@ const DEFAULTS = {
   // se puede cambiar aca si el negocio la vuelve a aprobar con otro nombre.
   pickupTemplateName: null,
   pickupTemplateLanguage: 'es',
+  deliveredTemplateName: 'pedido_entregado_gracias',
+  deliveredTemplateLanguage: 'es',
+  noveltyTemplateName: 'novedad_no_contactado',
+  noveltyTemplateLanguage: 'es',
+  returnPendingTemplateName: 'pedido_pendiente_devolucion',
+  returnPendingTemplateLanguage: 'es',
   // Numero de WhatsApp (con codigo de pais, sin "+", ej. 584121234567) al que
   // se le manda un aviso de texto libre cada vez que una conversacion pasa a
   // "vendido" (ver notifySale en push.js). null/vacio = no se manda ningun

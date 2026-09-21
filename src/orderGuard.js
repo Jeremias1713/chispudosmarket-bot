@@ -92,6 +92,9 @@ function buildGuiaPatch({ session, guia, agencia, guiaImageUrl, isNewOrder }) {
   if (isNewOrder) {
     patch.shippingNotifiedAt = null;
     patch.arrivalNotifiedAt = null;
+    patch.deliveredNotifiedAt = null;
+    patch.noveltyNotifiedAt = null;
+    patch.returnPendingNotifiedAt = null;
     patch.soldAt = new Date().toISOString();
     patch.orderClosed = false;
   }
