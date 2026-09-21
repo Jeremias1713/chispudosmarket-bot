@@ -141,13 +141,17 @@ con retiro en agencia.
 - telefono: telefono de contacto SOLO si lo escribio explicitamente (el numero desde el que
   escribe no cuenta), si no null.
 - cedula: numero de cedula si lo escribio explicitamente, si no null.
-- producto: que producto pidio, aunque no haya cerrado el pedido, si no null.
+- producto: resumen legible del producto o productos que pidió, si no null.
+- productos: SOLO los productos del pedido confirmado más reciente, como una lista de objetos con
+  nombre y cantidad. Incluye todos si pidió varios productos distintos. No incluyas productos que
+  solo aparecieron como opciones, preguntas o promociones. Si una cantidad no fue confirmada usa
+  null; no la inventes. Si todavía no existe un pedido concreto usa [].
   - notas: cualquier dato relevante para la venta que no entre en los otros campos, si no null.
 
   Copia lo que dijo el cliente, no lo inventes ni lo completes. Un dato que no aparece va en null.
 
   Devolve SOLO un JSON con esta forma exacta, nada de texto extra:
-{"etapa": "...", "razon": "...", "card": {"nombre": null, "ciudad": null, "telefono": null, "cedula": null, "producto": null, "notas": null}}`;
+{"etapa": "...", "razon": "...", "card": {"nombre": null, "ciudad": null, "telefono": null, "cedula": null, "producto": null, "productos": [{"nombre": "Shilajit Viking", "cantidad": 1}], "notas": null}}`;
 
 async function classifyConversation(history) {
   const transcript = (history || [])
@@ -168,6 +172,12 @@ async function classifyConversation(history) {
     const parsed = JSON.parse(completion.choices[0].message.content);
     const etapa = STAGES.includes(parsed.etapa) ? parsed.etapa : 'nuevo';
     const card = parsed.card || {};
+    const productos = (Array.isArray(card.productos) ? card.productos : [])
+      .map((item) => ({
+        nombre: String(item?.nombre || item?.producto || '').trim(),
+        cantidad: Number.isInteger(Number(item?.cantidad)) && Number(item.cantidad) > 0 ? Number(item.cantidad) : null,
+      }))
+      .filter((item) => item.nombre);
 
     return {
       stage: etapa,
@@ -183,6 +193,10 @@ async function classifyConversation(history) {
         // Viking"...) no queden separadas en Metricas > Productos mas
         // vendidos.
         producto: card.producto ? normalizeProductName(card.producto) : null,
+        // Se conserva además la lista estructurada y sin normalizar. La cola
+        // de DroPanas la cruza contra alias configurables y bloquea cualquier
+        // nombre ambiguo en lugar de adivinar un producto.
+        productos: productos.length ? productos : null,
         notas: card.notas || null,
 },
 };

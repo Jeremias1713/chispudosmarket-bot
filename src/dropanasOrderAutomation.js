@@ -20,17 +20,25 @@ function defaultMappings() {
   return [
     { id: 'turkesterone', label: 'Turkesterone', aliases: ['turkesterone'], productId: 20702, warehouseId: 1, prices: { 1: 39900 }, enabled: true },
     { id: 'shilajit', label: 'Shilajit Viking', aliases: ['shilajit', 'shilajit viking'], productId: 20343, warehouseId: 1, prices: { 1: 36900, 2: 51900 }, enabled: true },
+    { id: 'shilajit-resina', label: 'Shilajit Resina', aliases: ['shilajit resina', 'shilajit de resina', 'resina shilajit'], productId: 20448, warehouseId: 1, prices: { 1: 36900, 2: 51900 }, enabled: true },
   ];
 }
 
 function settings() {
   const current = settingsStore.getSettings();
+  const defaults = defaultMappings();
+  const stored = Array.isArray(current.dropanasOrderMappings) ? current.dropanasOrderMappings : [];
+  // Migración puntual: si ya se había guardado la configuración anterior,
+  // incorpora Resina sin borrar precios o alias personalizados del operador.
+  const resin = defaults.find((row) => row.id === 'shilajit-resina');
+  const mappings = stored.length
+    ? [...stored, ...(stored.some((row) => row.id === resin.id || Number(row.productId) === resin.productId) ? [] : [resin])]
+    : defaults;
   return {
     uploadEnabled: Boolean(current.dropanasOrderUploadEnabled),
     autoCreateEnabled: Boolean(current.dropanasOrderAutoCreateEnabled),
     activatedAt: current.dropanasOrderActivatedAt || null,
-    mappings: Array.isArray(current.dropanasOrderMappings) && current.dropanasOrderMappings.length
-      ? current.dropanasOrderMappings : defaultMappings(),
+    mappings,
   };
 }
 
@@ -104,12 +112,20 @@ function localPhone(value) {
 function findMapping(productName, mappings) {
   const value = fold(productName);
   if (!value) return null;
-  const matches = mappings.filter((row) => row.enabled && [row.label, ...(row.aliases || [])]
-    .some((alias) => {
+  const matches = mappings.filter((row) => row.enabled).map((row) => {
+    const score = Math.max(0, ...[row.label, ...(row.aliases || [])]
+      .map((alias) => {
       const normalized = fold(alias);
-      return normalized && (value === normalized || value.includes(normalized) || normalized.includes(value));
+      if (!normalized) return 0;
+      if (value === normalized) return 10000 + normalized.length;
+      if (value.includes(normalized)) return normalized.length;
+      if (normalized.includes(value)) return Math.max(1, value.length - 1);
+      return 0;
     }));
-  return matches.length === 1 ? matches[0] : null;
+    return { row, score };
+  }).filter((candidate) => candidate.score > 0).sort((a, b) => b.score - a.score);
+  if (!matches.length || (matches[1] && matches[0].score === matches[1].score)) return null;
+  return matches[0].row;
 }
 
 function historyOrderFacts(history = []) {
@@ -157,15 +173,27 @@ function baseDraft(phone, session, config = settings()) {
   const historyFacts = historyOrderFacts(session.history);
   const name = card.nombre || session.name || '';
   const identity = splitName(name);
-  const productName = order.product || card.producto || '';
-  const mapping = findMapping(productName, config.mappings);
-  const quantity = Number(order.quantity || historyFacts.quantity || 0);
-  const mappedTotal = mapping?.prices?.[quantity];
-  // El precio estructurado del mapeo es el respaldo seguro. No se toma un
-  // monto suelto del historial porque los mensajes promocionales suelen
-  // mostrar varios precios a la vez y elegir "el último" sería peligroso.
-  const rememberedTotal = Number(order.total ?? card.monto);
-  const total = Number.isFinite(rememberedTotal) && rememberedTotal > 0 ? rememberedTotal : Number(mappedTotal || 0);
+  const structuredItems = Array.isArray(order.items) && order.items.length
+    ? order.items
+    : Array.isArray(card.productos) && card.productos.length ? card.productos : null;
+  const rawItems = structuredItems || [{
+    product: order.product || card.producto || '',
+    quantity: order.quantity || historyFacts.quantity,
+    total: order.total ?? card.monto,
+  }];
+  const items = rawItems.map((row) => {
+    const productName = String(row?.product || row?.producto || row?.nombre || '').trim();
+    const mapping = findMapping(productName, config.mappings);
+    const quantity = Number(row?.quantity ?? row?.cantidad ?? 0);
+    const explicitTotal = Number(row?.total ?? row?.monto);
+    const mappedTotal = Number(mapping?.prices?.[quantity] || 0);
+    const total = Number.isFinite(explicitTotal) && explicitTotal > 0 ? explicitTotal : mappedTotal;
+    return { productName, mapping, quantity, total };
+  });
+  const productName = items.map((item) => item.productName).filter(Boolean).join(' + ');
+  const mapping = items.length === 1 ? items[0].mapping : null;
+  const quantity = items.length === 1 ? items[0].quantity : items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+  const total = items.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
   const agency = String(order.agency || card.agenciaConfirmadaEnChat || card.agencia || historyFacts.agency || '').trim();
   const issues = [];
   if (session.orderClosed !== true && !SOLD_STAGES.includes(session.stage || '')) {
@@ -174,14 +202,20 @@ function baseDraft(phone, session, config = settings()) {
   if (!identity) issues.push('Falta nombre y apellido.');
   if (!String(card.cedula || '').replace(/\D/g, '').match(/^\d{6,9}$/)) issues.push('Falta una cédula válida.');
   if (!localPhone(card.telefono || phone)) issues.push('Falta un teléfono venezolano válido.');
-  if (!mapping) issues.push('El producto no tiene un mapeo único a DroPanas.');
-  if (!Number.isInteger(quantity) || quantity < 1) issues.push('Falta confirmar la cantidad.');
-  if (!total) issues.push('Falta configurar el precio para esa cantidad.');
+  if (!items.length) issues.push('El pedido no contiene productos.');
+  for (const item of items) {
+    const label = item.productName || 'Producto sin nombre';
+    if (!item.mapping) issues.push(`${label}: no tiene un mapeo único a DroPanas.`);
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) issues.push(`${label}: falta confirmar la cantidad.`);
+    if (!item.total) issues.push(`${label}: falta configurar el precio para esa cantidad.`);
+  }
+  const warehouses = new Set(items.map((item) => item.mapping?.warehouseId).filter(Boolean));
+  if (warehouses.size > 1) issues.push('Todos los productos del pedido deben salir de la misma bodega.');
   if (!agency) issues.push('Falta confirmar una oficina de retiro.');
   if (session.dropanasOrder?.id) issues.push(`Ya fue subido como pedido #${session.dropanasOrder.id}.`);
   return {
     phone, name, identity, cedula: String(card.cedula || '').replace(/\D/g, ''),
-    customerPhone: localPhone(card.telefono || phone), productName, mapping,
+    customerPhone: localPhone(card.telefono || phone), productName, mapping, items,
     quantity, total, agency, soldAt: session.soldAt || null,
     current: session.dropanasOrder || null, issues,
   };
@@ -234,18 +268,21 @@ function resolveOffice(label, offices) {
 
 async function prepareDraft(phone, session = getSession(phone)) {
   const draft = baseDraft(phone, session);
-  if (draft.current?.id || !draft.mapping || !draft.agency) return draft;
+  if (draft.current?.id || draft.items.some((item) => !item.mapping) || !draft.agency) return draft;
   try {
     const live = await snapshot();
-    const product = live.products.find((item) => Number(item?.id) === Number(draft.mapping.productId));
-    if (!product) draft.issues.push(`El producto ${draft.mapping.productId} ya no existe en DroPanas.`);
-    const inventory = live.inventories.find((item) => Number(item.warehouseId) === Number(draft.mapping.warehouseId));
-    const stock = (inventory?.rows || []).filter((row) => Number(row?.producto?.id) === Number(draft.mapping.productId))
-      .reduce((sum, row) => sum + Number(row.cantidad || 0), 0);
-    if (stock < draft.quantity) draft.issues.push(`Inventario insuficiente: quedan ${stock}.`);
+    const officialItems = draft.items.map((item) => {
+      const product = live.products.find((row) => Number(row?.id) === Number(item.mapping.productId));
+      if (!product) draft.issues.push(`${item.mapping.label}: el producto ${item.mapping.productId} ya no existe en DroPanas.`);
+      const inventory = live.inventories.find((row) => Number(row.warehouseId) === Number(item.mapping.warehouseId));
+      const stock = (inventory?.rows || []).filter((row) => Number(row?.producto?.id) === Number(item.mapping.productId))
+        .reduce((sum, row) => sum + Number(row.cantidad || 0), 0);
+      if (stock < item.quantity) draft.issues.push(`${item.mapping.label}: inventario insuficiente; quedan ${stock}.`);
+      return { ...item, product, stock };
+    });
     const office = resolveOffice(draft.agency, live.offices);
     if (!office) draft.issues.push('La oficina mencionada no coincide de forma única con el catálogo oficial de Tealca.');
-    draft.official = { product, stock, office };
+    draft.official = { items: officialItems, office };
   } catch (error) {
     draft.issues.push(`No se pudo validar con DroPanas: ${error.message}`);
   }
@@ -263,6 +300,27 @@ function externalReference(draft) {
   return `CHISPUDOS-${String(draft.phone).slice(-10)}-${stamp}`.slice(0, 80);
 }
 
+function buildPayload(draft, reference) {
+  const office = draft.official.office;
+  return {
+    external_reference: reference,
+    cliente: { ...draft.identity, telefono: draft.customerPhone, documento: { tipo: 'V', numero: draft.cedula } },
+    direccion: {
+      state_id: Number(office.state_id), city_id: Number(office.city_id),
+      direccion: office.direccion || office.nombre, referencia: `Retiro en oficina Tealca ${office.nombre}`,
+    },
+    productos: draft.items.map((item) => ({
+      producto_id: Number(item.mapping.productId),
+      cantidad: item.quantity,
+      precio_venta_ves: item.total / item.quantity,
+    })),
+    bodega_origen_id: Number(draft.items[0].mapping.warehouseId),
+    tipo_entrega: 'oficina', shipping_type_id: 3, oficina_id: Number(office.id),
+    tipo_pago: 'con_recaudo', requiere_aprobacion: true,
+    nota_cliente: 'Pedido creado por ChispudosMarket. Revisar antes de aprobar.',
+  };
+}
+
 async function createForPhone(phone, { automatic = false } = {}) {
   if (locks.has(phone)) throw new Error('Ese pedido ya se está procesando.');
   locks.add(phone);
@@ -274,7 +332,6 @@ async function createForPhone(phone, { automatic = false } = {}) {
     const draft = await prepareDraft(phone, session);
     if (draft.current?.id) return { ok: true, duplicate: true, order: draft.current };
     if (draft.issues.length) throw new Error(draft.issues.join(' '));
-    const office = draft.official.office;
     const persisted = session.dropanasOrder || {};
     const idempotencyKey = persisted.idempotencyKey || crypto.randomUUID();
     const reference = persisted.externalReference || externalReference(draft);
@@ -284,19 +341,7 @@ async function createForPhone(phone, { automatic = false } = {}) {
     if (apiConfig.tokenMode !== 'live') {
       throw new Error('La creación de pedidos exige la API de producción de DroPanas.');
     }
-    const response = await axios.post(`${apiConfig.baseUrl}/ordenes`, {
-      external_reference: reference,
-      cliente: { ...draft.identity, telefono: draft.customerPhone, documento: { tipo: 'V', numero: draft.cedula } },
-      direccion: {
-        state_id: Number(office.state_id), city_id: Number(office.city_id),
-        direccion: office.direccion || office.nombre, referencia: `Retiro en oficina Tealca ${office.nombre}`,
-      },
-      productos: [{ producto_id: Number(draft.mapping.productId), cantidad: draft.quantity, precio_venta_ves: draft.total / draft.quantity }],
-      bodega_origen_id: Number(draft.mapping.warehouseId),
-      tipo_entrega: 'oficina', shipping_type_id: 3, oficina_id: Number(office.id),
-      tipo_pago: 'con_recaudo', requiere_aprobacion: true,
-      nota_cliente: 'Pedido creado por ChispudosMarket. Revisar antes de aprobar.',
-    }, {
+    const response = await axios.post(`${apiConfig.baseUrl}/ordenes`, buildPayload(draft, reference), {
       headers: { Authorization: `Bearer ${apiConfig.token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
       timeout: apiConfig.timeoutMs, validateStatus: (status) => status >= 200 && status < 300,
     });
@@ -326,4 +371,4 @@ function maybeCreate(phone) {
   }));
 }
 
-module.exports = { defaultMappings, settings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts };
+module.exports = { defaultMappings, settings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, buildPayload };

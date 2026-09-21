@@ -201,7 +201,12 @@ function orderDraftRow(draft) {
   const badge = created
     ? `<span class="badge">Subido #${esc(draft.current.id)}</span>`
     : ready ? '<span class="badge">Listo para subir</span>' : '<span class="badge badge-warning">Requiere revisión</span>'
-  const detail = [draft.mapping?.label || draft.productName || 'Producto pendiente', draft.quantity ? `${draft.quantity} unidad(es)` : null, draft.total ? `${Number(draft.total).toLocaleString('es-VE')} Bs` : null, draft.agency || null].filter(Boolean).join(' · ')
+  const itemDetail = (draft.items || []).map((item) => {
+    const label = item.mapping?.label || item.productName || 'Producto pendiente'
+    const amount = item.total ? ` · ${Number(item.total).toLocaleString('es-VE')} Bs` : ''
+    return `${item.quantity || '?'} × ${label}${amount}`
+  }).join(' + ')
+  const detail = [itemDetail || draft.productName || 'Producto pendiente', draft.total ? `Total ${Number(draft.total).toLocaleString('es-VE')} Bs` : null, draft.agency || null].filter(Boolean).join(' · ')
   const issues = (draft.issues || []).filter((issue) => !created || !issue.startsWith('Ya fue subido'))
   return `<div class="dp-order-draft">
     <div class="dp-auto-event-body">

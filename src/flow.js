@@ -815,8 +815,6 @@ async function processReply(from) {
     if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
       push.notifySale(from, getSession(from));
     }
-    if (isNewClose) dropanasOrderAutomation.maybeCreate(from);
-
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
     // etapa/ficha simplemente no se actualiza este turno. Si la etapa esta
@@ -887,6 +885,9 @@ async function processReply(from) {
         }
       }
     }
+    // Se hace después de clasificar para que los pedidos con varios productos
+    // ya tengan card.productos completo antes de preparar la orden DroPanas.
+    if (isNewClose) dropanasOrderAutomation.maybeCreate(from);
   } catch (err) {
     console.error('Error llamando a la IA (diagnostico):', {
       message: err.message,

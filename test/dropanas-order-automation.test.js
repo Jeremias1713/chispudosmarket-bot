@@ -77,3 +77,39 @@ test('recupera cantidad y agencia desde confirmaciones explícitas del historial
   assert.equal(draft.total, 39900);
   assert.deepEqual(draft.issues, []);
 });
+
+test('arma un solo pedido con varios productos y precios independientes', () => {
+  const draft = automation.baseDraft('584140859404', soldSession({
+    currentOrder: null,
+    card: {
+      nombre: 'Robinson Navarro', cedula: '13169676', telefono: '04140859404',
+      agencia: 'Nueva Barcelona', producto: 'Pedido mixto',
+      productos: [
+        { nombre: 'Shilajit Viking', cantidad: 1 },
+        { nombre: 'Shilajit de resina', cantidad: 2 },
+        { nombre: 'Turkesterone', cantidad: 1 },
+      ],
+    },
+  }));
+
+  assert.deepEqual(draft.items.map((item) => item.mapping.productId), [20343, 20448, 20702]);
+  assert.deepEqual(draft.items.map((item) => item.total), [36900, 51900, 39900]);
+  assert.equal(draft.total, 128700);
+  assert.deepEqual(draft.issues, []);
+
+  draft.official = { office: { id: 646, state_id: 2, city_id: 10, nombre: 'Barcelona', direccion: 'Nueva Barcelona' } };
+  const payload = automation.buildPayload(draft, 'CHISPUDOS-TEST');
+  assert.deepEqual(payload.productos, [
+    { producto_id: 20343, cantidad: 1, precio_venta_ves: 36900 },
+    { producto_id: 20448, cantidad: 2, precio_venta_ves: 25950 },
+    { producto_id: 20702, cantidad: 1, precio_venta_ves: 39900 },
+  ]);
+  assert.equal(payload.bodega_origen_id, 1);
+  assert.equal(payload.requiere_aprobacion, true);
+});
+
+test('incluye Shilajit Resina 20448 en la configuración inicial', () => {
+  const resin = automation.defaultMappings().find((row) => row.productId === 20448);
+  assert.ok(resin);
+  assert.deepEqual(resin.prices, { 1: 36900, 2: 51900 });
+});
