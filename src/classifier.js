@@ -148,12 +148,19 @@ con retiro en agencia.
   nombre y cantidad. Incluye todos si pidió varios productos distintos. No incluyas productos que
   solo aparecieron como opciones, preguntas o promociones. Si una cantidad no fue confirmada usa
   null; no la inventes. Si todavía no existe un pedido concreto usa [].
-  - notas: cualquier dato relevante para la venta que no entre en los otros campos, si no null.
+  - notas: SIEMPRE que el cliente ya haya confirmado una cantidad (de cualquier producto del pedido),
+  escribila de forma explicita y legible aca (ej. "Pidio 2 frascos de Shilajit Viking", o si son
+  varios productos "Pidio 2 frascos de Shilajit Viking y 1 de Melena de Leon"). Esto es a proposito
+  aunque la cantidad ya este tambien en "productos": la idea es que quede bien visible en texto plano
+  para quien mira la ficha del cliente en el panel, sin tener que abrir el detalle del pedido. Sumale
+  despues cualquier otro dato relevante para la venta que no entre en los otros campos. Si todavia no
+  se confirmo ninguna cantidad, no la inventes: dejá notas en null (o solo con el otro dato relevante,
+  sin mencionar cantidad) hasta que el cliente la confirme.
 
   Copia lo que dijo el cliente, no lo inventes ni lo completes. Un dato que no aparece va en null.
 
   Devolve SOLO un JSON con esta forma exacta, nada de texto extra:
-{"etapa": "...", "razon": "...", "card": {"nombre": null, "ciudad": null, "telefono": null, "cedula": null, "producto": null, "productos": [{"nombre": "Shilajit Viking", "cantidad": 1}], "notas": null}}`;
+{"etapa": "...", "razon": "...", "card": {"nombre": null, "ciudad": null, "telefono": null, "cedula": null, "producto": null, "productos": [{"nombre": "Shilajit Viking", "cantidad": 1}], "notas": "Pidio 1 frasco de Shilajit Viking"}}`;
 
 async function classifyConversation(history) {
   const transcript = (history || [])
