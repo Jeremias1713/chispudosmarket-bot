@@ -44,6 +44,12 @@ function blankProduct() {
     currency: 'Bs',
     description: '',
     active: true,
+    // FASE 3g: id y bodega de este producto en DroPanas (ver
+    // dropanasOrderAutomation.js). Opcionales -- si se cargan aca, no hace
+    // falta duplicar el producto a mano en la tabla de mapeo separada del
+    // panel de "Subir pedidos" para poder crear pedidos automaticamente.
+    dropanasProductId: null,
+    dropanasWarehouseId: null,
     // Instrucciones extra para la IA, solo cuando este producto esta activo.
     prompt: '',
     // Palabras que, si el cliente las escribe en su primer mensaje sobre este
