@@ -60,6 +60,7 @@ test('el catálogo local reconoce una oficina aunque la API no entregue sus IDs'
   const matches = require('../src/agencies').searchByText('Tealca de Guacara', 10);
   assert.equal(matches.length, 1);
   assert.equal(matches[0].name, 'GUACARA');
+  assert.deepEqual(require('../src/agencies').searchByText('Tealca', 10), []);
 });
 
 test('recupera cantidad y agencia desde confirmaciones explícitas del historial estable', () => {

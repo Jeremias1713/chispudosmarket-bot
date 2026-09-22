@@ -140,7 +140,11 @@ function searchByText(query, limit = 5) {
     .replace(/^\s*(?:de|del|la|el)\s+/, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const queries = [...new Set([raw, cleaned].filter(Boolean))];
+  // "Tealca" a secas no identifica ninguna sucursal. Además probamos primero
+  // el nombre limpio para que "Tealca de Guacara" resuelva por "Guacara" y
+  // no por una aparición accidental de la marca dentro de una dirección.
+  if (!cleaned) return [];
+  const queries = [...new Set([cleaned, raw].filter(Boolean))];
   const agencies = loadAgencies();
   // OJO: antes esto tambien comparaba contra a.country. Pero "country" es
   // siempre "Venezuela" en TODAS las filas (no es un dato que distinga nada
