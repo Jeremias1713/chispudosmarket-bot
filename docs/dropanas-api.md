@@ -1,8 +1,10 @@
 # Integración oficial con Dropanas
 
-La integración implementada en este repositorio es deliberadamente de solo lectura. El código solo permite `GET` contra la URL oficial y rechaza otra URL base. No crea, modifica ni elimina pedidos en Dropanas.
+El monitoreo de pedidos (`dropanasMonitor.js`/`dropanasAuto.js`) es de solo lectura: solo hace `GET` contra la URL oficial, rechaza otra URL base, y nunca crea, modifica ni elimina pedidos.
 
-## Qué ya hace
+Aparte de eso existe un módulo separado, `dropanasOrderAutomation.js`, que SÍ puede crear pedidos nuevos en Dropanas (POST `/ordenes`) a partir de una venta ya cerrada en el bot — ver "Creación automática de pedidos" más abajo. Está apagado por defecto y exige un token de producción (`live`); todo pedido creado así queda igual pendiente de aprobación en Dropanas, nunca se auto-aprueba.
+
+## Qué ya hace (monitoreo, solo lectura)
 
 - Lee todas las páginas de `/ordenes` y `/novedades` (100 registros por página).
 - Comprueba que el modo devuelto por Dropanas coincida con el tipo de token (`live` o `sandbox`).
@@ -71,3 +73,14 @@ manual hasta implementar y validar su documento original.
 ## Estado y recuperación
 
 El estado se guarda en `data/dropanas-api-state.json`, que está ignorado por Git. Si el archivo desaparece, la siguiente consulta vuelve a crear una línea base y no genera avisos retroactivos. El endpoint `/health` expone únicamente estado seguro, nunca el token.
+
+## Creación automática de pedidos (`dropanasOrderAutomation.js`)
+
+Distinto del monitoreo de arriba: este módulo puede crear pedidos NUEVOS en Dropanas a partir de una venta que el bot ya cerró. Se activa en el panel, en "Subir pedidos" (`dropanasOrderUploadEnabled`/`dropanasOrderAutoCreateEnabled`), y exige token de producción (`live`) — nunca funciona contra el token de pruebas. Todo pedido creado así llega a Dropanas con `requiere_aprobacion: true`, es decir, sigue necesitando aprobación manual ahí antes de generar guía; "automático" acá quiere decir "se sube solo", nunca "se aprueba solo".
+
+Para que un producto pueda subirse así, tiene que resolver a un producto real de Dropanas (su `productId` y `bodega`). Hay dos formas de cargar esa relación, y se pueden mezclar:
+
+- **Desde el catálogo de productos de siempre** (recomendado): al editar un producto normal del catálogo (el mismo que usa la IA para vender), cargar su "ID producto en DroPanas" y su "Bodega DroPanas". Con eso alcanza — no hace falta repetirlo en ningún otro lado, y si se cambia el precio en el catálogo, se refleja solo acá.
+- **Tabla de mapeo manual** (pantalla "Subir pedidos" del panel): pensada para casos que no calzan uno a uno con el catálogo (alias distintos, precios por cantidad diferentes a los del catálogo, etc.). Si un mismo `productId` de Dropanas está cargado en las dos formas a la vez, la tabla manual gana.
+
+Un producto sin ninguna de las dos cargas queda bloqueado ("no tiene un mapeo único a DroPanas") en la cola de pedidos del panel, con el motivo a la vista.
