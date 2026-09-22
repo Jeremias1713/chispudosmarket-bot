@@ -11,6 +11,15 @@ const DELIVERY_TO_CARRIER = Object.freeze({
   menssajero: 'mrw',
 });
 
+function requestHeaders(token, accept = 'application/json') {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: accept,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
+    'Accept-Language': 'es-ES,es;q=0.9',
+  };
+}
+
 function bool(value) {
   return String(value || '').toLowerCase() === 'true';
 }
@@ -128,7 +137,7 @@ function headerValue(headers, name) {
 async function fetchPage(endpoint, page, { config = configFromEnv(), client = axios } = {}) {
   assertReadOnlyEnabled(config);
   const response = await client.get(`${config.baseUrl}/${endpoint}`, {
-    headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' },
+    headers: requestHeaders(config.token),
     params: { per_page: 100, page },
     timeout: config.timeoutMs,
     validateStatus: (status) => status >= 200 && status < 300,
@@ -172,7 +181,7 @@ async function fetchOrder(orderId, { config = configFromEnv(), client = axios } 
   assertReadOnlyEnabled(config);
   if (!/^\d+$/.test(String(orderId))) throw new Error('ID de orden Dropanas invalido');
   const response = await client.get(`${config.baseUrl}/ordenes/${orderId}`, {
-    headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' },
+    headers: requestHeaders(config.token),
     timeout: config.timeoutMs,
     validateStatus: (status) => status >= 200 && status < 300,
   });
@@ -191,7 +200,7 @@ async function fetchTracking(orderId, { config = configFromEnv(), client = axios
   assertReadOnlyEnabled(config);
   if (!/^\d+$/.test(String(orderId))) throw new Error('ID de orden Dropanas inválido');
   const response = await client.get(`${config.baseUrl}/ordenes/${orderId}/tracking`, {
-    headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' },
+    headers: requestHeaders(config.token),
     timeout: config.timeoutMs,
     validateStatus: (status) => status >= 200 && status < 300,
   });
@@ -202,6 +211,7 @@ async function fetchTracking(orderId, { config = configFromEnv(), client = axios
 
 module.exports = {
   DEFAULT_BASE_URL,
+  requestHeaders,
   configFromEnv,
   assertReadOnlyEnabled,
   normalizePhone,

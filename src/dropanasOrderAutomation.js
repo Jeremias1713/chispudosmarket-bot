@@ -230,7 +230,7 @@ async function apiGet(endpoint, config, params) {
   let response;
   try {
     response = await axios.get(`${config.baseUrl}/${endpoint}`, {
-      headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' }, params,
+      headers: dropanasApi.requestHeaders(config.token), params,
       timeout: config.timeoutMs, validateStatus: (status) => status >= 200 && status < 300,
     });
   } catch (error) {
@@ -438,7 +438,11 @@ async function createForPhone(phone, { automatic = false } = {}) {
       throw new Error('La creación de pedidos exige la API de producción de DroPanas.');
     }
     const response = await axios.post(`${apiConfig.baseUrl}/ordenes`, buildPayload(draft, reference), {
-      headers: { Authorization: `Bearer ${apiConfig.token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      headers: {
+        ...dropanasApi.requestHeaders(apiConfig.token),
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
       timeout: apiConfig.timeoutMs, validateStatus: (status) => status >= 200 && status < 300,
     });
     const mode = String(response.headers['x-dropanas-mode'] || '').toLowerCase();

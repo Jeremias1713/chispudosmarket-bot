@@ -4,6 +4,15 @@ const dataDir = setupTempDataDir('dropanas-api');
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const api = require('../src/dropanasApi');
+
+test('envía encabezados compatibles con la API sin perder Bearer ni Accept', () => {
+  const headers = api.requestHeaders('live_sk_secret', 'application/pdf');
+
+  assert.equal(headers.Authorization, 'Bearer live_sk_secret');
+  assert.equal(headers.Accept, 'application/pdf');
+  assert.match(headers['User-Agent'], /Mozilla\/5\.0/);
+  assert.equal(headers['Accept-Language'], 'es-ES,es;q=0.9');
+});
 const monitor = require('../src/dropanasMonitor');
 
 after(() => cleanup(dataDir));

@@ -88,7 +88,7 @@ async function capture({ orderId, expectedTracking, expectedCarrier, config = co
 
   const response = await client.get(`${config.baseUrl}/ordenes/${orderId}/guia.pdf`, {
     responseType: 'arraybuffer',
-    headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/pdf' },
+    headers: dropanasApi.requestHeaders(config.token, 'application/pdf'),
     timeout: config.guideTimeoutMs,
     maxContentLength: MAX_PDF_BYTES,
     maxBodyLength: MAX_PDF_BYTES,
