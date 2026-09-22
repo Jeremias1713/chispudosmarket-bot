@@ -322,26 +322,39 @@ router.get('/api/conversations', (req, res) => {
 //   - el borrado real (DELETE) exige ademas escribir la palabra BORRAR,
 //     chequeado tambien aca (no solo en el boton del panel) para que un
 //     llamado directo a la API sin pasar por esa pantalla no alcance.
-function cleanupTargetPhones(stagesInput) {
+//   - opcionalmente se puede pedir "solo las de hace mas de N dias", para no
+//     borrar por accidente conversaciones de hoy que todavia pueden avanzar
+//     (se compara contra updatedAt: la ULTIMA actividad, no cuando se creo
+//     la conversacion, para no borrar algo que el cliente escribio recien).
+function cleanupTargetPhones(stagesInput, olderThanDaysInput) {
   const requested = (Array.isArray(stagesInput) ? stagesInput : [String(stagesInput || '')])
     .map((s) => String(s || '').trim())
     .filter(Boolean);
   const stages = requested.filter((s) => STAGES.includes(s) && !SOLD_STAGES.includes(s));
   if (!stages.length) return { stages: [], phones: [] };
+  const olderThanDays = Number(olderThanDaysInput);
+  const cutoff = Number.isFinite(olderThanDays) && olderThanDays > 0
+    ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000
+    : null;
   const phones = listSessions()
     .filter((session) => stages.includes(session.stage || 'nuevo'))
+    .filter((session) => {
+      if (cutoff === null) return true;
+      const updatedAt = session.updatedAt ? new Date(session.updatedAt).getTime() : 0;
+      return updatedAt < cutoff;
+    })
     .map((session) => session.phone);
   return { stages, phones };
 }
 
 router.get('/api/conversations/cleanup-preview', (req, res) => {
   const stagesInput = String(req.query.stages || '').split(',');
-  const { stages, phones } = cleanupTargetPhones(stagesInput);
+  const { stages, phones } = cleanupTargetPhones(stagesInput, req.query.days);
   res.json({ stages, count: phones.length });
 });
 
 router.delete('/api/conversations/cleanup', (req, res) => {
-  const { stages, phones } = cleanupTargetPhones(req.body && req.body.stages);
+  const { stages, phones } = cleanupTargetPhones(req.body && req.body.stages, req.body && req.body.days);
   if (!stages.length) return res.status(400).json({ error: 'Elegi al menos una etapa valida (que no sea una venta cerrada).' });
   if (String((req.body && req.body.confirm) || '').trim() !== 'BORRAR') {
     return res.status(400).json({ error: 'Falta confirmar: escribi BORRAR para continuar.' });
