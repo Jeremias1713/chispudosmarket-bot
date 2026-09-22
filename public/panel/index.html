@@ -1298,6 +1298,40 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
               </div>
             </details>
 
+            <details class="card cfg">
+              <summary class="cfg-head">
+                <span class="cfg-title">Limpieza de conversaciones</span>
+                <span class="cfg-sub">Borrar conversaciones viejas que nunca avanzaron</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="field">
+                  <div class="help">
+                    Esto borra para siempre las conversaciones marcadas, junto con todo su
+                    historial. No se puede deshacer desde el panel (solo quedan en la copia de
+                    seguridad completa de "Copia de seguridad" de arriba, si la descargaste
+                    antes). Nunca se puede borrar una venta cerrada, aunque la elijas: esta
+                    pantalla solo deja marcar etapas que todavía no compraron.
+                  </div>
+                </div>
+                <div class="field">
+                  <label><input type="checkbox" id="cleanup_stage_nuevo" value="nuevo"> Nuevo</label><br>
+                  <label><input type="checkbox" id="cleanup_stage_perdido" value="perdido"> Perdido</label>
+                </div>
+                <div class="settings-actions">
+                  <button class="btn" id="cleanup_count">Contar cuántas hay</button>
+                  <span id="cleanup_count_msg"></span>
+                </div>
+                <div class="field" id="cleanup_confirm_wrap" hidden>
+                  <label for="cleanup_confirm">Para borrar de verdad, escribí BORRAR aquí</label>
+                  <input type="text" id="cleanup_confirm" placeholder="BORRAR">
+                  <div class="settings-actions">
+                    <button class="btn btn-danger" id="cleanup_delete">Borrar estas conversaciones</button>
+                    <span class="save-msg" id="cleanup_msg"></span>
+                  </div>
+                </div>
+              </div>
+            </details>
+
             <div class="settings-actions">
               <button class="btn btn-primary" id="cfg_save">Guardar configuración</button>
               <span class="save-msg" id="cfg_msg"></span>
