@@ -7,6 +7,7 @@ const settingsStore = require('./settings');
 const dropanasApi = require('./dropanasApi');
 const { SOLD_STAGES } = require('./stageRules');
 const agencies = require('./agencies');
+const catalog = require('./catalog');
 
 const CACHE_MS = 5 * 60 * 1000;
 let cache = null;
@@ -43,6 +44,66 @@ function settings() {
     activatedAt: current.dropanasOrderActivatedAt || null,
     mappings,
   };
+}
+
+// FASE 3g: antes, el ÚNICO lugar donde un producto podía quedar vinculado a
+// DroPanas era esta tabla de mapeo manual (3 productos hardcodeados de
+// arranque, o los que el operador cargara a mano, duplicando nombre/precio
+// que YA estaban cargados en el catálogo normal del bot, ver catalog.js).
+// Cualquier producto real que no estuviera en esa lista separada quedaba
+// SIEMPRE bloqueado ("no tiene un mapeo único a DroPanas"), sin importar que
+// el catálogo tuviera el producto perfectamente cargado.
+//
+// Ahora, cualquier producto ACTIVO del catálogo que ya tenga cargado su
+// dropanasProductId (ver catalog.js/blankProduct) se suma solo como un
+// mapeo mas, usando el nombre y los precios que ya están en el catálogo.
+// No se guarda nada nuevo en la configuración de este módulo: se calcula al
+// vuelo cada vez, así que un cambio de precio en el catálogo se refleja acá
+// sin tocar nada más. Si el operador YA definió a mano un mapeo con el
+// MISMO id de producto DroPanas (tabla de "Subir pedidos" del panel), ese
+// mapeo manual gana -- se respetan los alias/precios que haya ajustado.
+//
+// Esto se calcula aparte de settings() (y no se mezcla en config.mappings)
+// para no ensuciar la tabla editable del panel: esos mapeos "del catálogo"
+// no son filas para editar ahí, se editan en el catálogo de productos de
+// siempre.
+function catalogMappings(existingProductIds) {
+  return catalog.listProducts()
+    .filter((p) => p.active !== false)
+    .filter((p) => {
+      const id = Number(p.dropanasProductId);
+      return Number.isInteger(id) && id > 0 && !existingProductIds.has(id);
+    })
+    .map((p) => {
+      const prices = {};
+      const basePrice = Number(p.price);
+      if (Number.isFinite(basePrice) && basePrice > 0) prices[1] = basePrice;
+      for (const row of catalog.normalizeQuantityPrices(p.quantityPrices)) prices[row.quantity] = row.total;
+      const warehouseId = Number(p.dropanasWarehouseId);
+      return {
+        id: `catalogo-${p.id}`,
+        label: p.name,
+        aliases: [p.name],
+        productId: Number(p.dropanasProductId),
+        warehouseId: Number.isInteger(warehouseId) && warehouseId > 0 ? warehouseId : 1,
+        prices,
+        enabled: true,
+      };
+    });
+}
+
+// Mapeos manuales + los que salen solos del catálogo -- esta es la lista
+// completa que se usa de verdad para encontrar a qué producto de DroPanas
+// corresponde cada línea de un pedido (findMapping) y para saber qué
+// productos/bodegas validar contra la API (snapshot). config.mappings (lo
+// que devuelve settings(), y lo que edita el panel) sigue siendo SOLO la
+// tabla manual, a propósito.
+function matchableMappings(config = settings()) {
+  const manual = Array.isArray(config?.mappings) ? config.mappings : [];
+  const existingProductIds = new Set(
+    manual.map((row) => Number(row.productId)).filter((id) => Number.isInteger(id) && id > 0)
+  );
+  return [...manual, ...catalogMappings(existingProductIds)];
 }
 
 function normalizeMapping(row, index) {
@@ -186,9 +247,10 @@ function baseDraft(phone, session, config = settings()) {
     quantity: order.quantity || historyFacts.quantity,
     total: order.total ?? card.monto,
   }];
+  const mappingPool = matchableMappings(config);
   const items = rawItems.map((row) => {
     const productName = String(row?.product || row?.producto || row?.nombre || '').trim();
-    const mapping = findMapping(productName, config.mappings);
+    const mapping = findMapping(productName, mappingPool);
     const quantity = Number(row?.quantity ?? row?.cantidad ?? 0);
     const explicitTotal = Number(row?.total ?? row?.monto);
     const mappedTotal = Number(mapping?.prices?.[quantity] || 0);
@@ -251,9 +313,9 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
   if (cachePromise) return cachePromise;
   cachePromise = (async () => {
-    const current = settings();
-    const productIds = [...new Set(current.mappings.filter((m) => m.enabled).map((m) => Number(m.productId)).filter(Boolean))];
-    const warehouseIds = [...new Set(current.mappings.filter((m) => m.enabled).map((m) => Number(m.warehouseId)).filter(Boolean))];
+    const pool = matchableMappings(settings());
+    const productIds = [...new Set(pool.filter((m) => m.enabled).map((m) => Number(m.productId)).filter(Boolean))];
+    const warehouseIds = [...new Set(pool.filter((m) => m.enabled).map((m) => Number(m.warehouseId)).filter(Boolean))];
     const productPromise = (async () => {
       try {
         return {
@@ -491,4 +553,4 @@ function maybeCreate(phone) {
   }));
 }
 
-module.exports = { defaultMappings, settings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, buildPayload, externalReference, deterministicIdempotencyKey };
+module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, buildPayload, externalReference, deterministicIdempotencyKey };
