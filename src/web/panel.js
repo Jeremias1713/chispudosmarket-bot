@@ -19,6 +19,7 @@ const {
   setStage,
   unlockStage,
   markFollowUp,
+  deleteSessions,
 } = require('../state');
 const { sendText, sendImageByLink, sendTemplate } = require('../whatsapp');
 const { STAGES } = require('../classifier');
@@ -307,6 +308,59 @@ router.get('/api/conversations', (req, res) => {
   const list = sessions.map(toConvo);
   list.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
   res.json(list);
+});
+
+// FASE 3h: limpieza manual de conversaciones viejas (ver Configuracion >
+// "Limpieza de conversaciones" en el panel). Pensada para el caso real de un
+// negocio con miles de conversaciones "nuevo"/"perdido" que nunca avanzaron
+// y solo ensucian el listado -- pero es una accion PERMANENTE (no hay
+// "restaurar" en el panel, solo la copia de seguridad completa que ya arma
+// state.js antes de cada guardado), asi que:
+//   - nunca se puede borrar una etapa de SOLD_STAGES (una venta real), ni
+//     aunque alguien la mande en el body a proposito: es un piso de
+//     seguridad que no depende de lo que pida el panel.
+//   - el borrado real (DELETE) exige ademas escribir la palabra BORRAR,
+//     chequeado tambien aca (no solo en el boton del panel) para que un
+//     llamado directo a la API sin pasar por esa pantalla no alcance.
+//   - opcionalmente se puede pedir "solo las de hace mas de N dias", para no
+//     borrar por accidente conversaciones de hoy que todavia pueden avanzar
+//     (se compara contra updatedAt: la ULTIMA actividad, no cuando se creo
+//     la conversacion, para no borrar algo que el cliente escribio recien).
+function cleanupTargetPhones(stagesInput, olderThanDaysInput) {
+  const requested = (Array.isArray(stagesInput) ? stagesInput : [String(stagesInput || '')])
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+  const stages = requested.filter((s) => STAGES.includes(s) && !SOLD_STAGES.includes(s));
+  if (!stages.length) return { stages: [], phones: [] };
+  const olderThanDays = Number(olderThanDaysInput);
+  const cutoff = Number.isFinite(olderThanDays) && olderThanDays > 0
+    ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000
+    : null;
+  const phones = listSessions()
+    .filter((session) => stages.includes(session.stage || 'nuevo'))
+    .filter((session) => {
+      if (cutoff === null) return true;
+      const updatedAt = session.updatedAt ? new Date(session.updatedAt).getTime() : 0;
+      return updatedAt < cutoff;
+    })
+    .map((session) => session.phone);
+  return { stages, phones };
+}
+
+router.get('/api/conversations/cleanup-preview', (req, res) => {
+  const stagesInput = String(req.query.stages || '').split(',');
+  const { stages, phones } = cleanupTargetPhones(stagesInput, req.query.days);
+  res.json({ stages, count: phones.length });
+});
+
+router.delete('/api/conversations/cleanup', (req, res) => {
+  const { stages, phones } = cleanupTargetPhones(req.body && req.body.stages, req.body && req.body.days);
+  if (!stages.length) return res.status(400).json({ error: 'Elegi al menos una etapa valida (que no sea una venta cerrada).' });
+  if (String((req.body && req.body.confirm) || '').trim() !== 'BORRAR') {
+    return res.status(400).json({ error: 'Falta confirmar: escribi BORRAR para continuar.' });
+  }
+  const deleted = deleteSessions(phones);
+  res.json({ ok: true, stages, deleted });
 });
 
 router.get('/api/conversations/:phone', (req, res) => {

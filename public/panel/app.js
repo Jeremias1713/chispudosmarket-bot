@@ -2935,6 +2935,69 @@ $('csv_download').addEventListener('click', async () => {
   }
 })
 
+/* ---------- limpieza de conversaciones (FASE 3h) ---------- */
+
+function cleanupSelectedStages() {
+  return ['nuevo', 'perdido'].filter((stage) => $('cleanup_stage_' + stage).checked)
+}
+
+function cleanupSelectedDays() {
+  const raw = Number($('cleanup_days').value)
+  return Number.isFinite(raw) && raw > 0 ? raw : 0
+}
+
+$('cleanup_count').addEventListener('click', async () => {
+  const stages = cleanupSelectedStages()
+  const days = cleanupSelectedDays()
+  $('cleanup_confirm_wrap').hidden = true
+  $('cleanup_msg').textContent = ''
+  if (!stages.length) {
+    $('cleanup_count_msg').textContent = 'Marcá al menos una etapa.'
+    return
+  }
+  $('cleanup_count').disabled = true
+  $('cleanup_count_msg').textContent = 'Contando...'
+  try {
+    const result = await api('/conversations/cleanup-preview?stages=' + encodeURIComponent(stages.join(',')) + '&days=' + encodeURIComponent(days))
+    $('cleanup_count_msg').textContent = `${result.count} conversación(es) en esa(s) etapa(s).`
+    $('cleanup_confirm_wrap').hidden = result.count === 0
+    $('cleanup_confirm').value = ''
+  } catch (err) {
+    $('cleanup_count_msg').textContent = err.message
+  } finally {
+    $('cleanup_count').disabled = false
+  }
+})
+
+$('cleanup_delete').addEventListener('click', async () => {
+  const stages = cleanupSelectedStages()
+  const days = cleanupSelectedDays()
+  if (!stages.length) return
+  if ($('cleanup_confirm').value.trim() !== 'BORRAR') {
+    $('cleanup_msg').textContent = 'Escribí BORRAR para confirmar.'
+    return
+  }
+  if (!confirm(`¿Seguro? Esto borra para siempre las conversaciones en: ${stages.join(', ')}. No se puede deshacer desde el panel.`)) return
+  $('cleanup_delete').disabled = true
+  $('cleanup_msg').textContent = 'Borrando...'
+  try {
+    const result = await api('/conversations/cleanup', {
+      method: 'DELETE',
+      body: JSON.stringify({ stages, days, confirm: 'BORRAR' }),
+    })
+    $('cleanup_msg').textContent = `Listo: se borraron ${result.deleted} conversación(es).`
+    $('cleanup_count_msg').textContent = ''
+    $('cleanup_confirm_wrap').hidden = true
+    $('cleanup_confirm').value = ''
+    $('cleanup_stage_nuevo').checked = false
+    $('cleanup_stage_perdido').checked = false
+  } catch (err) {
+    $('cleanup_msg').textContent = err.message
+  } finally {
+    $('cleanup_delete').disabled = false
+  }
+})
+
 /* ---------- notificaciones push (venta nueva, tipo Shopify) ---------- */
 
 function urlBase64ToUint8Array(base64String) {
