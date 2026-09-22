@@ -18,6 +18,7 @@ const { listSessions } = require('./state');
 // en cada archivo con reglas levemente distintas.
 const { foldName, compareNames } = require('./nameMatch');
 const { normalizePhone } = require('./dropanasApi');
+const { canAdvanceToEnCaminoOnGuia } = require('./stageRules');
 
 // Encuentra el indice de la primera columna del header cuyo nombre (ya
 // normalizado) contenga alguna de las palabras clave dadas. Asi no importa
@@ -129,7 +130,21 @@ function matchRow(row) {
         phone: session.phone,
         matchedName: session.card?.nombre || session.name,
         shippingStage: session.stage,
-        sendEligible: session.stage === 'esperando_guia',
+        // BUG encontrado: esto exigia session.stage === 'esperando_guia'
+        // exacto, pero esa etapa SOLO se fija a mano desde el panel (ver
+        // classifier.js) -- un pedido recien vendido normalmente se queda
+        // en "vendido" hasta que se le carga la guia, nunca pasa por
+        // "esperando_guia" a menos que alguien lo marque asi manualmente.
+        // Con este chequeo tal como estaba, el aviso automatico de "guia
+        // recien generada" (webhook order.guide_generated,
+        // DROPANAS_AUTO_SEND_ENABLED=true) nunca se disparaba en el uso
+        // real, aunque el resto de la logica (encontrar el telefono
+        // correcto) funcionara perfecto. Se usa el mismo criterio
+        // compartido que ya decide si una guia puede avanzar el pedido a
+        // "en_camino" (canAdvanceToEnCaminoOnGuia, stageRules.js) --
+        // "vendido" o "esperando_guia" son igual de validos para recibir
+        // la primera guia de un pedido.
+        sendEligible: canAdvanceToEnCaminoOnGuia(session.stage),
         candidates: [candidateInfo(session)],
       };
     }
@@ -158,7 +173,9 @@ function matchRow(row) {
       phone: s.phone,
       matchedName: s.card?.nombre || s.name,
       shippingStage: s.stage,
-      sendEligible: s.stage === 'esperando_guia',
+      // Mismo arreglo que en el match por telefono, mas arriba: "vendido" o
+      // "esperando_guia" son igual de validos para recibir la primera guia.
+      sendEligible: canAdvanceToEnCaminoOnGuia(s.stage),
       candidates: [candidateInfo(s)],
     };
   }
