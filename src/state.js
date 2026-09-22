@@ -234,6 +234,31 @@ function listSessions() {
   return Object.entries(sessions).map(([phone, data]) => ({ phone, ...data }));
 }
 
+// FASE 3h: el borrado PERMANENTE de verdad que ya anticipaba el comentario
+// de resetSession() de arriba -- una accion administrativa explicita y
+// separada, nunca automatica ni efecto secundario de otra cosa. Borra del
+// archivo las conversaciones cuyo telefono este en la lista dada (se elige
+// la lista de telefonos afuera, en el panel, filtrando por etapa u otro
+// criterio -- esta funcion no sabe de etapas, solo borra lo que se le pide).
+// Como saveAll() ya hace una copia de seguridad completa de sessions.json
+// ANTES de escribir (ver backupCurrentFile arriba), un borrado por error
+// sigue siendo recuperable a mano desde data/backups/sessions/ mientras esa
+// copia no se haya rotado (se guardan las ultimas 20). No hay una funcion de
+// "restaurar una sola conversacion": si hace falta, es leer el JSON de la
+// copia y sacar esa entrada a mano.
+function deleteSessions(phones) {
+  const sessions = loadAll();
+  let deleted = 0;
+  for (const phone of Array.isArray(phones) ? phones : []) {
+    if (Object.prototype.hasOwnProperty.call(sessions, phone)) {
+      delete sessions[phone];
+      deleted += 1;
+    }
+  }
+  if (deleted > 0) saveAll(sessions);
+  return deleted;
+}
+
 // FASE 5 (H35): aplica un evento de status de WhatsApp (sent/delivered/
 // read/failed, del webhook de Meta) al mensaje de plantilla que corresponda
 // (buscado por wamid), y guarda sessions.json solo si de verdad cambio
@@ -258,5 +283,6 @@ module.exports = {
   unlockStage,
   markFollowUp,
   listSessions,
+  deleteSessions,
   applyTemplateStatus,
 };
