@@ -2941,8 +2941,14 @@ function cleanupSelectedStages() {
   return ['nuevo', 'perdido'].filter((stage) => $('cleanup_stage_' + stage).checked)
 }
 
+function cleanupSelectedDays() {
+  const raw = Number($('cleanup_days').value)
+  return Number.isFinite(raw) && raw > 0 ? raw : 0
+}
+
 $('cleanup_count').addEventListener('click', async () => {
   const stages = cleanupSelectedStages()
+  const days = cleanupSelectedDays()
   $('cleanup_confirm_wrap').hidden = true
   $('cleanup_msg').textContent = ''
   if (!stages.length) {
@@ -2952,7 +2958,7 @@ $('cleanup_count').addEventListener('click', async () => {
   $('cleanup_count').disabled = true
   $('cleanup_count_msg').textContent = 'Contando...'
   try {
-    const result = await api('/conversations/cleanup-preview?stages=' + encodeURIComponent(stages.join(',')))
+    const result = await api('/conversations/cleanup-preview?stages=' + encodeURIComponent(stages.join(',')) + '&days=' + encodeURIComponent(days))
     $('cleanup_count_msg').textContent = `${result.count} conversación(es) en esa(s) etapa(s).`
     $('cleanup_confirm_wrap').hidden = result.count === 0
     $('cleanup_confirm').value = ''
@@ -2965,6 +2971,7 @@ $('cleanup_count').addEventListener('click', async () => {
 
 $('cleanup_delete').addEventListener('click', async () => {
   const stages = cleanupSelectedStages()
+  const days = cleanupSelectedDays()
   if (!stages.length) return
   if ($('cleanup_confirm').value.trim() !== 'BORRAR') {
     $('cleanup_msg').textContent = 'Escribí BORRAR para confirmar.'
@@ -2976,7 +2983,7 @@ $('cleanup_delete').addEventListener('click', async () => {
   try {
     const result = await api('/conversations/cleanup', {
       method: 'DELETE',
-      body: JSON.stringify({ stages, confirm: 'BORRAR' }),
+      body: JSON.stringify({ stages, days, confirm: 'BORRAR' }),
     })
     $('cleanup_msg').textContent = `Listo: se borraron ${result.deleted} conversación(es).`
     $('cleanup_count_msg').textContent = ''
