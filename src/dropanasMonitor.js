@@ -239,6 +239,7 @@ function recordWebhook(deliveryId) {
 async function enrichPendingGuides(options = {}) {
   const guide = options.guide || require('./dropanasGuide');
   const state = loadState();
+  const patches = [];
   let enriched = 0;
   let failed = 0;
   const candidates = (state.pending || []).filter((change) => {
@@ -258,21 +259,38 @@ async function enrichPendingGuides(options = {}) {
           expectedCarrier: order.carrier,
           ...(options.captureOptions || {}),
         });
-        order.telefono = api.normalizePhone(captured.phone);
-        if (!order.cliente && captured.client) order.cliente = captured.client;
-        order.guideImageFilename = captured.filename;
-        order.guideEnrichedAt = new Date().toISOString();
-        if (order.telefono) enriched += 1;
+        const patch = {
+          telefono: api.normalizePhone(captured.phone),
+          guideImageFilename: captured.filename,
+          guideEnrichedAt: new Date().toISOString(),
+        };
+        if (!order.cliente && captured.client) patch.cliente = captured.client;
+        patches.push({ key: change.key, orderId: order.dropanasId, guia: order.guia, patch });
+        if (patch.telefono) enriched += 1;
         else failed += 1;
       } catch (error) {
-        order.guideEnrichmentError = error.message;
+        patches.push({
+          key: change.key,
+          orderId: order.dropanasId,
+          guia: order.guia,
+          patch: { guideEnrichmentError: error.message },
+        });
         failed += 1;
       }
     }
   }
   await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, worker));
-  saveState(state);
-  return { total: (state.pending || []).length, enriched, failed };
+  // Durante las descargas pudo entrar otro webhook. Releer y aplicar únicamente
+  // nuestros campos evita guardar la copia antigua y borrar ese evento nuevo.
+  const fresh = loadState();
+  for (const result of patches) {
+    const current = fresh.pending.find((item) => item.key === result.key);
+    if (!current?.order) continue;
+    if (current.order.dropanasId !== result.orderId || current.order.guia !== result.guia) continue;
+    Object.assign(current.order, result.patch);
+  }
+  saveState(fresh);
+  return { total: (fresh.pending || []).length, enriched, failed };
 }
 
 function webhookOrder(payload) {
@@ -388,6 +406,9 @@ async function processWebhook(payload, options = {}) {
       } catch (guideError) {
         detailWarning = `${detailWarning}; etiqueta: ${guideError.message}`;
       }
+    }
+    if (!order.telefono && payload.evento !== 'order.guide_generated') {
+      order.reviewReason = 'Sin teléfono en el webhook y no se pudo consultar el detalle de la orden; requiere revisión manual.';
     }
   }
 

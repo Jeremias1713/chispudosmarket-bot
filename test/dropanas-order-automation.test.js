@@ -131,3 +131,19 @@ test('incluye Shilajit Resina 20448 en la configuración inicial', () => {
   assert.ok(resin);
   assert.deepEqual(resin.prices, { 1: 36900, 2: 51900 });
 });
+
+test('la idempotencia es estable entre procesos y cambia para otra venta', () => {
+  const firstReference = automation.externalReference(automation.baseDraft('584227167341', soldSession()));
+  const sameReference = automation.externalReference(automation.baseDraft('584227167341', soldSession()));
+  const otherReference = automation.externalReference(automation.baseDraft('584227167341', soldSession({ soldAt: '2026-09-20T13:00:00.000Z' })));
+
+  assert.equal(firstReference, sameReference);
+  assert.equal(automation.deterministicIdempotencyKey(firstReference), automation.deterministicIdempotencyKey(sameReference));
+  assert.notEqual(automation.deterministicIdempotencyKey(firstReference), automation.deterministicIdempotencyKey(otherReference));
+});
+
+test('no crea una referencia inestable si falta la fecha de cierre', () => {
+  const draft = automation.baseDraft('584227167341', soldSession({ soldAt: null }));
+  assert.ok(draft.issues.some((issue) => issue.includes('fecha válida')));
+  assert.throws(() => automation.externalReference(draft), /fecha válida/);
+});

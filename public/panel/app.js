@@ -294,6 +294,7 @@ function pendingAutomationRow(row) {
         Guía ${esc(row.guia || 'pendiente')} · ${esc(String(row.carrier || 'transportadora').toUpperCase())}
         ${row.producto ? ` · ${esc(row.producto)}` : ''}
       </div>
+      ${row.reviewReason ? `<small class="is-warn">${esc(row.reviewReason)}</small>` : ''}
       <small>${esc(detected)}</small>
     </div>
     <button class="btn da-review-one" type="button">Revisar</button>

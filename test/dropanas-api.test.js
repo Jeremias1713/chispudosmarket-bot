@@ -227,6 +227,38 @@ test('si falla el detalle, el webhook firmado conserva la guía sin enviarla a c
   assert.equal(pending.order.telefono, '');
 });
 
+test('enriquecer una guía no borra un webhook recibido durante la descarga', async () => {
+  const oldId = '99101';
+  const newId = '99102';
+  monitor.queueWebhookOrder({
+    dropanasId: oldId, guia: 'GUIA-99101', telefono: '', cliente: '', carrier: 'tealca',
+    estadoPedido: 'En camino', estadoAprobacion: '', tipoEntrega: 'oficina', producto: '', totalVentaBs: '', oficinaId: null,
+  });
+
+  const guide = { capture: async () => {
+    monitor.queueWebhookOrder({
+      dropanasId: newId, guia: 'GUIA-99102', telefono: '584121234567', cliente: 'Evento nuevo', carrier: 'tealca',
+      estadoPedido: 'En camino', estadoAprobacion: '', tipoEntrega: 'oficina', producto: '', totalVentaBs: '', oficinaId: null,
+    });
+    return { phone: '04125550101', client: 'Guía anterior', filename: 'guia-99101.png' };
+  } };
+
+  await monitor.enrichPendingGuides({ guide });
+  const pending = monitor.listPending();
+  assert.equal(pending.find((item) => item.order?.dropanasId === oldId).order.telefono, '584125550101');
+  assert.ok(pending.some((item) => item.order?.dropanasId === newId), 'el webhook nuevo debe conservarse');
+});
+
+test('un evento logístico sin teléfono explica por qué requiere revisión', async () => {
+  const client = { get: async () => { throw new Error('Forbidden 403'); } };
+  await monitor.processWebhook({
+    evento: 'order.delivered', sandbox: false,
+    datos: { orden_id: 99103, pedido: { numero_dropanas: 99103, numero_guia: 'GUIA-99103', transportadora: 'Tealca' } },
+  }, { config, client });
+  const pending = monitor.listPending().find((item) => item.order?.dropanasId === '99103');
+  assert.match(pending.order.reviewReason, /Sin teléfono.*revisión manual/);
+});
+
 for (const scenario of [
   { event: 'order.status_changed', announced: 'Pendiente de devolución', expected: 'Pendiente de devolución' },
   { event: 'order.delivered', announced: '', expected: 'Entregado' },

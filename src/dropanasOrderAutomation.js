@@ -204,6 +204,9 @@ function baseDraft(phone, session, config = settings()) {
   if (session.orderClosed !== true && !SOLD_STAGES.includes(session.stage || '')) {
     issues.push('La compra todavía no está confirmada.');
   }
+  if (!session.soldAt || Number.isNaN(new Date(session.soldAt).getTime())) {
+    issues.push('Falta una fecha válida de cierre de la venta.');
+  }
   if (!identity) issues.push('Falta nombre y apellido.');
   if (!String(card.cedula || '').replace(/\D/g, '').match(/^\d{6,9}$/)) issues.push('Falta una cédula válida.');
   if (!localPhone(card.telefono || phone)) issues.push('Falta un teléfono venezolano válido.');
@@ -390,8 +393,16 @@ async function listDrafts() {
 }
 
 function externalReference(draft) {
-  const stamp = String(draft.soldAt || new Date().toISOString()).replace(/\D/g, '').slice(0, 14);
+  if (!draft.soldAt || Number.isNaN(new Date(draft.soldAt).getTime())) {
+    throw new Error('No se puede identificar el pedido sin una fecha válida de cierre.');
+  }
+  const stamp = String(draft.soldAt).replace(/\D/g, '').slice(0, 14);
   return `CHISPUDOS-${String(draft.phone).slice(-10)}-${stamp}`.slice(0, 80);
+}
+
+function deterministicIdempotencyKey(reference) {
+  const digest = crypto.createHash('sha256').update(String(reference)).digest('hex');
+  return `chispudos-order-${digest}`;
 }
 
 function buildPayload(draft, reference) {
@@ -429,8 +440,11 @@ async function createForPhone(phone, { automatic = false } = {}) {
     if (draft.current?.id) return { ok: true, duplicate: true, order: draft.current };
     if (draft.issues.length) throw new Error(draft.issues.join(' '));
     const persisted = session.dropanasOrder || {};
-    const idempotencyKey = persisted.idempotencyKey || crypto.randomUUID();
     const reference = persisted.externalReference || externalReference(draft);
+    // Dos procesos o reintentos del mismo pedido deben enviar exactamente la
+    // misma clave. Guardarla sigue siendo útil para auditoría, pero la defensa
+    // ya no depende de que sessions.json se haya escrito antes del POST.
+    const idempotencyKey = persisted.idempotencyKey || deterministicIdempotencyKey(reference);
     updateSession(phone, { dropanasOrder: { ...persisted, status: 'subiendo', idempotencyKey, externalReference: reference, attemptedAt: new Date().toISOString() } });
     const apiConfig = dropanasApi.configFromEnv();
     dropanasApi.assertReadOnlyEnabled(apiConfig);
@@ -471,4 +485,4 @@ function maybeCreate(phone) {
   }));
 }
 
-module.exports = { defaultMappings, settings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, buildPayload };
+module.exports = { defaultMappings, settings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, buildPayload, externalReference, deterministicIdempotencyKey };
