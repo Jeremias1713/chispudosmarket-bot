@@ -97,6 +97,14 @@ const DEFAULTS = {
   // se puede cambiar aca si el negocio la vuelve a aprobar con otro nombre.
   pickupTemplateName: null,
   pickupTemplateLanguage: 'es',
+  // Recordatorio diario para pedidos que siguen esperando retiro. Se activa
+  // al arrancar la version que incorpora esta funcion, pero solo toma pedidos
+  // que llegaron a oficina DESPUES de esa activacion para no escribirle de
+  // golpe a toda la cartera historica.
+  pickupReminderEnabled: true,
+  pickupReminderHour: 10,
+  pickupReminderMaxDays: 5,
+  pickupReminderActivatedAt: null,
   deliveredTemplateName: 'pedido_entregado_gracias',
   deliveredTemplateLanguage: 'es',
   noveltyTemplateName: 'novedad_no_contactado',

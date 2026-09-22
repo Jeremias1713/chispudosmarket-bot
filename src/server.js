@@ -10,6 +10,7 @@ const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
 const { normalizeProductName } = require('./catalog');
 const dropanasMonitor = require('./dropanasMonitor');
+const pickupReminders = require('./pickupReminders');
 
 // Correccion de una sola vez (retroactiva): antes, a las conversaciones que
 // ya estaban vendidas de antes de existir el campo soldAt se les rellenaba
@@ -266,6 +267,7 @@ if (require.main === module) {
     fixFragmentedProductNames();
     remarketing.start();
     dropanasMonitor.start();
+    pickupReminders.start();
   });
 }
 
