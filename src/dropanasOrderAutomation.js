@@ -367,6 +367,7 @@ async function prepareDraft(phone, session = getSession(phone)) {
       }
       return { ...item, product, stock };
     });
+    const localOfficeMatches = agencies.searchByText(draft.agency, 10);
     let office = resolveOffice(draft.agency, live.offices);
     if (!office && live.officeWarning) {
       try {
@@ -375,7 +376,12 @@ async function prepareDraft(phone, session = getSession(phone)) {
         draft.warnings.push(`DroPanas no permitió validar la oficina (${live.officeWarning}; ${error.message}).`);
       }
     }
-    if (!office) draft.issues.push('La oficina mencionada no coincide de forma única con el catálogo oficial de Tealca.');
+    if (!office && live.officeWarning && localOfficeMatches.length === 1) {
+      draft.issues.push('La oficina sí existe en tu catálogo de Tealca, pero DroPanas bloqueó la consulta de su ID interno. Hace falta habilitar lectura de oficinas/ciudades en la API para subirla con seguridad.');
+      draft.localOffice = localOfficeMatches[0];
+    } else if (!office) {
+      draft.issues.push('La oficina mencionada no coincide de forma única con el catálogo de Tealca.');
+    }
     else if (office.assignedByDropanas) {
       draft.warnings.push('DroPanas no permite leer oficinas con esta clave: se enviará la ciudad confirmada y DroPanas asignará la oficina al despachar. Revísala antes de aprobar.');
     }

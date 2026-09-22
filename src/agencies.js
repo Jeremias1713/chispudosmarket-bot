@@ -130,8 +130,17 @@ function foldAccents(s) {
 }
 
 function searchByText(query, limit = 5) {
-  const q = foldAccents(query.trim());
-  if (!q) return [];
+  const raw = foldAccents(query.trim()).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!raw) return [];
+  // Las confirmaciones del chat suelen guardar "Tealca de Guacara",
+  // "oficina Tealca Guacara" o incluso "**Guacara**". Esas palabras
+  // describen el transportista, no forman parte del nombre de la sucursal.
+  const cleaned = raw
+    .replace(/\b(?:oficina|agencia|sucursal|tealca)\b/g, ' ')
+    .replace(/^\s*(?:de|del|la|el)\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const queries = [...new Set([raw, cleaned].filter(Boolean))];
   const agencies = loadAgencies();
   // OJO: antes esto tambien comparaba contra a.country. Pero "country" es
   // siempre "Venezuela" en TODAS las filas (no es un dato que distinga nada
@@ -142,16 +151,22 @@ function searchByText(query, limit = 5) {
   // mandaba un listado gigante de agencias de cualquier lado menos de donde
   // preguntaba el cliente. Sacamos country de la comparacion: nunca aporta
   // precision, solo puede causar este falso positivo masivo.
-  const nameMatches = agencies.filter(
-    (a) =>
-      foldAccents(a.name).includes(q) ||
-      foldAccents(a.region).includes(q) ||
-      foldAccents(a.city).includes(q)
-  );
-  if (nameMatches.length) return nameMatches.slice(0, limit);
+  for (const q of queries) {
+    const nameMatches = agencies.filter(
+      (a) =>
+        foldAccents(a.name).includes(q) ||
+        foldAccents(a.region).includes(q) ||
+        foldAccents(a.city).includes(q)
+    );
+    if (nameMatches.length) return nameMatches.slice(0, limit);
+  }
 
   // Si no matcheo por nombre/region, probamos dentro de la direccion.
-  return agencies.filter((a) => foldAccents(a.address).includes(q)).slice(0, limit);
+  for (const q of queries) {
+    const addressMatches = agencies.filter((a) => foldAccents(a.address).includes(q));
+    if (addressMatches.length) return addressMatches.slice(0, limit);
+  }
+  return [];
 }
 
 // Diccionario chico (no exhaustivo, pero cubre las capitales de estado y las

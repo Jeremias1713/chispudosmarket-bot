@@ -1,6 +1,7 @@
 'use strict';
 const { setupTempDataDir, cleanup } = require('./helpers/tempDataDir');
 const dataDir = setupTempDataDir('dropanas-order-automation');
+require('node:fs').copyFileSync(require('node:path').join(__dirname, '..', 'data', 'agencies.csv'), require('node:path').join(dataDir, 'agencies.csv'));
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const automation = require('../src/dropanasOrderAutomation');
@@ -53,6 +54,12 @@ test('rechaza configuraciones sin IDs ni precios', () => {
   const result = automation.validateConfig({ mappings: [{ label: 'Nuevo', aliases: ['nuevo'], prices: {} }] });
   assert.ok(result.errors.some((error) => error.includes('ID de producto')));
   assert.ok(result.errors.some((error) => error.includes('precio')));
+});
+
+test('el catálogo local reconoce una oficina aunque la API no entregue sus IDs', () => {
+  const matches = require('../src/agencies').searchByText('Tealca de Guacara', 10);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].name, 'GUACARA');
 });
 
 test('recupera cantidad y agencia desde confirmaciones explícitas del historial estable', () => {
