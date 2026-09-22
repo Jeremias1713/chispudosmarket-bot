@@ -1693,6 +1693,8 @@ function openProduct(p) {
   $('p_currency').value = p?.currency || 'Bs'
   $('p_active').value = p && p.active === false ? '0' : '1'
   $('p_sku').value = p?.sku || ''
+  $('p_dropanas_product_id').value = p?.dropanasProductId || ''
+  $('p_dropanas_warehouse_id').value = p?.dropanasWarehouseId || ''
   $('p_description').value = p?.description || ''
   $('p_prompt').value = p?.prompt || ''
   $('p_triggers').value = (p?.triggers || []).join(', ')
@@ -1727,6 +1729,8 @@ $('saveProduct').addEventListener('click', async () => {
     currency: $('p_currency').value.trim() || 'Bs',
     active: $('p_active').value === '1',
     sku: $('p_sku').value.trim(),
+    dropanasProductId: $('p_dropanas_product_id').value.trim(),
+    dropanasWarehouseId: $('p_dropanas_warehouse_id').value.trim(),
     description: $('p_description').value,
     prompt: $('p_prompt').value,
     triggers: $('p_triggers').value,
