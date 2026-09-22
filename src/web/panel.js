@@ -1244,6 +1244,18 @@ function sanitizeProductInput(body) {
       ? body.triggers
       : String(body.triggers).split(',').map((t) => t.trim()).filter(Boolean);
   }
+  // FASE 3g: id/bodega de DroPanas para este producto (ver
+  // dropanasOrderAutomation.js). Vacio/invalido se guarda como null: sin
+  // esto, el producto simplemente no participa de la creacion automatica de
+  // pedidos hasta que se cargue aca o en el mapeo manual del panel.
+  if (body.dropanasProductId !== undefined) {
+    const id = Number(body.dropanasProductId);
+    patch.dropanasProductId = Number.isInteger(id) && id > 0 ? id : null;
+  }
+  if (body.dropanasWarehouseId !== undefined) {
+    const id = Number(body.dropanasWarehouseId);
+    patch.dropanasWarehouseId = Number.isInteger(id) && id > 0 ? id : null;
+  }
   return patch;
 }
 
