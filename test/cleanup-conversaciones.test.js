@@ -51,6 +51,24 @@ function seedSessions() {
   }));
 }
 
+function sessionAt(name, stage, updatedAt) {
+  return { name, stage, history: [], card: { producto: 'Producto' }, createdAt: updatedAt, updatedAt };
+}
+
+// Para las pruebas del filtro por fecha: dos "nuevo" de HOY (no se deben
+// tocar con el filtro por defecto) y un "nuevo" y un "perdido" de hace mas
+// de una semana (los que si se esperan borrar al pedir "mas de N dias").
+function seedSessionsConFechas() {
+  const hoy = new Date().toISOString();
+  const haceOchoDias = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    '584120000010': sessionAt('Nuevo de hoy', 'nuevo', hoy),
+    '584120000011': sessionAt('Nuevo viejo', 'nuevo', haceOchoDias),
+    '584120000012': sessionAt('Perdido viejo', 'perdido', haceOchoDias),
+    '584120000013': sessionAt('Vendido viejo', 'vendido', haceOchoDias),
+  }));
+}
+
 test('state.deleteSessions borra solo los telefonos pedidos y deja el resto intacto', () => {
   seedSessions();
   const deleted = state.deleteSessions(['584120000001', '584120000003', '584120000999']);
@@ -115,4 +133,33 @@ test('DELETE cleanup sin ninguna etapa valida no borra nada y avisa el error', a
 
   assert.equal(res.statusCode, 400);
   assert.equal(state.listSessions().length, 5);
+});
+
+test('GET cleanup-preview con "days" solo cuenta las que no tuvieron actividad en esos ultimos dias', () => {
+  seedSessionsConFechas();
+  const req = { query: { stages: 'nuevo,perdido', days: '1' } };
+  const res = fakeRes();
+  findHandler('get', '/api/conversations/cleanup-preview')(req, res);
+
+  assert.equal(res.body.count, 2, 'la de hoy no cuenta; las 2 de hace 8 dias si');
+});
+
+test('GET cleanup-preview sin "days" (o con 0) no filtra por fecha: cuenta tambien las de hoy', () => {
+  seedSessionsConFechas();
+  const req = { query: { stages: 'nuevo,perdido' } };
+  const res = fakeRes();
+  findHandler('get', '/api/conversations/cleanup-preview')(req, res);
+
+  assert.equal(res.body.count, 3, 'sin days, entran las 3 nuevo/perdido sin importar cuando escribieron');
+});
+
+test('DELETE cleanup con "days" NUNCA borra la conversacion de hoy, aunque su etapa este marcada', async () => {
+  seedSessionsConFechas();
+  const req = { query: {}, body: { stages: ['nuevo', 'perdido'], days: 1, confirm: 'BORRAR' } };
+  const res = fakeRes();
+  await findHandler('delete', '/api/conversations/cleanup')(req, res);
+
+  assert.equal(res.body.deleted, 2);
+  const restantes = state.listSessions().map((s) => s.phone).sort();
+  assert.deepEqual(restantes, ['584120000010', '584120000013'], 'la de hoy (10) y la vendida (13) deben seguir existiendo');
 });
