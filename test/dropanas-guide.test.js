@@ -136,7 +136,7 @@ test('el automatico ahora acepta un match por nombre exacto y unico (no solo por
   assert.equal(captured, true);
 });
 
-// El piso de seguridad sigue en pie: un parecido PARCIAL (! 'exacto', ver
+// El piso de seguridad sigue en pie: un parecido PARCIAL (no 'exacto', ver
 // nameMatch.js) nunca alcanza para el automatico, tenga o no telefono.
 test('el automatico sigue rechazando un match que no sea "exacto" (parcial o ambiguo)', async () => {
   let captured = false;
