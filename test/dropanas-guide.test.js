@@ -109,13 +109,42 @@ test('el envio totalmente automatico queda apagado por defecto', async () => {
   assert.deepEqual(await auto.processChanges([]), { enabled: false, results: [], acknowledged: [] });
 });
 
-test('el automatico rechaza coincidencias por nombre aunque parezcan exactas', async () => {
+// FASE 3i: antes esto se rechazaba siempre (el automatico exigia ademas
+// matchEvidence === 'telefono'). Se relajo a proposito para el caso real de
+// un telefono cargado con algun digito distinto en Dropanas: si dropanas.js
+// ya encontro un match por NOMBRE 'exacto' (su mismo criterio estricto de
+// nameMatch.js) y UNICO, ahora se acepta igual que un match por telefono.
+test('el automatico ahora acepta un match por nombre exacto y unico (no solo por telefono)', async () => {
   let captured = false;
   const result = await auto.processChanges(
     [{ key: 'k1', order: { dropanasId: '10', guia: 'ABC10', carrier: 'tealca' } }],
     {
       env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
-      matchRows: (rows) => rows.map((row) => ({ ...row, matchType: 'exacto', phone: '584120000000' })),
+      matchRows: (rows) => rows.map((row) => ({
+        ...row, matchType: 'exacto', phone: '584120000000',
+        shippingStage: 'esperando_guia', sendEligible: true,
+      })),
+      getSession: () => ({ stage: 'vendido', stageLocked: false, card: {} }),
+      detectOrderConflict: () => null,
+      capture: async () => { captured = true; return { filename: 'guias/etiqueta.png' }; },
+      mediaUrl: (filename) => `https://bot.example/media/${filename}`,
+      updateSession: (_phone, patch) => ({ ...patch, phone: '584120000000' }),
+      maybeNotifyShipping: async () => ({ sent: true }),
+    }
+  );
+  assert.equal(result.results[0].sent, true);
+  assert.equal(captured, true);
+});
+
+// El piso de seguridad sigue en pie: un parecido PARCIAL (! 'exacto', ver
+// nameMatch.js) nunca alcanza para el automatico, tenga o no telefono.
+test('el automatico sigue rechazando un match que no sea "exacto" (parcial o ambiguo)', async () => {
+  let captured = false;
+  const result = await auto.processChanges(
+    [{ key: 'k1b', order: { dropanasId: '10b', guia: 'ABC10B', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows.map((row) => ({ ...row, matchType: 'ambiguo', phone: null })),
       capture: async () => { captured = true; },
     }
   );
@@ -228,6 +257,47 @@ test('un aviso de llegada ya registrado no se duplica y termina de actualizar la
   assert.equal(result.results[0].sent, false);
   assert.equal(updated.stage, 'esperando_retiro');
   assert.deepEqual(result.acknowledged, ['k7']);
+});
+
+// FASE 3i: si el telefono que llega de Dropanas no matchea ninguna sesion
+// (por ejemplo, algun digito distinto al que quedo guardado), pero el
+// nombre del cliente es exacto y unico entre las conversaciones candidatas,
+// el aviso de "en oficina" ahora sí se dispara igual.
+test('en oficina avisa llegada por nombre exacto y unico cuando el telefono no matchea', async () => {
+  const updates = [];
+  const session = { phone: '584120009999', stage: 'en_camino', card: { guia: 'ABC18', nombre: 'Erica Lugo' } };
+  const result = await auto.processChanges(
+    [{ key: 'k8', order: { dropanasId: '18', guia: 'ABC18', telefono: '04120001111', cliente: 'Erica Lugo', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [session],
+      maybeNotifyArrival: async () => ({ sent: true, viaTemplate: true }),
+      updateSession: (_phone, patch) => { updates.push(patch); },
+    }
+  );
+  assert.equal(result.results[0].sent, true);
+  assert.deepEqual(result.acknowledged, ['k8']);
+  assert.equal(updates[0].stage, 'esperando_retiro');
+});
+
+// Pero si el nombre tampoco es exacto y unico (ambiguo, parcial, o no hay
+// ninguna coincidencia), sigue quedando para revision manual: el respaldo
+// por nombre no relaja la exigencia de unicidad/exactitud.
+test('en oficina no avisa si ni el telefono ni el nombre matchean de forma exacta y unica', async () => {
+  let sends = 0;
+  const result = await auto.processChanges(
+    [{ key: 'k9', order: { dropanasId: '19', guia: 'ABC19', telefono: '04120002222', cliente: 'Ana', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [{ phone: '584120009998', stage: 'en_camino', card: { guia: 'ABC19', nombre: 'Ana Maria Perez' } }],
+      maybeNotifyArrival: async () => { sends++; return { sent: true }; },
+    }
+  );
+  assert.equal(result.results[0].reason, 'requiere_revision');
+  assert.equal(sends, 0);
+  assert.deepEqual(result.acknowledged, []);
 });
 
 for (const scenario of [
