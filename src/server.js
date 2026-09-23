@@ -10,6 +10,7 @@ const siteRouter = require('./web/site');
 const remarketing = require('./remarketing');
 const { normalizeProductName } = require('./catalog');
 const dropanasMonitor = require('./dropanasMonitor');
+const dropanasOrderAutomation = require('./dropanasOrderAutomation');
 const pickupReminders = require('./pickupReminders');
 
 // Correccion de una sola vez (retroactiva): antes, a las conversaciones que
@@ -233,11 +234,23 @@ app.post('/dropanas/webhook', (req, res) => {
   if (!valid) return res.sendStatus(403);
   const deliveryId = String(req.get('x-dropanas-delivery') || '').trim();
   if (!deliveryId) return res.status(400).json({ error: 'Falta X-DroPanas-Delivery' });
-  const fresh = dropanasMonitor.recordWebhook(deliveryId);
+  // El evento se guarda en la bandeja ANTES de responder 200: si el
+  // procesamiento falla o el servicio se reinicia, se reintenta después en
+  // vez de perderse. La huella del cuerpo evita procesar dos veces el mismo
+  // evento aunque llegue con otro X-DroPanas-Delivery.
+  const bodyHash = crypto.createHash('sha256').update(req.rawBody || Buffer.alloc(0)).digest('hex');
+  let fresh;
+  try {
+    fresh = dropanasMonitor.recordWebhook(deliveryId, { payload: req.body, bodyHash });
+  } catch (error) {
+    // Si no se pudo guardar, se responde error para que DroPanas reintente.
+    console.error('No se pudo guardar el webhook Dropanas:', error.message);
+    return res.sendStatus(500);
+  }
   res.sendStatus(200);
   if (fresh) {
-    setImmediate(() => dropanasMonitor.processWebhook(req.body).catch((error) => {
-      console.error('Procesamiento del webhook Dropanas:', error.message);
+    setImmediate(() => dropanasMonitor.processInboxItem(deliveryId).catch((error) => {
+      console.error('Procesamiento del webhook Dropanas (queda para reintento):', error.message);
     }));
   }
 });
@@ -267,6 +280,8 @@ if (require.main === module) {
     fixFragmentedProductNames();
     remarketing.start();
     dropanasMonitor.start();
+    dropanasMonitor.startInboxRetry();
+    dropanasOrderAutomation.startAutoRetry();
     pickupReminders.start();
   });
 }

@@ -9,7 +9,11 @@ const api = require('./dropanasApi');
 const STATE_PATH = path.join(DATA_DIR, 'dropanas-api-state.json');
 const MAX_PENDING = 1000;
 const MAX_DELIVERIES = 500;
+const INBOX_MAX_ATTEMPTS = 5;
+const INBOX_RETRY_MS = 5 * 60 * 1000;
 let timer = null;
+let inboxTimer = null;
+const inboxProcessing = new Set();
 let running = null;
 
 function blankState() {
@@ -24,6 +28,12 @@ function blankState() {
     snapshots: { orders: {}, novelties: {} },
     pending: [],
     deliveries: [],
+    // Huellas (sha256) de los cuerpos ya recibidos: un mismo evento reenviado
+    // con otro X-DroPanas-Delivery tampoco se procesa dos veces.
+    bodyHashes: [],
+    // Webhooks recibidos y todavía no procesados con éxito. Se guardan ANTES
+    // de responder 200, así un error o un reinicio no los pierde.
+    inbox: [],
     lastWebhookAt: null,
   };
 }
@@ -205,6 +215,7 @@ function status() {
     lastWarning: state.lastWarning,
     mode: state.mode,
     pending: (state.pending || []).length,
+    webhookInbox: (state.inbox || []).length,
     lastWebhookAt: state.lastWebhookAt,
   };
 }
@@ -222,15 +233,84 @@ function acknowledge(keys) {
   return { acknowledged: before - state.pending.length, pending: state.pending.length };
 }
 
-function recordWebhook(deliveryId) {
+function recordWebhook(deliveryId, { payload, bodyHash } = {}) {
   if (!deliveryId) return false;
   const state = loadState();
+  state.deliveries = state.deliveries || [];
+  state.bodyHashes = state.bodyHashes || [];
+  state.inbox = state.inbox || [];
   if (state.deliveries.includes(deliveryId)) return false;
+  if (bodyHash && state.bodyHashes.includes(bodyHash)) return false;
   state.deliveries.push(deliveryId);
   state.deliveries = state.deliveries.slice(-MAX_DELIVERIES);
+  if (bodyHash) {
+    state.bodyHashes.push(bodyHash);
+    state.bodyHashes = state.bodyHashes.slice(-MAX_DELIVERIES);
+  }
+  if (payload !== undefined) {
+    state.inbox.push({ deliveryId, payload, receivedAt: new Date().toISOString(), attempts: 0, lastError: null });
+    state.inbox = state.inbox.slice(-MAX_PENDING);
+  }
   state.lastWebhookAt = new Date().toISOString();
   saveState(state);
   return true;
+}
+
+// Procesa un webhook guardado en la bandeja de entrada. Solo se borra de la
+// bandeja cuando termina bien; si falla, queda con el error para reintentar.
+async function processInboxItem(deliveryId, options = {}) {
+  if (inboxProcessing.has(deliveryId)) return { ok: false, busy: true };
+  const item = (loadState().inbox || []).find((row) => row.deliveryId === deliveryId);
+  if (!item) return { ok: false, missing: true };
+  inboxProcessing.add(deliveryId);
+  try {
+    const result = await (options.process || processWebhook)(item.payload, options);
+    const state = loadState();
+    state.inbox = (state.inbox || []).filter((row) => row.deliveryId !== deliveryId);
+    saveState(state);
+    return result;
+  } catch (error) {
+    const state = loadState();
+    const row = (state.inbox || []).find((entry) => entry.deliveryId === deliveryId);
+    if (row) {
+      row.attempts = (Number(row.attempts) || 0) + 1;
+      row.lastError = error.message;
+      row.lastAttemptAt = new Date().toISOString();
+    }
+    state.lastError = `Webhook ${deliveryId}: ${error.message}`;
+    saveState(state);
+    throw error;
+  } finally {
+    inboxProcessing.delete(deliveryId);
+  }
+}
+
+async function retryInbox(options = {}) {
+  const items = (loadState().inbox || []).filter((row) => (Number(row.attempts) || 0) < INBOX_MAX_ATTEMPTS);
+  const results = [];
+  for (const item of items) {
+    try {
+      results.push({ deliveryId: item.deliveryId, ok: true, result: await processInboxItem(item.deliveryId, options) });
+    } catch (error) {
+      results.push({ deliveryId: item.deliveryId, ok: false, error: error.message });
+    }
+  }
+  return results;
+}
+
+function startInboxRetry() {
+  if (inboxTimer) return false;
+  const run = () => retryInbox().catch((error) => console.error('Reintento de webhooks Dropanas:', error.message));
+  // Primero lo que haya quedado sin procesar antes de un reinicio.
+  run();
+  inboxTimer = setInterval(run, INBOX_RETRY_MS);
+  inboxTimer.unref?.();
+  return true;
+}
+
+function stopInboxRetry() {
+  if (inboxTimer) clearInterval(inboxTimer);
+  inboxTimer = null;
 }
 
 // Cuando GET /ordenes/{id} no está autorizado, la etiqueta oficial sigue
@@ -464,6 +544,11 @@ module.exports = {
   acknowledge,
   enrichPendingGuides,
   recordWebhook,
+  processInboxItem,
+  retryInbox,
+  startInboxRetry,
+  stopInboxRetry,
+  INBOX_MAX_ATTEMPTS,
   webhookOrder,
   queueWebhookOrder,
   processWebhook,

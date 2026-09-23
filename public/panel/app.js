@@ -218,7 +218,7 @@ function orderDraftRow(draft) {
     </div>
     <div class="dp-order-draft-actions">
       <button class="btn do-open-chat" data-phone="${esc(draft.phone)}" type="button">Ver chat</button>
-      ${canUpload ? `<button class="btn btn-primary do-create-order" data-phone="${esc(draft.phone)}" type="button">Subir pedido</button>` : ''}
+      ${canUpload ? `<button class="btn btn-primary do-create-order" data-phone="${esc(draft.phone)}" data-careful="${warnings.length ? '1' : ''}" type="button">${draft.current && !draft.current.id && draft.current.status ? 'Reintentar subida' : 'Subir pedido'}</button>` : ''}
     </div>
   </div>`
 }
@@ -235,11 +235,16 @@ function renderOrderQueue(data) {
     selectConversation(button.dataset.phone)
   }))
   document.querySelectorAll('.do-create-order').forEach((button) => button.addEventListener('click', async () => {
-    if (!confirm('Se creará este pedido real en DroPanas y quedará pendiente de tu aprobación. ¿Continuar?')) return
+    const question = button.dataset.careful
+      ? 'Este pedido tiene avisos (en naranja). Antes de seguir, revisa en DroPanas que no se haya creado ya. ¿Subirlo de todas formas?'
+      : 'Se creará este pedido real en DroPanas y quedará pendiente de tu aprobación. ¿Continuar?'
+    if (!confirm(question)) return
     button.disabled = true
     try {
       const result = await api(`/dropanas-orders/${encodeURIComponent(button.dataset.phone)}/create`, { method: 'POST', body: '{}' })
-      alert(`Pedido #${result.order.id} creado pendiente de aprobación.`)
+      alert(result.warning
+        ? `Pedido #${result.order.id} creado en DroPanas, pero revísalo: ${result.warning}`
+        : `Pedido #${result.order.id} creado pendiente de aprobación.`)
       await loadDropanasOrderQueue()
     } catch (err) {
       showError(err)
