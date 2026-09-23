@@ -3,13 +3,22 @@
 // Envio completamente automatico de etiquetas nuevas detectadas por el
 // monitor de Dropanas. Permanece apagado salvo que se active expresamente
 // en Render. Para evitar avisar a la persona equivocada, el modo automatico
-// solo acepta una coincidencia unica por TELEFONO; las coincidencias por
-// nombre siguen apareciendo en el panel para revision manual.
+// exige una coincidencia UNICA: primero por TELEFONO (evidencia mas
+// fuerte), y si el telefono no matchea (por ejemplo, un numero cargado con
+// algun digito distinto en Dropanas respecto al que quedo guardado en la
+// conversacion), se acepta tambien una coincidencia por NOMBRE, pero solo
+// si es 'exacto' segun el mismo criterio estricto de nameMatch.js (nombre
+// completo igual, o el mas chico -2+ palabras- contenido entero en el mas
+// grande) Y ademas es la UNICA conversacion candidata. Un parecido parcial
+// (una sola palabra en comun, como "Ana" contra "Ana Maria") nunca alcanza
+// para el modo automatico: esas siguen quedando para revision manual en el
+// panel, igual que antes.
 const dropanas = require('./dropanas');
 const dropanasGuide = require('./dropanasGuide');
 const { getSession, updateSession, listSessions } = require('./state');
 const { mediaUrl } = require('./flow');
 const { detectOrderConflict, buildGuiaPatch } = require('./orderGuard');
+const { foldName, compareNames } = require('./nameMatch');
 const shipping = require('./shipping');
 
 let running = null;
@@ -49,15 +58,27 @@ function statusAction(row) {
   return null;
 }
 
-function matchArrivalByPhone(row, sessions) {
+// FASE 3i: antes se llamaba matchArrivalByPhone y solo miraba telefono. Se
+// le agrego el mismo respaldo por nombre exacto/unico que ya tenia el aviso
+// de guia nueva mas abajo (ver comentario del encabezado del archivo).
+function matchOrderToSession(row, sessions) {
   const phone = require('./dropanasApi').normalizePhone(row?.telefono);
-  if (!phone) return { reason: 'requiere_revision' };
-  const matches = sessions.filter((session) => {
-    const candidate = require('./dropanasApi').normalizePhone(session.phone || session.card?.telefono);
-    return candidate && candidate === phone;
+  if (phone) {
+    const byPhone = sessions.filter((session) => {
+      const candidate = require('./dropanasApi').normalizePhone(session.phone || session.card?.telefono);
+      return candidate && candidate === phone;
+    });
+    if (byPhone.length === 1) return { phone: byPhone[0].phone, session: byPhone[0] };
+    if (byPhone.length > 1) return { reason: 'requiere_revision' };
+  }
+  const target = foldName(row?.cliente);
+  if (!target) return { reason: 'requiere_revision' };
+  const exactas = sessions.filter((session) => {
+    const nombre = session.card?.nombre || session.name || '';
+    return foldName(nombre) && compareNames(nombre, row.cliente) === 'exacto';
   });
-  if (matches.length !== 1) return { reason: 'requiere_revision' };
-  return { phone: matches[0].phone, session: matches[0] };
+  if (exactas.length !== 1) return { reason: 'requiere_revision' };
+  return { phone: exactas[0].phone, session: exactas[0] };
 }
 
 async function processChanges(changes, overrides = {}) {
@@ -90,7 +111,7 @@ async function processChanges(changes, overrides = {}) {
     for (const row of deps.matchRows(rows)) {
       const action = statusAction(row);
       if (action) {
-        const matched = matchArrivalByPhone(row, deps.listSessions());
+        const matched = matchOrderToSession(row, deps.listSessions());
         if (!matched.session) {
           results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
           continue;
@@ -122,7 +143,7 @@ async function processChanges(changes, overrides = {}) {
       }
 
       if (isArrival(row)) {
-        const matched = matchArrivalByPhone(row, deps.listSessions());
+        const matched = matchOrderToSession(row, deps.listSessions());
         if (!matched.session) {
           results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
           continue;
@@ -157,7 +178,13 @@ async function processChanges(changes, overrides = {}) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'transportista_sin_descarga_automatica' });
         continue;
       }
-      if (row.matchType !== 'exacto' || row.matchEvidence !== 'telefono' || !row.phone) {
+      // FASE 3i: antes exigia ademas row.matchEvidence === 'telefono', o sea
+      // que un match por NOMBRE exacto y unico (dropanas.js ya lo calcula
+      // igual de estricto que aca arriba) quedaba afuera del automatico
+      // aunque fuera confiable. Ahora alcanza con matchType === 'exacto'
+      // (por telefono o por nombre), manteniendo la misma exigencia de
+      // unicidad que ya tenia matchRow().
+      if (row.matchType !== 'exacto' || !row.phone) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'requiere_revision' });
         continue;
       }
