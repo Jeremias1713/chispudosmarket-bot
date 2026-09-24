@@ -44,6 +44,7 @@ const dropanasMonitor = require('../dropanasMonitor');
 const dropanasGuide = require('../dropanasGuide');
 const dropanasAuto = require('../dropanasAuto');
 const dropanasOrderAutomation = require('../dropanasOrderAutomation');
+const pickupReminders = require('../pickupReminders');
 
 const STAGE_LABELS = {
   nuevo: 'Nuevo',
@@ -945,6 +946,34 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
 // Integración oficial de solo lectura. La primera consulta crea una
 // referencia y devuelve cero acciones, aunque haya cientos de pedidos: así
 // nunca se avisa en bloque a clientes antiguos al activar la función.
+// Vista previa (NO manda nada) de a quien le toca hoy el recordatorio diario
+// de retiro, con la confirmacion de DroPanas de cada pedido.
+router.get('/api/pickup-reminders/preview', async (_req, res) => {
+  try {
+    const { date, due, skipped, apiOk } = await pickupReminders.plan(new Date(), { ignoreDecided: true });
+    const motivos = {};
+    for (const item of skipped) {
+      const key = item.confirmation === 'otro_estado' ? `DroPanas: ${item.estado || 'otro estado'}` : item.confirmation || 'sin_confirmacion';
+      motivos[key] = (motivos[key] || 0) + 1;
+    }
+    res.json({
+      fecha: date,
+      dropanasRespondio: apiOk,
+      recordara: due.map(({ session, confirmation, order }) => ({
+        phone: session.phone,
+        nombre: session.card?.nombre || session.name || null,
+        guia: session.card?.guia || null,
+        guiaReal: order?.guia || null,
+        confirmacion: confirmation || 'aviso_reciente_del_bot',
+      })),
+      noRecordara: skipped.length,
+      motivos,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/api/dropanas-api/status', (_req, res) => {
   res.json({
     ...dropanasMonitor.status(),
