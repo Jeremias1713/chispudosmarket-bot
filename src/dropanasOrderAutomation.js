@@ -260,6 +260,34 @@ function splitStoredOrder(stored, reference) {
   return sameSale ? { current: stored, previous: null } : { current: null, previous: stored };
 }
 
+// "Agencia: X" en cualquier linea, con o sin negritas, viñetas o guiones.
+const LABELED_AGENCY = /(?:^|\n)[\s>*•\-]*\**\s*(?:agencia|oficina)(?:\s+de\s+retiro|\s+tealca)?\s*\**\s*:\s*\**\s*([^\n]+)/gi;
+
+// Frases que el bot escribe despues de "agencia"/"oficina" y que NO son el
+// nombre de una sucursal ("mas cercana", "dentro de los 5 dias habiles",
+// "al momento de retirar", "cuando llegues a ...").
+const NOT_AN_AGENCY = /^(?:(?:la )?mas (?:cercan|convenient|proxim)\w*|dentro|al momento|cuando|que|para|donde|hasta|durante|antes|despues|en|y|o|por|con|sin|si|tu|tus|su|sus|mi|mis|ese|esa|este|esta|elegida|seleccionada|de tu|de su|a tu|mas conveniente|indicada|correspondiente|a retirar|a buscar|pagar)\b/;
+
+function cleanAgency(raw) {
+  const text = String(raw || '')
+    .replace(/\*+/g, '')
+    .replace(/["“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[\s:;,.!?-]+$/, '')
+    .replace(/^\d+[.)]\s*/, '')
+    .trim();
+  const folded = fold(text);
+  if (folded.length < 3 || folded.length > 70) return null;
+  const core = folded.replace(/^(?:(?:oficina|agencia|sucursal|tealca|de|la|el)\s+)+/, '');
+  if (NOT_AN_AGENCY.test(folded) || NOT_AN_AGENCY.test(core)) return null;
+  // "Tealca" o "agencia" a secas no dicen cual sucursal.
+  if (!folded.replace(/\b(?:oficina|agencia|sucursal|tealca|de|la|el)\b/g, '').trim()) return null;
+  // Plazos y pasos del retiro, no lugares (salvo que parezca una direccion).
+  if (/\b(?:dias?|habiles|retirar|retiro|pagar|pago|plazo|semanas?|horas?|confirmas?)\b/.test(folded)
+    && !/\b(?:av|avenida|calle|cc|centro comercial|local|sector|urb|urbanizacion)\b/.test(folded)) return null;
+  return text;
+}
+
 function historyOrderFacts(history = []) {
   let quantity = null;
   let total = null;
@@ -286,13 +314,27 @@ function historyOrderFacts(history = []) {
       total = Number(raw.replace(/[.,](?=\d{3}(?:\D|$))/g, '').replace(',', '.')) || total;
     }
     if (message?.role !== 'user') {
-      const isAgencyConfirmation = !/(^|\n)\s*\d+[.)]\s/.test(content)
-        && /reserv|apart|retir|retiro|envi|entreg|resumen|pedido/i.test(content);
-      const match = content.match(/(?:retirar|retiro)\s+en\s+(?:la\s+)?agencia\s+(?:de\s+)?([^\n.!?]+)/i)
-        || (isAgencyConfirmation
-          ? content.match(/(?:para|en)\s+(?:la\s+)?agencia(?:\s+tealca)?\s+(?:de\s+)?([^\n.!?,;]+)/i)
-          : null);
-      if (match) agency = match[1].trim();
+      // 1) Lo mas confiable: el campo del resumen del pedido ("Agencia: X",
+      //    "**Agencia:** X", "Oficina de retiro: X").
+      const labeled = [...content.matchAll(LABELED_AGENCY)]
+        .map((found) => cleanAgency(found[1]))
+        .filter(Boolean);
+      if (labeled.length) {
+        agency = labeled.at(-1);
+      } else {
+        // 2) Frases como "retirar en la agencia de X". Solo cuentan si lo que
+        //    sigue es de verdad un nombre de sucursal: antes "retirar y pagar
+        //    en la agencia dentro de los 5 dias habiles" pisaba la agencia
+        //    confirmada con "dentro de los 5 dias habiles".
+        const isAgencyConfirmation = !/(^|\n)\s*\d+[.)]\s/.test(content)
+          && /reserv|apart|retir|retiro|envi|entreg|resumen|pedido/i.test(content);
+        const match = content.match(/(?:retirar|retiro)\s+en\s+(?:la\s+)?agencia\s+(?:de\s+)?([^\n.!?]+)/i)
+          || (isAgencyConfirmation
+            ? content.match(/(?:para|en)\s+(?:la\s+)?agencia(?:\s+tealca)?\s+(?:de\s+)?([^\n.!?,;]+)/i)
+            : null);
+        const candidate = match ? cleanAgency(match[1]) : null;
+        if (candidate) agency = candidate;
+      }
       previousAssistant = content;
     }
   }
@@ -773,5 +815,5 @@ function stopAutoRetry() {
   autoRetryTimer = null;
 }
 
-module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, buildPayload, externalReference, deterministicIdempotencyKey,
+module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, buildPayload, externalReference, deterministicIdempotencyKey,
   mentionedProducts, documentType, retryAutomatic, startAutoRetry, stopAutoRetry, AUTO_RETRY_MAX };
