@@ -66,3 +66,15 @@ test('sin DROPANAS_AUTO_SEND_ENABLED no reintenta nada', async () => {
   assert.equal(result.enabled, false);
   process.env.DROPANAS_AUTO_SEND_ENABLED = 'true';
 });
+
+test('un aviso de hace mas de 5 dias no se reintenta solo (queda para revisar en el panel)', async () => {
+  const change = queueOrder(1006);
+  let calls = 0;
+  const later = Date.parse(change.detectedAt) + monitor.PENDING_RETRY_MAX_AGE_MS + 60 * 1000;
+  await monitor.retryPendingNotifications({
+    now: later,
+    processChanges: async (items) => { calls += items.filter((i) => i.key === change.key).length; return { acknowledged: [], results: [] }; },
+  });
+  assert.equal(calls, 0);
+  assert.equal(monitor.listPending().some((item) => item.key === change.key), true);
+});

@@ -21,7 +21,12 @@ const { detectOrderConflict, buildGuiaPatch } = require('./orderGuard');
 const { foldName, compareNames } = require('./nameMatch');
 const shipping = require('./shipping');
 
-let running = null;
+// Cola en serie. Antes, si entraba un cambio mientras otro se estaba
+// procesando, el segundo llamado devolvia el resultado del PRIMERO y su propio
+// cambio nunca se procesaba (pasaba cuando DroPanas manda varios "Entregado"
+// o "En oficina" juntos). Ahora cada llamado espera su turno y procesa lo suyo.
+let queue = Promise.resolve();
+let active = 0;
 
 function configFromEnv(env = process.env) {
   return { enabled: String(env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true' };
@@ -34,7 +39,7 @@ function status() {
   )).length;
   return {
     enabled: config.enabled,
-    running: Boolean(running),
+    running: active > 0,
     validatedGuideCount,
     realGuideValidated: validatedGuideCount > 0,
   };
@@ -43,6 +48,62 @@ function status() {
 function foldStatus(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 }
+
+// DroPanas primero numera la guia de un pedido como "DP<numero de orden>" y
+// despues, cuando la transportadora la procesa, la reemplaza por la guia real
+// (por ejemplo Tealca 848xxxxx). El bot guardaba la primera y exigia que la
+// guia del aviso fuera identica, asi que todos los avisos siguientes del MISMO
+// pedido (llegada a oficina, entregado, novedad, devolucion) se descartaban en
+// silencio con "guia_no_coincide". Aca se reconoce que son el mismo pedido
+// usando el numero de orden de DroPanas, nunca el nombre ni la posicion.
+const DP_GUIDE = /^DP\d+$/i;
+
+function guideRelation(session, row) {
+  const current = String(session?.card?.guia || '').trim();
+  const incoming = String(row?.guia || '').trim();
+  const orderId = String(row?.dropanasId || '').trim();
+  if (!current) return { kind: 'none' };
+  if (!incoming || current.toUpperCase() === incoming.toUpperCase()) return { kind: 'same' };
+  const sameOrder = Boolean(orderId) && (
+    current.toUpperCase() === `DP${orderId}`
+    || String(session?.card?.dropanasId || '') === orderId
+    || String(session?.dropanasOrder?.id || '') === orderId
+  );
+  // Una guia distinta sin prueba de que sea la misma orden puede ser OTRA
+  // compra del mismo cliente: eso sigue quedando para revision manual.
+  if (!sameOrder) return { kind: 'different' };
+  // Nunca se "baja" de la guia real de la transportadora a la interna DP.
+  if (DP_GUIDE.test(incoming)) return { kind: 'same' };
+  return { kind: 'upgrade', from: current, to: incoming };
+}
+
+function upgradeGuidePatch(session, relation, row) {
+  const card = { ...(session?.card || {}) };
+  card.guia = relation.to;
+  if (!card.guiaDropanas && DP_GUIDE.test(relation.from)) card.guiaDropanas = relation.from;
+  card.dropanasId = String(row.dropanasId);
+  return { card };
+}
+
+// Aplica la guia real sobre la sesion (si corresponde) y devuelve la sesion
+// que hay que usar para armar el aviso, o el motivo por el que no se avisa.
+function resolveGuide(deps, phone, session, row) {
+  const relation = guideRelation(session, row);
+  if (relation.kind === 'none' || relation.kind === 'different') return { reason: 'guia_no_coincide' };
+  if (relation.kind !== 'upgrade') return { session, relation };
+  const patch = upgradeGuidePatch(session, relation, row);
+  const saved = deps.updateSession(phone, patch);
+  return { session: saved && saved.card ? saved : { ...session, ...patch }, relation };
+}
+
+// Estados en los que NO corresponde mandar "tu paquete fue despachado",
+// aunque el evento traiga una guia: el pedido se cancelo, se esta devolviendo
+// o ya termino. Antes cualquiera de estos caia en el aviso de despacho.
+const NO_SHIPPING_NOTICE = new Set([
+  'cancelado', 'cancelada', 'anulado', 'anulada', 'rechazado', 'rechazada',
+  'devuelto', 'devuelta', 'devolucion', 'en devolucion', 'pagado', 'pagada',
+  'entregado', 'entregada',
+]);
 
 function isArrival(row) {
   return ['en oficina', 'en agencia', 'listo para retirar'].includes(foldStatus(row?.estadoPedido));
@@ -83,9 +144,14 @@ function matchOrderToSession(row, sessions) {
 
 async function processChanges(changes, overrides = {}) {
   if (!configFromEnv(overrides.env || process.env).enabled) return { enabled: false, results: [], acknowledged: [] };
-  if (running) return running;
+  const turn = queue.then(() => runChanges(changes, overrides));
+  queue = turn.catch(() => {});
+  return turn;
+}
 
-  running = (async () => {
+async function runChanges(changes, overrides = {}) {
+  active += 1;
+  try {
     const deps = {
       matchRows: dropanas.matchRows,
       capture: dropanasGuide.capture,
@@ -116,15 +182,17 @@ async function processChanges(changes, overrides = {}) {
           results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
           continue;
         }
-        const { phone, session } = matched;
-        if (!['en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion'].includes(session.stage)) {
+        const { phone } = matched;
+        if (!['en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion'].includes(matched.session.stage)) {
           results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_logistico_invalido' });
           continue;
         }
-        if (!session.card?.guia || (row.guia && String(session.card.guia) !== String(row.guia))) {
-          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'guia_no_coincide' });
+        const guide = resolveGuide(deps, phone, matched.session, row);
+        if (!guide.session) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: guide.reason });
           continue;
         }
+        const session = guide.session;
         try {
           const notice = await deps[action.notify](phone, session);
           if (notice?.sent || notice?.reason === 'ya_avisado') {
@@ -148,15 +216,17 @@ async function processChanges(changes, overrides = {}) {
           results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
           continue;
         }
-        const { phone, session } = matched;
-        if (session.stage !== 'en_camino') {
+        const { phone } = matched;
+        if (matched.session.stage !== 'en_camino') {
           results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_no_en_camino' });
           continue;
         }
-        if (!session.card?.guia || (row.guia && String(session.card.guia) !== String(row.guia))) {
-          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'guia_no_coincide' });
+        const guide = resolveGuide(deps, phone, matched.session, row);
+        if (!guide.session) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: guide.reason });
           continue;
         }
+        const session = guide.session;
         try {
           const notice = await deps.maybeNotifyArrival(phone, session);
           if (notice?.sent || notice?.reason === 'ya_avisado') {
@@ -174,6 +244,10 @@ async function processChanges(changes, overrides = {}) {
         continue;
       }
 
+      if (NO_SHIPPING_NOTICE.has(foldStatus(row.estadoPedido))) {
+        results.push({ orderId: row.dropanasId, sent: false, reason: 'estado_sin_aviso_de_despacho' });
+        continue;
+      }
       if (!['tealca', 'zoom', 'mrw'].includes(row.carrier)) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'transportista_sin_descarga_automatica' });
         continue;
@@ -188,14 +262,34 @@ async function processChanges(changes, overrides = {}) {
         results.push({ orderId: row.dropanasId, sent: false, reason: 'requiere_revision' });
         continue;
       }
-      if (!row.sendEligible || row.shippingStage !== 'esperando_guia') {
-        results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'estado_no_esperando_guia' });
-        continue;
+      // "vendido" y "esperando_guia" son igual de validos para la primera guia
+      // (mismo criterio que dropanas.js/stageRules). Antes aca se exigia
+      // "esperando_guia" exacto, una etapa que solo se fija a mano, asi que
+      // la mayoria de las ventas nunca recibia el aviso de despacho.
+      let upgrade = null;
+      if (!row.sendEligible) {
+        const current = deps.getSession(row.phone);
+        const relation = guideRelation(current, row);
+        if (relation.kind !== 'upgrade') {
+          results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'estado_no_esperando_guia' });
+          continue;
+        }
+        // Llego la guia real de un pedido que ya estaba en camino con la guia
+        // interna DP: se actualiza siempre, para que los avisos que siguen
+        // muestren el numero de la transportadora. El aviso de despacho solo
+        // se manda si nunca se habia mandado (no se repite).
+        if (current.shippingNotifiedAt || current.stage !== 'en_camino') {
+          deps.updateSession(row.phone, upgradeGuidePatch(current, relation, row));
+          results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'guia_actualizada' });
+          if (row._pendingKey) acknowledged.push(row._pendingKey);
+          continue;
+        }
+        upgrade = relation;
       }
 
       try {
         const session = deps.getSession(row.phone);
-        const conflict = deps.detectOrderConflict(session, row.guia);
+        const conflict = upgrade ? null : deps.detectOrderConflict(session, row.guia);
         if (conflict) {
           results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'pedido_nuevo_sin_confirmar' });
           continue;
@@ -222,6 +316,10 @@ async function processChanges(changes, overrides = {}) {
         if (!card.producto && row.producto) card.producto = row.producto;
         const amount = Number(row.totalVentaBs);
         if (card.monto == null && Number.isFinite(amount) && amount > 0) card.monto = amount;
+        if (upgrade && !patch.card.guiaDropanas && DP_GUIDE.test(upgrade.from)) patch.card.guiaDropanas = upgrade.from;
+        // Se guarda el numero de orden: asi, cuando DroPanas cambie la guia
+        // de este pedido, los avisos siguientes lo siguen reconociendo.
+        if (row.dropanasId) patch.card.dropanasId = String(row.dropanasId);
         const updated = deps.updateSession(row.phone, patch);
         const notice = await deps.maybeNotifyShipping(row.phone, updated);
         results.push({ orderId: row.dropanasId, phone: row.phone, sent: Boolean(notice?.sent), notice });
@@ -232,13 +330,9 @@ async function processChanges(changes, overrides = {}) {
     }
 
     return { enabled: true, results, acknowledged };
-  })();
-
-  try {
-    return await running;
   } finally {
-    running = null;
+    active -= 1;
   }
 }
 
-module.exports = { configFromEnv, status, processChanges };
+module.exports = { configFromEnv, status, processChanges, guideRelation };

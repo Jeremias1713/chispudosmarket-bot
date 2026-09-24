@@ -16,6 +16,9 @@ const INBOX_RETRY_MS = 5 * 60 * 1000;
 // porque maybeNotify* ya es idempotente ('ya_avisado').
 const PENDING_RETRY_MAX = 8;
 const PENDING_RETRY_MS = 10 * 60 * 1000;
+// Un aviso con mas de 5 dias ya no se manda solo ("ya llego" una semana
+// tarde confunde mas de lo que ayuda): queda en el panel para revisarlo.
+const PENDING_RETRY_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 let timer = null;
 let inboxTimer = null;
 let pendingRetryTimer = null;
@@ -333,9 +336,13 @@ async function retryPendingNotifications(options = {}) {
   }
   const state = loadState();
   state.pendingAttempts = state.pendingAttempts || {};
-  const candidates = (state.pending || []).filter((change) => (
-    change?.order && (Number(state.pendingAttempts[change.key]) || 0) < PENDING_RETRY_MAX
-  ));
+  const now = Number(options.now) || Date.now();
+  const candidates = (state.pending || []).filter((change) => {
+    if (!change?.order) return false;
+    if ((Number(state.pendingAttempts[change.key]) || 0) >= PENDING_RETRY_MAX) return false;
+    const detected = Date.parse(change.detectedAt || '');
+    return !Number.isFinite(detected) || now - detected <= PENDING_RETRY_MAX_AGE_MS;
+  });
   if (!candidates.length) return { enabled: true, results: [] };
   const processChanges = options.processChanges || require('./dropanasAuto').processChanges;
   const automatic = await processChanges(candidates);
@@ -350,6 +357,10 @@ async function retryPendingNotifications(options = {}) {
     }
   }
   if (acknowledgedKeys.size) fresh.pending = fresh.pending.filter((item) => !acknowledgedKeys.has(item.key));
+  const stillPending = new Set((fresh.pending || []).map((item) => item.key));
+  for (const key of Object.keys(fresh.pendingAttempts)) {
+    if (!stillPending.has(key)) delete fresh.pendingAttempts[key];
+  }
   saveState(fresh);
   return { enabled: true, results: automatic.results || [], acknowledged: automatic.acknowledged || [] };
 }
@@ -608,6 +619,7 @@ module.exports = {
   startPendingRetry,
   stopPendingRetry,
   PENDING_RETRY_MAX,
+  PENDING_RETRY_MAX_AGE_MS,
   webhookOrder,
   queueWebhookOrder,
   processWebhook,
