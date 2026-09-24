@@ -281,6 +281,7 @@ if (require.main === module) {
     remarketing.start();
     dropanasMonitor.start();
     dropanasMonitor.startInboxRetry();
+    dropanasMonitor.startPendingRetry();
     dropanasOrderAutomation.startAutoRetry();
     pickupReminders.start();
   });

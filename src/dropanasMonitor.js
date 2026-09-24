@@ -11,8 +11,14 @@ const MAX_PENDING = 1000;
 const MAX_DELIVERIES = 500;
 const INBOX_MAX_ATTEMPTS = 5;
 const INBOX_RETRY_MS = 5 * 60 * 1000;
+// Avisos (llegada a oficina, entregado, etc.) que dropanasAuto no pudo
+// confirmar en el primer intento: se reintentan solos, sin duplicar nada
+// porque maybeNotify* ya es idempotente ('ya_avisado').
+const PENDING_RETRY_MAX = 8;
+const PENDING_RETRY_MS = 10 * 60 * 1000;
 let timer = null;
 let inboxTimer = null;
+let pendingRetryTimer = null;
 const inboxProcessing = new Set();
 let running = null;
 
@@ -27,6 +33,7 @@ function blankState() {
     mode: null,
     snapshots: { orders: {}, novelties: {} },
     pending: [],
+    pendingAttempts: {},
     deliveries: [],
     // Huellas (sha256) de los cuerpos ya recibidos: un mismo evento reenviado
     // con otro X-DroPanas-Delivery tampoco se procesa dos veces.
@@ -313,6 +320,54 @@ function stopInboxRetry() {
   inboxTimer = null;
 }
 
+// Reintenta avisos ya encolados (llegada a oficina, entregado, novedad,
+// devolucion) que dropanasAuto.processChanges no pudo confirmar en su
+// primer intento -- por ejemplo, un error transitorio al mandar el WhatsApp.
+// Antes de este reintento, ese aviso se perdia para siempre: el webhook ya
+// habia respondido 200 y nada volvia a intentarlo. maybeNotify* ya evita
+// duplicados ('ya_avisado'), asi que reintentar nunca reenvia un aviso que
+// ya llego al cliente.
+async function retryPendingNotifications(options = {}) {
+  if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() !== 'true') {
+    return { enabled: false, results: [] };
+  }
+  const state = loadState();
+  state.pendingAttempts = state.pendingAttempts || {};
+  const candidates = (state.pending || []).filter((change) => (
+    change?.order && (Number(state.pendingAttempts[change.key]) || 0) < PENDING_RETRY_MAX
+  ));
+  if (!candidates.length) return { enabled: true, results: [] };
+  const processChanges = options.processChanges || require('./dropanasAuto').processChanges;
+  const automatic = await processChanges(candidates);
+  const acknowledgedKeys = new Set((automatic.acknowledged || []).map(String));
+  const fresh = loadState();
+  fresh.pendingAttempts = fresh.pendingAttempts || {};
+  for (const change of candidates) {
+    if (acknowledgedKeys.has(change.key)) {
+      delete fresh.pendingAttempts[change.key];
+    } else {
+      fresh.pendingAttempts[change.key] = (Number(fresh.pendingAttempts[change.key]) || 0) + 1;
+    }
+  }
+  if (acknowledgedKeys.size) fresh.pending = fresh.pending.filter((item) => !acknowledgedKeys.has(item.key));
+  saveState(fresh);
+  return { enabled: true, results: automatic.results || [], acknowledged: automatic.acknowledged || [] };
+}
+
+function startPendingRetry() {
+  if (pendingRetryTimer) return false;
+  const run = () => retryPendingNotifications().catch((error) => console.error('Reintento de avisos Dropanas:', error.message));
+  run();
+  pendingRetryTimer = setInterval(run, PENDING_RETRY_MS);
+  pendingRetryTimer.unref?.();
+  return true;
+}
+
+function stopPendingRetry() {
+  if (pendingRetryTimer) clearInterval(pendingRetryTimer);
+  pendingRetryTimer = null;
+}
+
 // Cuando GET /ordenes/{id} no está autorizado, la etiqueta oficial sigue
 // trayendo el teléfono impreso. Se usa únicamente ese teléfono para asociar
 // la guía; nunca se adivina por nombre ni por posición en la cola.
@@ -549,6 +604,10 @@ module.exports = {
   startInboxRetry,
   stopInboxRetry,
   INBOX_MAX_ATTEMPTS,
+  retryPendingNotifications,
+  startPendingRetry,
+  stopPendingRetry,
+  PENDING_RETRY_MAX,
   webhookOrder,
   queueWebhookOrder,
   processWebhook,
