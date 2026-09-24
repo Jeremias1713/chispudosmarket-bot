@@ -54,3 +54,11 @@ test('la ultima agencia confirmada es la que vale', () => {
   ]);
   assert.equal(facts.agency, 'Los Guayos');
 });
+
+test('explica si el 403 viene de la API (codigo) o de un firewall (pagina HTML)', () => {
+  const api = automation.describeApiError({ response: { status: 403, headers: { 'content-type': 'application/json' }, data: { success: false, error: { code: 'CROSS_MODE_OPERATION_FORBIDDEN', message: 'Modo cruzado' } } } });
+  assert.equal(api, '403 — CROSS_MODE_OPERATION_FORBIDDEN — Modo cruzado');
+  const waf = automation.describeApiError({ response: { status: 403, headers: { 'content-type': 'text/html', 'cf-ray': 'x' }, data: '<!DOCTYPE html><html>Attention Required</html>' } });
+  assert.match(waf, /firewall de Cloudflare/);
+  assert.equal(automation.describeApiError({ code: 'ECONNRESET' }), 'ECONNRESET');
+});

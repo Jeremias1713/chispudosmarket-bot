@@ -446,6 +446,31 @@ function baseDraft(phone, session, config = settings()) {
   };
 }
 
+// Explica un error de DroPanas con lo que haga falta para saber de donde
+// viene: el codigo de la API (ej. CROSS_MODE_OPERATION_FORBIDDEN) si responde
+// JSON, o un bloqueo de firewall si vuelve una pagina HTML (por ejemplo
+// Cloudflare), que no es un problema de permisos de la clave.
+function describeApiError(error) {
+  const response = error?.response;
+  if (!response) return error?.code || error?.message || 'error';
+  const data = response.data;
+  const type = String(response.headers?.['content-type'] || '');
+  const parts = [String(response.status)];
+  if (data && typeof data === 'object') {
+    const inner = typeof data.error === 'object' && data.error ? data.error : {};
+    const code = inner.code || data.code || (typeof data.error === 'string' ? data.error : null);
+    const message = inner.message || data.message;
+    if (code) parts.push(String(code));
+    if (message) parts.push(String(message).slice(0, 160));
+  } else if (/html/i.test(type) || /^\s*</.test(String(data || ''))) {
+    const firewall = response.headers?.['cf-ray'] ? 'firewall de Cloudflare' : 'firewall';
+    parts.push(`respuesta HTML (${firewall}), no es un error de permisos de la API`);
+  } else if (data) {
+    parts.push(String(data).replace(/\s+/g, ' ').slice(0, 120));
+  }
+  return parts.join(' — ');
+}
+
 async function apiGet(endpoint, config, params) {
   let response;
   try {
@@ -454,9 +479,7 @@ async function apiGet(endpoint, config, params) {
       timeout: config.timeoutMs, validateStatus: (status) => status >= 200 && status < 300,
     });
   } catch (error) {
-    const status = error.response?.status;
-    const detail = error.response?.data?.message || error.response?.data?.error || error.response?.data?.code;
-    throw new Error(`GET /${endpoint}: ${status || error.code || 'error'}${detail ? ` — ${detail}` : ''}`);
+    throw new Error(`GET /${endpoint}: ${describeApiError(error)}`);
   }
   const mode = String(response.headers['x-dropanas-mode'] || '').toLowerCase();
   if (mode !== config.tokenMode) throw new Error(`Modo DroPanas inesperado: ${mode || 'sin identificar'}`);
@@ -485,7 +508,7 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
         } catch (catalogError) {
           return {
             rows: [],
-            warning: `DroPanas no permite validar el catálogo con esta clave (${detailError.message}; ${catalogError.message}). Los IDs configurados se comprobarán al crear el pedido pendiente.`,
+            warning: `DroPanas no permite validar el catálogo con esta clave (${detailError.message}; GET /productos: ${describeApiError(catalogError)}). Los IDs configurados se comprobarán al crear el pedido pendiente.`,
           };
         }
       }
@@ -815,5 +838,5 @@ function stopAutoRetry() {
   autoRetryTimer = null;
 }
 
-module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, buildPayload, externalReference, deterministicIdempotencyKey,
+module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, buildPayload, externalReference, deterministicIdempotencyKey,
   mentionedProducts, documentType, retryAutomatic, startAutoRetry, stopAutoRetry, AUTO_RETRY_MAX };
