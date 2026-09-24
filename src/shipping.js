@@ -235,6 +235,20 @@ async function notifyStatusTemplate(phone, session, options) {
   if (s[options.marker]) return { sent: false, reason: 'ya_avisado' };
   const values = placeholderValues(s);
   const params = [values.nombre, values.producto];
+  // Si el cliente escribio en las ultimas 24 horas, WhatsApp deja mandar un
+  // mensaje normal: se usa ese texto en vez de la plantilla. Fuera de esa
+  // ventana WhatsApp solo acepta plantillas aprobadas.
+  if (options.freeText && isWindowOpen(s)) {
+    try {
+      await require('./flow').sendRawReply(phone, fillPlaceholders(options.freeText, values));
+    } catch (err) {
+      const detail = err.response?.data?.error?.message || err.message;
+      console.error(`No se pudo mandar el mensaje de ${options.marker} a`, phone, detail);
+      return { sent: false, reason: 'error', error: detail };
+    }
+    updateSession(phone, { [options.marker]: new Date().toISOString() });
+    return { sent: true, viaTemplate: false };
+  }
   try {
     const { wamid, snapshot } = await sendTemplateWithSnapshot({
       to: phone,
@@ -254,9 +268,15 @@ async function notifyStatusTemplate(phone, session, options) {
   return { sent: true, viaTemplate: true };
 }
 
+// Agradecimiento cuando DroPanas marca el pedido como entregado. Dentro de la
+// ventana de 24 horas va como mensaje normal (no necesita plantilla).
+const DEFAULT_DELIVERED_FREE_TEXT =
+  '¡Hola {{nombre}}! 🙌 Vimos que ya retiraste tu pedido de {{producto}}. ¡Muchas gracias por tu compra! Si tienes cualquier duda sobre cómo tomarlo, aquí estamos para ayudarte. 😊';
+
 function maybeNotifyDelivered(phone, session) {
   const settings = getSettings();
   return notifyStatusTemplate(phone, session, {
+    freeText: settings.deliveredFreeText || DEFAULT_DELIVERED_FREE_TEXT,
     marker: 'deliveredNotifiedAt',
     templateName: settings.deliveredTemplateName || 'pedido_entregado_gracias',
     languageCode: settings.deliveredTemplateLanguage || 'es',

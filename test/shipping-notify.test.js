@@ -194,3 +194,28 @@ test('entregado, novedad y pendiente de devolución usan plantillas de dos varia
   const updated = getSession(phone);
   assert.ok(updated.deliveredNotifiedAt && updated.noveltyNotifiedAt && updated.returnPendingNotifiedAt);
 });
+
+test('entregado: si el cliente escribio en las ultimas 24h va como mensaje normal, sin plantilla', async () => {
+  const plantillas = [];
+  const textos = [];
+  whatsapp.sendTemplate = async (to, name) => { plantillas.push(name); return { wamid: 'wamid.T' }; };
+  const flow = require('../src/flow');
+  const sendRawReplyOriginal = flow.sendRawReply;
+  flow.sendRawReply = async (to, text) => { textos.push(text); };
+  try {
+    const phone = seedSesionCerrada({
+      stage: 'esperando_retiro',
+      history: [{ role: 'user', content: 'ya lo busque', at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }],
+    });
+    const result = await shipping.maybeNotifyDelivered(phone, getSession(phone));
+    assert.equal(result.sent, true);
+    assert.equal(result.viaTemplate, false);
+    assert.deepEqual(plantillas, []);
+    assert.equal(textos.length >= 1, true);
+    assert.match(textos[0], /Carlos/);
+    assert.match(textos[0], /Shilajit/);
+    assert.ok(getSession(phone).deliveredNotifiedAt);
+  } finally {
+    flow.sendRawReply = sendRawReplyOriginal;
+  }
+});
