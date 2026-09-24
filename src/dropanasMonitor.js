@@ -19,6 +19,20 @@ const PENDING_RETRY_MS = 10 * 60 * 1000;
 // Un aviso con mas de 5 dias ya no se manda solo ("ya llego" una semana
 // tarde confunde mas de lo que ayuda): queda en el panel para revisarlo.
 const PENDING_RETRY_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
+// Horario en que el bot puede mandar avisos automaticos a clientes (hora de
+// Venezuela). Fuera de este horario los avisos quedan en cola y salen solos
+// a partir de las 8:00, con el reintento de pendientes.
+const NOTIFY_START_HOUR = 8;
+const NOTIFY_END_HOUR = 20;
+
+function caracasHour(now = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Caracas', hour: '2-digit', hourCycle: 'h23' }).format(now));
+}
+
+function isQuietHours(now = new Date()) {
+  const hour = caracasHour(now);
+  return hour < NOTIFY_START_HOUR || hour >= NOTIFY_END_HOUR;
+}
 let timer = null;
 let inboxTimer = null;
 let pendingRetryTimer = null;
@@ -37,6 +51,7 @@ function blankState() {
     snapshots: { orders: {}, novelties: {} },
     pending: [],
     pendingAttempts: {},
+    pendingNotes: {},
     deliveries: [],
     // Huellas (sha256) de los cuerpos ya recibidos: un mismo evento reenviado
     // con otro X-DroPanas-Delivery tampoco se procesa dos veces.
@@ -182,7 +197,7 @@ async function sync(options = {}) {
       state.lastWarning = noveltyResult.warning || null;
       saveState(state);
       let automatic = null;
-      if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true') {
+      if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true' && !isQuietHours(options.now)) {
         automatic = await require('./dropanasAuto').processChanges(changes.orderChanges);
         if (automatic.acknowledged?.length) acknowledge(automatic.acknowledged);
       }
@@ -226,6 +241,14 @@ function status() {
     mode: state.mode,
     pending: (state.pending || []).length,
     webhookInbox: (state.inbox || []).length,
+    // Por que siguen sin salir los avisos pendientes (ultimo intento).
+    pendingReasons: Object.values(state.pendingNotes || {}).reduce((acc, note) => {
+      const key = note?.reason || 'sin_motivo';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {}),
+    lastNotifyErrors: Object.values(state.pendingNotes || {}).map((note) => note?.error).filter(Boolean).slice(-5),
+    quietHours: isQuietHours(),
     lastWebhookAt: state.lastWebhookAt,
   };
 }
@@ -334,6 +357,10 @@ async function retryPendingNotifications(options = {}) {
   if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() !== 'true') {
     return { enabled: false, results: [] };
   }
+  // De noche no se le escribe a nadie: queda para las 8:00.
+  if (!options.ignoreQuietHours && isQuietHours(options.now ? new Date(options.now) : new Date())) {
+    return { enabled: true, quietHours: true, results: [] };
+  }
   const state = loadState();
   state.pendingAttempts = state.pendingAttempts || {};
   const now = Number(options.now) || Date.now();
@@ -349,17 +376,29 @@ async function retryPendingNotifications(options = {}) {
   const acknowledgedKeys = new Set((automatic.acknowledged || []).map(String));
   const fresh = loadState();
   fresh.pendingAttempts = fresh.pendingAttempts || {};
+  fresh.pendingNotes = fresh.pendingNotes || {};
+  const byOrder = new Map((automatic.results || []).map((result) => [String(result.orderId), result]));
   for (const change of candidates) {
     if (acknowledgedKeys.has(change.key)) {
       delete fresh.pendingAttempts[change.key];
+      delete fresh.pendingNotes[change.key];
     } else {
       fresh.pendingAttempts[change.key] = (Number(fresh.pendingAttempts[change.key]) || 0) + 1;
+      const result = byOrder.get(String(change.order?.dropanasId)) || {};
+      fresh.pendingNotes[change.key] = {
+        reason: result.reason || result.notice?.reason || null,
+        error: result.error || result.notice?.error || null,
+        at: new Date().toISOString(),
+      };
     }
   }
   if (acknowledgedKeys.size) fresh.pending = fresh.pending.filter((item) => !acknowledgedKeys.has(item.key));
   const stillPending = new Set((fresh.pending || []).map((item) => item.key));
   for (const key of Object.keys(fresh.pendingAttempts)) {
     if (!stillPending.has(key)) delete fresh.pendingAttempts[key];
+  }
+  for (const key of Object.keys(fresh.pendingNotes)) {
+    if (!stillPending.has(key)) delete fresh.pendingNotes[key];
   }
   saveState(fresh);
   return { enabled: true, results: automatic.results || [], acknowledged: automatic.acknowledged || [] };
@@ -561,7 +600,7 @@ async function processWebhook(payload, options = {}) {
   const now = new Date().toISOString();
   const change = queueWebhookOrder(order, now, payload.evento);
   let automatic = null;
-  if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true') {
+  if (String(process.env.DROPANAS_AUTO_SEND_ENABLED || '').toLowerCase() === 'true' && !isQuietHours(options.now)) {
     automatic = await require('./dropanasAuto').processChanges([change]);
     if (automatic.acknowledged?.length) acknowledge(automatic.acknowledged);
   }
@@ -620,6 +659,7 @@ module.exports = {
   stopPendingRetry,
   PENDING_RETRY_MAX,
   PENDING_RETRY_MAX_AGE_MS,
+  isQuietHours,
   webhookOrder,
   queueWebhookOrder,
   processWebhook,
