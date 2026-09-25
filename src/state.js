@@ -110,6 +110,7 @@ function saveAll(sessions) {
   const tmpPath = `${STATE_PATH}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(sessions, null, 2));
   fs.renameSync(tmpPath, STATE_PATH);
+  readCache = null;
 }
 
 function blankSession() {
@@ -234,6 +235,32 @@ function listSessions() {
   return Object.entries(sessions).map(([phone, data]) => ({ phone, ...data }));
 }
 
+// Lectura cacheada SOLO para el panel (listado, pipeline, detalle de una
+// charla). Con miles de conversaciones, sessions.json pesa varios MB y el
+// panel lo volvia a leer y parsear entero cada 4 segundos por cada pestaña
+// abierta (y otra vez para la charla abierta): en el celular eso era lo que
+// hacia todo lento. Aca se parsea una sola vez y se reutiliza mientras el
+// archivo no cambie (mismo mtime y tamaño; cualquier guardado de este u otro
+// proceso lo invalida). OJO: lo que devuelve es compartido, es de SOLO
+// LECTURA -- nadie debe modificarlo. Todo lo que escribe sigue pasando por
+// loadAll()/saveAll() como siempre.
+let readCache = null;
+function listSessionsCached() {
+  let stat;
+  try {
+    stat = fs.statSync(STATE_PATH);
+  } catch (err) {
+    if (err.code === 'ENOENT') return { list: [], byPhone: new Map() };
+    throw err;
+  }
+  const key = `${stat.mtimeMs}:${stat.size}`;
+  if (readCache && readCache.key === key) return readCache;
+  const list = listSessions();
+  const byPhone = new Map(list.map((s) => [String(s.phone), s]));
+  readCache = { key, list, byPhone };
+  return readCache;
+}
+
 // FASE 3h: el borrado PERMANENTE de verdad que ya anticipaba el comentario
 // de resetSession() de arriba -- una accion administrativa explicita y
 // separada, nunca automatica ni efecto secundario de otra cosa. Borra del
@@ -283,6 +310,7 @@ module.exports = {
   unlockStage,
   markFollowUp,
   listSessions,
+  listSessionsCached,
   deleteSessions,
   applyTemplateStatus,
 };
