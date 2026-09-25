@@ -12,6 +12,7 @@ const multer = require('multer');
 const axios = require('axios');
 const {
   listSessions,
+  listSessionsCached,
   getSession,
   updateSession,
   appendMessage,
@@ -311,6 +312,137 @@ router.get('/api/conversations', (req, res) => {
   res.json(list);
 });
 
+/* ---------- listado liviano (panel rapido en el celular) ---------- */
+// El listado viejo (/api/conversations, arriba) devuelve TODAS las
+// conversaciones completas: con ~3000 conversaciones eran 2,2 MB que el panel
+// bajaba cada 4 segundos y redibujaba enteros (28.000 nodos en pantalla). En
+// el celular eso era lo que dejaba todo lento. Estos endpoints devuelven solo
+// lo que se ve (una pagina, con el ultimo mensaje recortado) y, en el
+// refresco periodico, solo lo que cambio desde la ultima vez (`since`).
+// El listado viejo se deja tal cual porque lo siguen usando otras vistas.
+const LIST_PREVIEW_CHARS = 140;
+const CURSOR_OVERLAP_MS = 5000;
+
+function slimConvo(s) {
+  const c = toConvo(s);
+  return {
+    phone: c.phone,
+    name: c.name,
+    stage: c.stage,
+    stageLocked: c.stageLocked,
+    stageReason: c.stageReason,
+    paused: c.paused,
+    lastMessage: String(c.lastMessage || '').slice(0, LIST_PREVIEW_CHARS),
+    lastMessageAt: c.lastMessageAt,
+    createdAt: c.createdAt,
+    changedAt: s.updatedAt || c.lastMessageAt || c.createdAt || null,
+  };
+}
+
+// Lista liviana ordenada, calculada una sola vez por version del archivo.
+const slimIndexByCache = new WeakMap();
+function slimIndex(cache) {
+  let index = slimIndexByCache.get(cache);
+  if (!index) {
+    index = cache.list.map(slimConvo);
+    index.sort((a, b) => (Date.parse(b.lastMessageAt || 0) || 0) - (Date.parse(a.lastMessageAt || 0) || 0));
+    slimIndexByCache.set(cache, index);
+  }
+  return index;
+}
+
+function clampInt(value, fallback, min, max) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+router.get('/api/conversations/feed', (req, res) => {
+  // El cursor sale de ANTES de leer, con margen: un guardado que ocurra
+  // mientras se arma esta respuesta entra igual en el proximo refresco (un
+  // duplicado no molesta, el panel lo reemplaza por telefono).
+  const cursor = new Date(Date.now() - CURSOR_OVERLAP_MS).toISOString();
+  const search = String(req.query.search || '').trim();
+  const limit = clampInt(req.query.limit, 40, 1, 200);
+  const offset = clampInt(req.query.offset, 0, 0, 1e9);
+  const cache = listSessionsCached();
+  let items = slimIndex(cache);
+  if (search) items = items.filter((c) => matchesConversation(cache.byPhone.get(String(c.phone)) || c, search));
+  const total = items.length;
+
+  const since = Date.parse(String(req.query.since || ''));
+  if (Number.isFinite(since)) {
+    const changed = items.filter((c) => (Date.parse(c.changedAt || 0) || 0) > since);
+    return res.json({ items: changed, total, cursor, delta: true });
+  }
+  res.json({ items: items.slice(offset, offset + limit), total, hasMore: offset + limit < total, cursor });
+});
+
+// Pipeline agrupado en el servidor: antes el panel bajaba las ~3000
+// conversaciones completas cada 4 segundos para armar el tablero y dibujaba
+// todas las tarjetas. Ahora cada columna trae su total y solo las primeras N
+// tarjetas (con "ver mas" para pedir la siguiente tanda de UNA columna).
+// Los filtros de tiempo son los mismos que tenia el panel (Hoy, 24h, 3 dias,
+// semana, +7 dias sin novedad, rango Desde/Hasta), usando la zona horaria
+// del navegador (tz = getTimezoneOffset en minutos) para "Hoy" y el rango.
+const PIPELINE_WINDOWS_MS = {
+  '24h': (ms) => ms <= 24 * 60 * 60 * 1000,
+  '3d': (ms) => ms <= 3 * 24 * 60 * 60 * 1000,
+  '7d': (ms) => ms <= 7 * 24 * 60 * 60 * 1000,
+  stale: (ms) => ms > 7 * 24 * 60 * 60 * 1000,
+};
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function localDateStartMs(isoDate, tzMinutes) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ''));
+  if (!m) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + tzMinutes * 60 * 1000;
+}
+
+function pipelineTimeFilter(query, now = Date.now()) {
+  const windowId = String(query.window || '');
+  const tz = clampInt(query.tz, 0, -14 * 60, 14 * 60);
+  const tsOf = (c) => Date.parse(c.lastMessageAt || c.createdAt || '') || null;
+  if (windowId === 'custom') {
+    const fromStart = localDateStartMs(query.from, tz);
+    const toStart = localDateStartMs(query.to, tz);
+    if (fromStart == null && toStart == null) return () => true;
+    const fromTs = fromStart == null ? -Infinity : fromStart;
+    const toTs = toStart == null ? Infinity : toStart + DAY_MS - 1;
+    return (c) => { const t = tsOf(c); return t != null && t >= fromTs && t <= toTs; };
+  }
+  if (windowId === 'hoy') {
+    const localDay = (ms) => Math.floor((ms - tz * 60 * 1000) / DAY_MS);
+    const today = localDay(now);
+    return (c) => { const t = tsOf(c); return t != null && localDay(t) === today; };
+  }
+  const rule = PIPELINE_WINDOWS_MS[windowId];
+  if (!rule) return () => true;
+  return (c) => rule(now - (tsOf(c) ?? now));
+}
+
+router.get('/api/pipeline', (req, res) => {
+  const perStage = clampInt(req.query.perStage, 25, 1, 200);
+  const offset = clampInt(req.query.offset, 0, 0, 1e9);
+  const onlyStage = String(req.query.stage || '').trim();
+  const keep = pipelineTimeFilter(req.query);
+  const buckets = new Map(STAGES.map((id) => [id, []]));
+  for (const c of slimIndex(listSessionsCached())) {
+    if (!keep(c)) continue;
+    (buckets.get(c.stage) || buckets.get(STAGES[0])).push(c);
+  }
+  if (onlyStage) {
+    const bucket = buckets.get(onlyStage) || [];
+    return res.json({ stage: onlyStage, total: bucket.length, items: bucket.slice(offset, offset + perStage) });
+  }
+  res.json({
+    stages: STAGES.map((id) => {
+      const bucket = buckets.get(id);
+      return { id, label: STAGE_LABELS[id] || id, count: bucket.length, items: bucket.slice(0, perStage) };
+    }),
+  });
+});
+
 // FASE 3h: limpieza manual de conversaciones viejas (ver Configuracion >
 // "Limpieza de conversaciones" en el panel). Pensada para el caso real de un
 // negocio con miles de conversaciones "nuevo"/"perdido" que nunca avanzaron
@@ -366,7 +498,11 @@ router.delete('/api/conversations/cleanup', (req, res) => {
 
 router.get('/api/conversations/:phone', (req, res) => {
   const phone = req.params.phone;
-  const s = getSession(phone);
+  // Lectura desde la cache del panel cuando la conversacion ya existe (lo
+  // normal): evita re-parsear todo sessions.json cada 4 segundos solo para
+  // refrescar la charla abierta. getSession() queda para el caso raro de una
+  // conversacion que todavia no esta guardada (la crea, igual que antes).
+  const s = listSessionsCached().byPhone.get(String(phone)) || getSession(phone);
   // FASE 3c: appendMessage (state.js) guarda el snapshot de la plantilla
   // (nombre, origen, parametros, contenido real ya sustituido, wamid, estado
   // confirmado por Meta) en el campo `template` de cada mensaje del history
@@ -384,7 +520,15 @@ router.get('/api/conversations/:phone', (req, res) => {
     attachment: m.attachment || null,
     template: m.template || null,
   }));
-  res.json({ conversation: toConvo({ phone, ...s }), messages });
+  const body = { conversation: toConvo({ ...s, phone }), messages };
+  // Version del contenido: si el panel ya tiene exactamente esto (misma
+  // version, mandada en ?v=), no hace falta volver a mandar ni redibujar la
+  // charla entera cada 4 segundos. Se calcula sobre la respuesta completa, asi
+  // que cualquier cambio (mensaje nuevo, tilde de leido, etapa, ventana de
+  // 24h que se cierra) da otra version.
+  const version = crypto.createHash('sha1').update(JSON.stringify(body)).digest('base64url');
+  if (req.query?.v && String(req.query.v) === version) return res.json({ unchanged: true, version });
+  res.json({ ...body, version });
 });
 
 router.post('/api/conversations/:phone/send', async (req, res) => {
