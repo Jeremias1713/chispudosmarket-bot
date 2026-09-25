@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Panel de ventas — ChispudosMarket</title>
 <link rel="stylesheet" href="/panel/styles.css">
 <link rel="manifest" href="/panel/manifest.json">
@@ -24,19 +24,19 @@
     </span>
 
     <nav class="rail-nav" role="tablist">
-      <button class="tab" role="tab" data-view="view-convos" data-label="Conversaciones"
+      <button class="tab" role="tab" data-mobile="primary" data-mobile-label="Chats" data-view="view-convos" data-label="Conversaciones"
               aria-selected="true" aria-label="Conversaciones">
         <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3v3.2c0 .68.79 1.05 1.31.61L13.5 19H20a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>
         <span class="rail-tip">Conversaciones</span>
       </button>
 
-      <button class="tab" role="tab" data-view="view-pipeline" data-label="Pipeline"
+      <button class="tab" role="tab" data-mobile="primary" data-mobile-label="Pipeline" data-view="view-pipeline" data-label="Pipeline"
               aria-selected="false" aria-label="Pipeline">
         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="12" rx="1.6"/><rect x="9.5" y="4" width="5" height="16" rx="1.6"/><rect x="16" y="4" width="5" height="8" rx="1.6"/></svg>
         <span class="rail-tip">Pipeline</span>
       </button>
 
-      <button class="tab" role="tab" data-view="view-metrics" data-label="Métricas"
+      <button class="tab" role="tab" data-mobile="primary" data-mobile-label="Métricas" data-view="view-metrics" data-label="Métricas"
               aria-selected="false" aria-label="Métricas">
         <svg viewBox="0 0 24 24"><path d="M3 3v18h18v-2H5V3zm4 14h2V9H7zm4 0h2V5h-2zm4 0h2v-6h-2z"/></svg>
         <span class="rail-tip">Métricas</span>
@@ -54,7 +54,7 @@
         <span class="rail-tip">Imágenes</span>
       </button>
 
-      <button class="tab" role="tab" data-view="view-dropanas-auto" data-label="Automatización DroPanas"
+      <button class="tab" role="tab" data-mobile="primary" data-mobile-label="DroPanas" data-view="view-dropanas-auto" data-label="Automatización DroPanas"
               aria-selected="false" aria-label="Automatización DroPanas">
         <svg viewBox="0 0 24 24"><path d="M12 2a4 4 0 0 0-4 4v1.1A7 7 0 0 0 5 13v3l-2 2v1h18v-1l-2-2v-3a7 7 0 0 0-3-5.9V6a4 4 0 0 0-4-4zm0 2a2 2 0 0 1 2 2v.3a7.4 7.4 0 0 0-4 0V6a2 2 0 0 1 2-2zm-1.8 17h3.6a2 2 0 0 1-3.6 0z"/></svg>
         <span class="rail-tip">Automatización DroPanas</span>
@@ -83,8 +83,25 @@
         <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.65 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.12.22.39.3.61.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.49 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
         <span class="rail-tip">Configuración</span>
       </button>
+
+      <!-- Solo en el celular: la barra de abajo muestra las 4 secciones de
+           todos los dias y el resto se abre desde "Más" (antes eran 10
+           iconos apretados y los ultimos quedaban fuera de la pantalla). -->
+      <button class="tab tab-more" type="button" id="moreTab" aria-label="Más secciones" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        <span class="tab-label">Más</span>
+      </button>
     </nav>
   </aside>
+
+  <div class="more-sheet" id="moreSheet" hidden>
+    <div class="more-sheet-backdrop" data-close="1"></div>
+    <div class="more-sheet-panel" role="dialog" aria-label="Más secciones">
+      <div class="more-sheet-grip"></div>
+      <div class="more-sheet-grid" id="moreSheetGrid"></div>
+      <button class="btn more-sheet-logout" type="button" id="moreLogout">Cerrar sesión</button>
+    </div>
+  </div>
 
   <div class="app-body">
 
@@ -111,7 +128,7 @@
             <div class="convo-list" id="convoList"></div>
           </aside>
 
-          <div class="chat">
+          <div class="chat" id="chatPanel">
             <div class="chat-header" id="chatHeader" hidden>
               <button class="btn back" id="chatBack" aria-label="Volver">←</button>
               <span class="avatar avatar-sm" id="chatAvatar"></span>
@@ -131,6 +148,10 @@
                 <input type="checkbox" id="chatBotToggle">
                 <span>Bot activo</span>
               </label>
+              <button class="btn chat-tools-toggle" id="chatToolsToggle" type="button" aria-expanded="false" aria-controls="chatTools" title="Ficha del pedido: etapa, guía, monto, nota">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 1.5L18.5 9H13zM8 13h8v1.6H8zm0 3.4h8V18H8zm0-6.8h4v1.6H8z"/></svg>
+                <span>Ficha</span>
+              </button>
             </div>
 
             <div class="followup-bar window-closed-bar" id="windowClosedBar" hidden>
@@ -151,38 +172,44 @@
               <div class="tpl-preview-box" id="wcPreviewBox" hidden></div>
             </div>
 
-            <div class="followup-bar" id="followupBar" hidden>
-              <span class="followup-info" id="followupInfo"></span>
-              <button class="btn" id="followupBtn" type="button">Marcar guía enviada</button>
-            </div>
+            <!-- Ficha del pedido. En PC queda siempre a la vista; en el celular
+                 se abre con el boton "Ficha" para que los mensajes tengan la
+                 pantalla (antes estos bloques tapaban mas de la mitad). -->
+            <div class="chat-tools" id="chatTools">
+              <div class="chat-tools-stage" id="chatToolsStage"></div>
+              <div class="followup-bar" id="followupBar" hidden>
+                <span class="followup-info" id="followupInfo"></span>
+                <button class="btn" id="followupBtn" type="button">Marcar guía enviada</button>
+              </div>
 
-            <div class="followup-bar" id="amountBar" hidden>
-              <span class="followup-info">Monto vendido</span>
-              <input type="number" id="amountInput" min="0" step="0.01" placeholder="0.00" style="width:110px">
-              <button class="btn" id="amountSaveBtn" type="button">Guardar</button>
-            </div>
+              <div class="followup-bar" id="amountBar" hidden>
+                <span class="followup-info">Monto vendido</span>
+                <input type="number" id="amountInput" min="0" step="0.01" placeholder="0.00" style="width:110px">
+                <button class="btn" id="amountSaveBtn" type="button">Guardar</button>
+              </div>
 
-            <div class="followup-bar" id="guiaBar" hidden>
-              <span class="followup-info">Número de guía</span>
-              <input type="text" id="guiaInput" placeholder="Ej: 123456789" style="width:160px">
-              <span class="followup-info">Agencia</span>
-              <input type="text" id="guiaAgenciaInput" placeholder="Ej: Tealca Maracaibo" style="width:170px">
-              <label class="btn" id="guiaImageLabel" title="Adjuntar foto de la guía" style="cursor:pointer">
-                📎 Foto
-                <input type="file" id="guiaImageFile" accept="image/jpeg,image/png,image/webp" hidden>
-              </label>
-              <span class="followup-info" id="guiaImageName"></span>
-              <button class="btn" id="guiaSaveBtn" type="button">Guardar y avisar</button>
-              <span class="followup-info" id="guiaStatus"></span>
-            </div>
+              <div class="followup-bar" id="guiaBar" hidden>
+                <span class="followup-info">Número de guía</span>
+                <input type="text" id="guiaInput" placeholder="Ej: 123456789" style="width:160px">
+                <span class="followup-info">Agencia</span>
+                <input type="text" id="guiaAgenciaInput" placeholder="Ej: Tealca Maracaibo" style="width:170px">
+                <label class="btn" id="guiaImageLabel" title="Adjuntar foto de la guía" style="cursor:pointer">
+                  📎 Foto
+                  <input type="file" id="guiaImageFile" accept="image/jpeg,image/png,image/webp" hidden>
+                </label>
+                <span class="followup-info" id="guiaImageName"></span>
+                <button class="btn" id="guiaSaveBtn" type="button">Guardar y avisar</button>
+                <span class="followup-info" id="guiaStatus"></span>
+              </div>
 
-            <div class="followup-bar note-bar" id="noteBar" hidden>
-              <span class="followup-info">Nota interna</span>
-              <input type="text" id="noteInput" placeholder="Ej: cliente frecuente, pide al mayor..." style="flex:1;min-width:160px">
-              <button class="btn" id="noteSaveBtn" type="button">Guardar</button>
-            </div>
+              <div class="followup-bar note-bar" id="noteBar" hidden>
+                <span class="followup-info">Nota interna</span>
+                <input type="text" id="noteInput" placeholder="Ej: cliente frecuente, pide al mayor..." style="flex:1;min-width:160px">
+                <button class="btn" id="noteSaveBtn" type="button">Guardar</button>
+              </div>
 
-            <div class="memory-card" id="memoryCard" hidden></div>
+              <div class="memory-card" id="memoryCard" hidden></div>
+            </div>
 
             <div class="chat-messages" id="chatMessages">
               <div class="empty-state">
@@ -221,6 +248,7 @@
           <button class="btn" id="pipelineApplyRange" type="button">Aplicar rango</button>
           <button class="btn" id="pipelineClearRange" type="button" hidden>Quitar filtro</button>
         </div>
+        <div class="pipeline-stage-nav" id="pipelineStageNav"></div>
         <div class="board" id="board"></div>
       </section>
 

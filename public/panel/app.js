@@ -56,6 +56,9 @@ function esc(value) {
 }
 
 function showError(err) {
+  // Si algo fallo, la proxima lectura de la charla tiene que redibujar todo
+  // (aunque el servidor no haya cambiado) para deshacer lo que se toco a mano.
+  if (typeof chatVersion !== 'undefined') chatVersion.v = null
   alert('No se pudo guardar: ' + err.message)
 }
 
@@ -139,6 +142,9 @@ function showView(viewId) {
   })
   const tab = document.querySelector(`.tab[data-view="${viewId}"]`)
   $('viewTitle').textContent = tab?.dataset.label ?? ''
+  syncMoreTab(viewId)
+  if (viewId !== 'view-convos') closeChatMobile()
+  if (viewId === 'view-convos') pollConversations()
   if (viewId === 'view-pipeline') pollPipeline()
   if (viewId === 'view-metrics') pollMetrics()
   if (viewId === 'view-products') pollProducts()
@@ -150,8 +156,61 @@ function showView(viewId) {
   if (viewId === 'view-config') loadSettings()
 }
 
-document.querySelectorAll('.tab').forEach((tab) => {
+document.querySelectorAll('.tab[data-view]').forEach((tab) => {
   tab.addEventListener('click', () => showView(tab.dataset.view))
+})
+
+/* ---------- celular: menu "Más" y ficha de la charla ---------- */
+
+const mobileQuery = window.matchMedia('(max-width: 768px)')
+
+function buildMoreSheet() {
+  const grid = $('moreSheetGrid')
+  if (!grid) return
+  grid.innerHTML = [...document.querySelectorAll('.rail-nav .tab[data-view]:not([data-mobile="primary"])')]
+    .map((t) => `<button type="button" class="more-item" data-view="${esc(t.dataset.view)}">${t.querySelector('svg')?.outerHTML || ''}<span>${esc(t.dataset.label)}</span></button>`)
+    .join('')
+}
+function openMoreSheet() {
+  buildMoreSheet()
+  $('moreSheet').hidden = false
+  document.querySelectorAll('.more-item').forEach((b) => b.classList.toggle('is-on', b.dataset.view === state.activeView))
+}
+function closeMoreSheet() { $('moreSheet').hidden = true }
+$('moreTab')?.addEventListener('click', openMoreSheet)
+$('moreSheet')?.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]')) return closeMoreSheet()
+  const item = e.target.closest('.more-item')
+  if (item) { closeMoreSheet(); showView(item.dataset.view) }
+})
+$('moreLogout')?.addEventListener('click', () => $('logoutBtn')?.click())
+
+// "Más" se marca como activo cuando la seccion abierta es una de las que
+// viven adentro de ese menu.
+function syncMoreTab(viewId) {
+  const tab = document.querySelector(`.rail-nav .tab[data-view="${viewId}"]`)
+  $('moreTab')?.classList.toggle('is-current', Boolean(tab && tab.dataset.mobile !== 'primary'))
+}
+
+// La etapa vive en el encabezado de la charla en PC; en el celular no entra,
+// asi que pasa a la ficha (se mueve el mismo elemento, no una copia).
+function placeStagePicker() {
+  const picker = document.querySelector('.stage-picker')
+  if (!picker) return
+  if (mobileQuery.matches) {
+    $('chatToolsStage')?.appendChild(picker)
+  } else {
+    const header = $('chatHeader')
+    const toggle = header?.querySelector('.switch')
+    if (header && picker.parentElement !== header) header.insertBefore(picker, toggle)
+  }
+}
+mobileQuery.addEventListener?.('change', placeStagePicker)
+placeStagePicker()
+
+$('chatToolsToggle')?.addEventListener('click', () => {
+  const open = $('chatPanel').classList.toggle('tools-open')
+  $('chatToolsToggle').setAttribute('aria-expanded', String(open))
 })
 
 /* ---------- centro de automatización DroPanas ---------- */
@@ -548,56 +607,214 @@ function convoInner(convo) {
     </div>`
 }
 
-let convoCache = []
-
-function renderConvoList(list) {
-  convoCache = list
-  const box = $('convoList')
-  box.innerHTML = ''
-
-  if (!list.length) {
-    box.innerHTML = emptyState('💬', 'Sin conversaciones todavía', 'En cuanto alguien le escriba al bot, va a aparecer acá.')
-    return
-  }
-
-  list.forEach((convo) => {
-    const el = document.createElement('div')
-    el.className = 'convo-item' + (convo.phone === state.selectedPhone ? ' is-active' : '')
-    el.dataset.phone = convo.phone
-    el.innerHTML = convoInner(convo)
-    el.addEventListener('click', () => selectConversation(convo.phone))
-    box.appendChild(el)
-  })
+// El listado ya no baja las miles de conversaciones enteras cada 4 segundos
+// (eran >2 MB por refresco y ~28.000 nodos redibujados: en el celular dejaba
+// todo trabado). Ahora:
+//   - arranca con una pagina de LIST_PAGE y va pidiendo mas al llegar abajo;
+//   - el refresco periodico pide SOLO lo que cambio desde el ultimo cursor;
+//   - el DOM se actualiza fila por fila: solo se reescribe una fila si su
+//     contenido cambio, y solo se mueve si cambio de lugar.
+const LIST_PAGE = 40
+const convoList = {
+  byPhone: new Map(),
+  order: [],
+  nodes: new Map(),
+  sigs: new Map(),
+  total: 0,
+  hasMore: false,
+  cursor: null,
+  search: '',
+  loadingMore: false,
+  generation: 0,
 }
 
-async function pollConversations() {
+function convoSig(convo) {
+  return [convo.name, convo.stage, convo.paused, convo.lastMessage, convo.lastMessageAt].join('\u0001')
+}
+
+function sortConvoOrder() {
+  const ts = (c) => Date.parse(c.lastMessageAt || 0) || 0
+  convoList.order = [...convoList.byPhone.values()].sort((a, b) => ts(b) - ts(a)).map((c) => c.phone)
+}
+
+function renderConvoList() {
+  const box = $('convoList')
+  const { order, byPhone, nodes, sigs } = convoList
+  if (!order.length) {
+    nodes.clear()
+    sigs.clear()
+    box.innerHTML = convoList.search
+      ? emptyState('🔎', 'Sin resultados', 'No hay conversaciones que coincidan con esa búsqueda.')
+      : emptyState('💬', 'Sin conversaciones todavía', 'En cuanto alguien le escriba al bot, va a aparecer acá.')
+    return
+  }
+  box.querySelector(':scope > .empty-state')?.remove()
+
+  const keep = new Set(order)
+  for (const [phone, el] of nodes) {
+    if (!keep.has(phone)) { el.remove(); nodes.delete(phone); sigs.delete(phone) }
+  }
+
+  let cursorNode = box.firstElementChild
+  for (const phone of order) {
+    const convo = byPhone.get(phone)
+    let el = nodes.get(phone)
+    const sig = convoSig(convo)
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'convo-item'
+      el.dataset.phone = phone
+      nodes.set(phone, el)
+    }
+    if (sigs.get(phone) !== sig) {
+      el.innerHTML = convoInner(convo)
+      sigs.set(phone, sig)
+    }
+    el.classList.toggle('is-selected', phone === state.selectedPhone)
+    if (el !== cursorNode) box.insertBefore(el, cursorNode)
+    else cursorNode = cursorNode.nextElementSibling
+  }
+
+  let more = $('convoMore')
+  if (!more) {
+    more = document.createElement('div')
+    more.id = 'convoMore'
+    more.className = 'convo-more'
+    listObserver?.observe(more)
+  }
+  more.textContent = convoList.hasMore ? 'Cargando más…' : `${convoList.total} conversaciones`
+  box.appendChild(more)
+}
+
+function mergeConvos(items, { onlyVisibleRange } = {}) {
+  const ts = (c) => Date.parse(c.lastMessageAt || 0) || 0
+  const lastPhone = convoList.order[convoList.order.length - 1]
+  const floor = onlyVisibleRange && convoList.hasMore && lastPhone ? ts(convoList.byPhone.get(lastPhone)) : -Infinity
+  for (const item of items) {
+    // Un cambio en una conversacion vieja que todavia no se cargo (por
+    // ejemplo, se le cambio la etapa) no se mete al final de la lista:
+    // aparece sola cuando se llegue a esa parte con "cargar mas".
+    if (!convoList.byPhone.has(item.phone) && ts(item) < floor) continue
+    convoList.byPhone.set(item.phone, item)
+  }
+  sortConvoOrder()
+}
+
+async function loadConvoFirstPage() {
+  const generation = ++convoList.generation
   const search = $('convoSearch').value.trim()
-  let list
+  let data
   try {
-    list = await api('/conversations' + (search ? `?search=${encodeURIComponent(search)}` : ''))
+    data = await api(`/conversations/feed?limit=${LIST_PAGE}` + (search ? `&search=${encodeURIComponent(search)}` : ''))
   } catch {
     return
   }
-  renderConvoList(list)
+  if (generation !== convoList.generation) return
+  convoList.search = search
+  convoList.byPhone = new Map()
+  convoList.total = data.total
+  convoList.hasMore = data.hasMore
+  convoList.cursor = data.cursor
+  mergeConvos(data.items)
+  $('convoList').scrollTop = 0
+  renderConvoList()
 }
+
+async function loadMoreConvos() {
+  if (!convoList.hasMore || convoList.loadingMore) return
+  convoList.loadingMore = true
+  const generation = convoList.generation
+  try {
+    const search = convoList.search
+    const data = await api(`/conversations/feed?limit=${LIST_PAGE}&offset=${convoList.byPhone.size}` + (search ? `&search=${encodeURIComponent(search)}` : ''))
+    if (generation !== convoList.generation) return
+    convoList.total = data.total
+    convoList.hasMore = data.hasMore
+    mergeConvos(data.items)
+    renderConvoList()
+  } catch {
+    /* se reintenta al volver a llegar abajo */
+  } finally {
+    convoList.loadingMore = false
+  }
+}
+
+// Mantiene el nombre de antes: lo llaman varias acciones (cambiar etapa,
+// pausar el bot, mandar un mensaje) para refrescar el listado.
+async function pollConversations() {
+  if (!convoList.cursor || $('convoSearch').value.trim() !== convoList.search) return loadConvoFirstPage()
+  const generation = convoList.generation
+  const search = convoList.search
+  let data
+  try {
+    data = await api(`/conversations/feed?since=${encodeURIComponent(convoList.cursor)}` + (search ? `&search=${encodeURIComponent(search)}` : ''))
+  } catch {
+    return
+  }
+  if (generation !== convoList.generation) return
+  convoList.cursor = data.cursor
+  convoList.total = data.total
+  if (data.items.length) {
+    mergeConvos(data.items, { onlyVisibleRange: true })
+    renderConvoList()
+  } else {
+    const more = $('convoMore')
+    if (more && !convoList.hasMore) more.textContent = `${convoList.total} conversaciones`
+  }
+}
+
+const listObserver = 'IntersectionObserver' in window
+  ? new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) loadMoreConvos()
+  }, { root: $('convoList'), rootMargin: '400px 0px' })
+  : null
+if (!listObserver) {
+  $('convoList').addEventListener('scroll', () => {
+    const box = $('convoList')
+    if (box.scrollHeight - box.scrollTop - box.clientHeight < 400) loadMoreConvos()
+  }, { passive: true })
+}
+
+// Un solo listener para toda la lista (antes uno por fila, recreado cada 4s).
+$('convoList').addEventListener('click', (e) => {
+  const item = e.target.closest('.convo-item')
+  if (item) selectConversation(item.dataset.phone)
+})
 
 let searchTimer = null
 $('convoSearch').addEventListener('input', () => {
   clearTimeout(searchTimer)
-  searchTimer = setTimeout(pollConversations, 200)
+  searchTimer = setTimeout(loadConvoFirstPage, 250)
 })
 
 function selectConversation(phone) {
   state.selectedPhone = phone
-  document.querySelectorAll('.convo-item').forEach((el) => {
-    el.classList.toggle('is-active', el.dataset.phone === phone)
-  })
+  convoList.nodes.forEach((el, p) => el.classList.toggle('is-selected', p === phone))
   document.getElementById('convoLayout')?.classList.add('show-chat')
+  document.querySelector('.app-shell')?.classList.add('chat-open')
   loadChat()
 }
 
-$('chatBack').addEventListener('click', () => {
+function closeChatMobile() {
   document.getElementById('convoLayout')?.classList.remove('show-chat')
+  document.querySelector('.app-shell')?.classList.remove('chat-open')
+  $('chatPanel')?.classList.remove('tools-open')
+}
+
+$('chatBack').addEventListener('click', () => {
+  closeChatMobile()
+  if (history.state?.chat) history.back()
+})
+
+// En el celular, el boton "atras" del telefono cierra la charla y vuelve a
+// la lista (como en WhatsApp) en vez de salir del panel.
+document.getElementById('convoList').addEventListener('click', () => {
+  if (window.matchMedia('(max-width: 768px)').matches && !history.state?.chat) {
+    history.pushState({ chat: true }, '')
+  }
+})
+window.addEventListener('popstate', () => {
+  if (document.querySelector('.app-shell')?.classList.contains('chat-open')) closeChatMobile()
 })
 
 /* ---------- ficha del cliente ---------- */
@@ -712,6 +929,7 @@ function renderMessages(messages, forceScrollBottom) {
   const box = $('chatMessages')
   if (!messages.length) {
     box.innerHTML = emptyState('💬', 'Sin mensajes', 'Esta conversación todavía no tiene historial.')
+    renderedMessageSigs = []
     return
   }
   // El polling (cada 4s) vuelve a llamar a esto para la charla abierta, aunque
@@ -720,9 +938,25 @@ function renderMessages(messages, forceScrollBottom) {
   // Ahora solo se sigue bajando solo si ya estaba pegado abajo del todo, o si
   // forceScrollBottom pide arrancar abajo (recien se abrio esta charla).
   const wasNearBottom = forceScrollBottom || box.scrollHeight - box.scrollTop - box.clientHeight < 80
-  box.innerHTML = messages.map((m) => `<div class="bubble bubble-${m.role}">${bubbleInner(m)}</div>`).join('')
+  // Solo se agregan los mensajes nuevos al final si lo anterior no cambio
+  // (lo normal: llego un mensaje). Redibujar todo cada vez reiniciaba los
+  // audios que se estaban escuchando y recargaba las imagenes.
+  const sigs = messages.map((m) => `${m.role}|${m.at}|${m.content}|${m.template?.status || ''}|${m.attachment?.url || ''}`)
+  const prev = renderedMessageSigs
+  const samePrefix = !forceScrollBottom && prev.length && prev.length <= sigs.length
+    && prev.every((sig, i) => sig === sigs[i]) && box.querySelector(':scope > .bubble')
+  if (samePrefix) {
+    if (sigs.length > prev.length) {
+      box.insertAdjacentHTML('beforeend', messages.slice(prev.length)
+        .map((m) => `<div class="bubble bubble-${m.role} is-new">${bubbleInner(m)}</div>`).join(''))
+    }
+  } else {
+    box.innerHTML = messages.map((m) => `<div class="bubble bubble-${m.role}">${bubbleInner(m)}</div>`).join('')
+  }
+  renderedMessageSigs = sigs
   if (wasNearBottom) box.scrollTop = box.scrollHeight
 }
+let renderedMessageSigs = []
 
 /* ---------- etapa ---------- */
 
@@ -755,16 +989,26 @@ function renderStagePicker(convo) {
 
 /* ---------- abrir un chat ---------- */
 
+// Version de la charla abierta que ya esta dibujada (ver panel.js): el
+// refresco de cada 4s la manda y, si nada cambio, el servidor contesta
+// "unchanged" sin mandar el historial de nuevo ni redibujar nada.
+let chatVersion = { phone: null, v: null }
+
 async function loadChat() {
   if (!state.selectedPhone) return
+  const phone = state.selectedPhone
+  const known = chatVersion.phone === phone && chatVersion.v ? '?v=' + encodeURIComponent(chatVersion.v) : ''
   let data
   try {
-    data = await api('/conversations/' + encodeURIComponent(state.selectedPhone))
+    data = await api('/conversations/' + encodeURIComponent(phone) + known)
   } catch {
     return
   }
+  if (phone !== state.selectedPhone) return
+  if (data.unchanged) return
   const { conversation, messages } = data
   if (conversation.phone !== state.selectedPhone) return
+  chatVersion = { phone, v: data.version || null }
 
   $('chatHeader').hidden = false
   $('chatComposer').hidden = false
@@ -1261,28 +1505,78 @@ $('pipelineClearRange').addEventListener('click', () => {
   pollPipeline()
 })
 
-function renderBoard(list) {
-  const grouped = new Map(state.stages.map((s) => [s.id, []]))
-  for (const convo of list) {
-    const bucket = grouped.get(convo.stage) ?? grouped.get(state.stages[0]?.id)
-    bucket?.push(convo)
-  }
+const PIPELINE_PAGE = 25
+const pipelineShown = new Map()
+let lastBoardJson = ''
 
-  $('board').innerHTML = state.stages.map((s) => {
-    const cards = grouped.get(s.id) ?? []
-    return `<section class="kcol" data-stage="${esc(s.id)}">
+function pipelineColumn(col) {
+  const shown = col.items.length
+  const rest = col.count - shown
+  return `<section class="kcol" data-stage="${esc(col.id)}">
       <header class="kcol-head">
-        <span class="badge" data-stage="${esc(s.id)}">${esc(s.label)}</span>
-        <span class="kcol-count">${cards.length}</span>
+        <span class="badge" data-stage="${esc(col.id)}">${esc(col.label)}</span>
+        <span class="kcol-count">${col.count}</span>
       </header>
       <div class="kcol-body">
-        ${cards.length ? cards.map(pipelineCard).join('') : '<p class="kcol-empty">Vacía</p>'}
+        ${shown ? col.items.map(pipelineCard).join('') : '<p class="kcol-empty">Vacía</p>'}
+        ${rest > 0 ? `<button class="btn kcol-more" type="button" data-stage="${esc(col.id)}">Ver ${Math.min(rest, PIPELINE_PAGE)} más (${rest} restantes)</button>` : ''}
       </div>
     </section>`
-  }).join('')
+}
 
+function renderBoard(data) {
+  const json = JSON.stringify(data)
+  if (json === lastBoardJson) return
+  lastBoardJson = json
+  const board = $('board')
+  const scrollLeft = board.scrollLeft
+  const bodyScroll = new Map([...board.querySelectorAll('.kcol')].map((c) => [c.dataset.stage, c.querySelector('.kcol-body')?.scrollTop || 0]))
+  board.innerHTML = data.stages.map(pipelineColumn).join('')
+  board.scrollLeft = scrollLeft
+  board.querySelectorAll('.kcol').forEach((c) => {
+    const body = c.querySelector('.kcol-body')
+    if (body) body.scrollTop = bodyScroll.get(c.dataset.stage) || 0
+  })
+  renderPipelineStageNav(data)
   bindBoardEvents()
 }
+
+// En el celular las columnas se recorren de a una (deslizando): esta tira de
+// etapas arriba muestra cuantas hay en cada una y salta directo a esa columna.
+function renderPipelineStageNav(data) {
+  const nav = $('pipelineStageNav')
+  if (!nav) return
+  nav.innerHTML = data.stages.map((c) => `<button type="button" class="stage-jump" data-stage="${esc(c.id)}">${esc(c.label)} <b>${c.count}</b></button>`).join('')
+}
+$('pipelineStageNav')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.stage-jump')
+  if (!btn) return
+  const col = $('board').querySelector(`.kcol[data-stage="${CSS.escape(btn.dataset.stage)}"]`)
+  col?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+})
+
+function pipelineQuery() {
+  const params = new URLSearchParams()
+  if (state.pipelineWindow) params.set('window', state.pipelineWindow)
+  if (state.pipelineWindow === 'custom') {
+    if (state.pipelineFrom) params.set('from', state.pipelineFrom)
+    if (state.pipelineTo) params.set('to', state.pipelineTo)
+  }
+  params.set('tz', String(new Date().getTimezoneOffset()))
+  return params
+}
+
+$('board').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.kcol-more')
+  if (!btn) return
+  const stage = btn.dataset.stage
+  const already = btn.closest('.kcol').querySelectorAll('.kcard').length
+  btn.disabled = true
+  btn.textContent = 'Cargando…'
+  pipelineShown.set(stage, already + PIPELINE_PAGE)
+  lastBoardJson = ''
+  await pollPipeline()
+})
 
 async function dropOnStage(phone, stage) {
   try {
@@ -1330,14 +1624,22 @@ function bindBoardEvents() {
   })
 }
 
+let lastPipelineFilter = ''
 async function pollPipeline() {
-  let list
+  const params = pipelineQuery()
+  const filterKey = params.toString()
+  if (filterKey !== lastPipelineFilter) { pipelineShown.clear(); lastPipelineFilter = filterKey }
+  const perStage = Math.max(PIPELINE_PAGE, ...pipelineShown.values())
+  params.set('perStage', String(Math.min(200, perStage)))
+  let data
   try {
-    list = await api('/conversations')
+    data = await api('/pipeline?' + params.toString())
   } catch {
     return
   }
-  renderBoard(filtrarPorTiempo(list, state.pipelineWindow))
+  // Las columnas que no se expandieron se recortan a su pagina normal.
+  for (const col of data.stages) col.items = col.items.slice(0, pipelineShown.get(col.id) || PIPELINE_PAGE)
+  renderBoard(data)
 }
 
 /* ---------- métricas ---------- */
@@ -3225,21 +3527,47 @@ $('cp_save').addEventListener('click', async () => {
 
 /* ---------- arranque ---------- */
 
+// Refresco periodico. Cosas que antes lo hacian pesado en el celular:
+//   - seguia corriendo con el panel en segundo plano o la pantalla apagada
+//     (ahora se frena y, al volver, refresca al instante);
+//   - refrescaba el listado aunque se estuviera en otra pestaña;
+//   - el pipeline y DroPanas se pedian enteros cada 4s (ahora cada ~16s,
+//     no necesitan mas: no son conversaciones en vivo).
+let tickCount = 0
+let tickRunning = false
+async function tick() {
+  if (document.hidden || tickRunning) return
+  tickRunning = true
+  tickCount++
+  const slow = tickCount % 4 === 0
+  try {
+    const jobs = []
+    if (state.activeView === 'view-convos') {
+      jobs.push(pollConversations())
+      if (state.selectedPhone) jobs.push(loadChat())
+    }
+    if (state.activeView === 'view-pipeline' && slow) jobs.push(pollPipeline())
+    if (state.activeView === 'view-metrics' && slow) jobs.push(pollMetrics())
+    if (state.activeView === 'view-products' && slow) jobs.push(pollProducts())
+    if (state.activeView === 'view-library' && slow) jobs.push(pollLibrary())
+    if (state.activeView === 'view-dropanas-auto' && slow) jobs.push(loadDropanasOrders())
+    if (state.activeView === 'view-broadcast') jobs.push(pollBroadcasts())
+    if (state.activeView === 'view-sim') jobs.push(pollSimulator())
+    if (state.activeView === 'view-coupons' && slow) jobs.push(pollCoupons())
+    await Promise.allSettled(jobs)
+  } finally {
+    tickRunning = false
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) tick()
+})
+
 async function boot() {
   await loadStages()
-  await pollConversations()
-  setInterval(() => {
-    pollConversations()
-    if (state.selectedPhone) loadChat()
-    if (state.activeView === 'view-pipeline') pollPipeline()
-    if (state.activeView === 'view-metrics') pollMetrics()
-    if (state.activeView === 'view-products') pollProducts()
-    if (state.activeView === 'view-library') pollLibrary()
-    if (state.activeView === 'view-dropanas-auto') loadDropanasOrders()
-    if (state.activeView === 'view-broadcast') pollBroadcasts()
-    if (state.activeView === 'view-sim') pollSimulator()
-    if (state.activeView === 'view-coupons') pollCoupons()
-  }, POLL_MS)
+  await loadConvoFirstPage()
+  setInterval(tick, POLL_MS)
 }
 
 boot()
