@@ -8,6 +8,9 @@ const dropanasApi = require('./dropanasApi');
 const { SOLD_STAGES } = require('./stageRules');
 const agencies = require('./agencies');
 const catalog = require('./catalog');
+const fs = require('fs');
+const path = require('path');
+const { DATA_DIR } = require('./dataDir');
 
 const CACHE_MS = 5 * 60 * 1000;
 // Etapas que normalmente significan que el pedido ya salió por DroPanas.
@@ -26,6 +29,15 @@ const AUTO_RETRY_MS = 10 * 60 * 1000;
 const AUTO_RETRY_MAX = 5;
 let cache = null;
 let cachePromise = null;
+// Catalogo de oficinas Tealca: cambia muy poco y la consulta es lenta, asi que
+// va aparte, con cache larga y una copia guardada en disco para cuando
+// DroPanas tarda o falla (los IDs de oficina siguen siendo validos).
+const OFFICE_CACHE_MS = 6 * 60 * 60 * 1000;
+const OFFICE_FAIL_RETRY_MS = 60 * 1000;
+const OFFICE_TIMEOUT_MS = 60 * 1000;
+const OFFICE_FILE = path.join(DATA_DIR, 'dropanas-oficinas.json');
+let officeCache = null;
+let officePromise = null;
 // Sube con cada guardado de configuración: una validación que empezó con la
 // configuración vieja no puede dejar su resultado guardado en caché.
 let configVersion = 0;
@@ -177,6 +189,7 @@ function saveConfig(input) {
   configVersion += 1;
   cache = null;
   cachePromise = null;
+  officeCache = null;
   geoCache.clear();
   return settings();
 }
@@ -503,6 +516,60 @@ async function apiGet(endpoint, config, params) {
   return response.data?.data ?? response.data;
 }
 
+function readSavedOffices() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(OFFICE_FILE, 'utf8'));
+    return Array.isArray(saved?.rows) && saved.rows.length ? saved : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function saveOffices(rows) {
+  try {
+    fs.writeFileSync(OFFICE_FILE, JSON.stringify({ savedAt: new Date().toISOString(), rows }));
+  } catch (_error) {
+    // Solo es respaldo: si no se puede escribir, se sigue con la cache en memoria.
+  }
+}
+
+// Lee las oficinas Tealca de DroPanas (timeout largo + 1 reintento). Si falla,
+// usa la ultima copia buena guardada en disco.
+async function officeCatalog(config = dropanasApi.configFromEnv(), { force = false } = {}) {
+  if (!force && officeCache && Date.now() - officeCache.at < officeCache.ttl) return officeCache.value;
+  if (officePromise) return officePromise;
+  officePromise = (async () => {
+    const slowConfig = { ...config, timeoutMs: Math.max(Number(config.timeoutMs) || 0, OFFICE_TIMEOUT_MS) };
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const data = await apiGet('oficinas', slowConfig, { carrier: 'tealca' });
+        const rows = (Array.isArray(data) ? data : []).filter((row) => row && row.id != null);
+        if (rows.length) {
+          saveOffices(rows);
+          const value = { rows, warning: null, source: 'dropanas' };
+          officeCache = { at: Date.now(), ttl: OFFICE_CACHE_MS, value };
+          return value;
+        }
+        lastError = new Error('GET /oficinas: DroPanas devolvió la lista vacía');
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    const saved = readSavedOffices();
+    const value = saved
+      ? { rows: saved.rows, warning: null, source: 'copia', savedAt: saved.savedAt, liveError: lastError.message }
+      : { rows: [], warning: lastError.message, source: 'ninguna' };
+    officeCache = { at: Date.now(), ttl: saved ? 10 * 60 * 1000 : OFFICE_FAIL_RETRY_MS, value };
+    return value;
+  })();
+  try {
+    return await officePromise;
+  } finally {
+    officePromise = null;
+  }
+}
+
 async function snapshot(config = dropanasApi.configFromEnv()) {
   dropanasApi.assertReadOnlyEnabled(config);
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
@@ -530,12 +597,9 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
         }
       }
     })();
-    const officePromise = apiGet('oficinas', config, { carrier: 'tealca' })
-      .then((rows) => ({ rows, warning: null }))
-      .catch((error) => ({ rows: [], warning: error.message }));
     const [productResult, officeResult, inventoryResults] = await Promise.all([
       productPromise,
-      officePromise,
+      officeCatalog(config),
       Promise.all(warehouseIds.map(async (id) => {
         try {
           return { warehouseId: id, rows: await apiGet(`bodegas/${id}/inventario`, config), warning: null };
@@ -551,7 +615,9 @@ async function snapshot(config = dropanasApi.configFromEnv()) {
       officeWarning: officeResult.warning,
       inventories: inventoryResults,
     };
-    if (version === configVersion) cache = { at: Date.now(), value };
+    // Si las oficinas fallaron sin copia guardada, no se congela ese fallo 5 min.
+    const at = value.offices.length ? Date.now() : Date.now() - CACHE_MS + OFFICE_FAIL_RETRY_MS;
+    if (version === configVersion) cache = { at, value };
     return value;
   })();
   try {
@@ -716,14 +782,28 @@ function suggestOffices(draft, session, offices, limit = 5) {
 }
 
 // Busqueda libre en el catalogo real de oficinas Tealca (para el panel).
-async function searchOffices(query, limit = 20) {
-  const live = await snapshot();
+// Sin texto devuelve TODAS (para la lista desplegable), ordenadas por estado y nombre.
+async function searchOffices(query, limit = 20, { force = false } = {}) {
+  dropanasApi.assertReadOnlyEnabled(dropanasApi.configFromEnv());
+  const result = await officeCatalog(dropanasApi.configFromEnv(), { force });
   const words = fold(query).split(' ').filter(Boolean);
-  const rows = live.offices.filter((office) => {
+  const rows = result.rows.filter((office) => {
     const text = fold(`${office?.nombre} ${office?.ciudad} ${office?.estado} ${office?.direccion}`);
     return words.every((word) => text.includes(word));
-  });
-  return { offices: rows.slice(0, limit).map(officeView), warning: live.officeWarning || null };
+  }).map(officeView)
+    .sort((a, b) => a.estado.localeCompare(b.estado, 'es') || a.nombre.localeCompare(b.nombre, 'es'));
+  return {
+    offices: rows.slice(0, limit),
+    total: rows.length,
+    warning: result.warning || null,
+    source: result.source,
+    savedAt: result.savedAt || null,
+  };
+}
+
+function resetOfficeCache() {
+  officeCache = null;
+  officePromise = null;
 }
 
 // Guarda las correcciones hechas a mano en el panel para ESTA venta.
@@ -986,5 +1066,5 @@ function stopAutoRetry() {
   autoRetryTimer = null;
 }
 
-module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, suggestOffices, searchOffices, saveDraftEdit, buildPayload, externalReference, deterministicIdempotencyKey,
+module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, suggestOffices, searchOffices, officeCatalog, resetOfficeCache, saveDraftEdit, buildPayload, externalReference, deterministicIdempotencyKey,
   mentionedProducts, documentType, retryAutomatic, startAutoRetry, stopAutoRetry, AUTO_RETRY_MAX };

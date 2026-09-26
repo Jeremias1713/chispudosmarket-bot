@@ -305,10 +305,6 @@ function orderEditForm(draft) {
     </div>`
   const suggestions = draft.officeSuggestions || []
   const selectedId = draft.officeId ?? suggestions[0]?.id ?? ''
-  const officeOptions = [
-    '<option value="">— Sin cambiar —</option>',
-    ...suggestions.map((o) => `<option value="${esc(o.id)}"${String(o.id) === String(selectedId) ? ' selected' : ''}>⭐ ${esc(o.nombre)}${o.ciudad ? ` · ${esc(o.ciudad)}` : ''}</option>`),
-  ].join('')
   return `<div class="dp-order-edit" hidden>
     <div class="dp-edit-grid">
       <label>Nombre<input class="do-edit-nombre" value="${esc(draft.identity?.nombre || '')}"></label>
@@ -319,14 +315,76 @@ function orderEditForm(draft) {
     </div>
     <div class="dp-edit-items"><span class="dp-edit-label">Productos (cantidad y total en Bs)</span>${items.map(itemRow).join('')}</div>
     <label class="dp-edit-office">Oficina Tealca
-      <select class="do-edit-office">${officeOptions}</select>
-      <input class="do-edit-office-search" placeholder="Buscar otra oficina (ej: Coro, Punto Fijo)…">
+      <select class="do-edit-office" data-selected="${esc(selectedId)}" data-suggested="${esc(JSON.stringify(suggestions.map((o) => o.id)))}">${officeSelectOptions(suggestions, selectedId)}</select>
+      <input class="do-edit-office-search" placeholder="Filtrar la lista (ej: Coro, Falcón)…">
+      <small class="do-edit-office-msg"></small>
     </label>
     <div class="dp-edit-actions">
       <button class="btn btn-primary do-save-edit" data-phone="${esc(draft.phone)}" type="button">Guardar cambios</button>
       <small class="do-edit-msg"></small>
     </div>
   </div>`
+}
+
+// Lista completa de oficinas Tealca (se pide una vez y se reutiliza).
+let tealcaOffices = null
+let tealcaOfficesPromise = null
+
+function loadTealcaOffices(refresh = false) {
+  if (tealcaOffices && !refresh) return Promise.resolve(tealcaOffices)
+  if (tealcaOfficesPromise && !refresh) return tealcaOfficesPromise
+  tealcaOfficesPromise = api(`/dropanas-orders/offices?all=1${refresh ? '&refresh=1' : ''}`)
+    .then((result) => {
+      if ((result.offices || []).length) tealcaOffices = result
+      return result
+    })
+    .finally(() => { tealcaOfficesPromise = null })
+  return tealcaOfficesPromise
+}
+
+// Opciones del desplegable: primero las sugeridas (⭐) y luego todas las
+// oficinas agrupadas por estado. `filter` reduce la lista por texto.
+function officeSelectOptions(suggestions, selectedId, all = [], filter = '') {
+  const fold = (text) => String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const words = fold(filter).split(/\s+/).filter(Boolean)
+  const matches = (o) => words.every((w) => fold(`${o.nombre} ${o.ciudad} ${o.estado} ${o.direccion}`).includes(w))
+  const option = (o, star) => `<option value="${esc(o.id)}"${String(o.id) === String(selectedId) ? ' selected' : ''}>${star ? '⭐ ' : ''}${esc(o.nombre)}${o.ciudad ? ` · ${esc(o.ciudad)}` : ''}</option>`
+  const parts = [`<option value="">${all.length ? '— Elige una oficina —' : 'Cargando oficinas…'}</option>`]
+  const sugg = suggestions.filter(matches)
+  if (sugg.length) parts.push(`<optgroup label="Sugeridas por el chat">${sugg.map((o) => option(o, true)).join('')}</optgroup>`)
+  const groups = new Map()
+  for (const o of all.filter(matches)) {
+    const key = o.estado || 'Otros'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(o)
+  }
+  for (const [estado, list] of groups) parts.push(`<optgroup label="${esc(estado)}">${list.map((o) => option(o, false)).join('')}</optgroup>`)
+  return parts.join('')
+}
+
+async function fillOfficeSelect(form, refresh = false) {
+  const select = form.querySelector('.do-edit-office')
+  const message = form.querySelector('.do-edit-office-msg')
+  if (!select) return
+  let suggestions = []
+  try { suggestions = JSON.parse(select.dataset.suggested || '[]') } catch (_) { suggestions = [] }
+  try {
+    const result = await loadTealcaOffices(refresh)
+    const all = result.offices || []
+    const byId = new Map(all.map((o) => [String(o.id), o]))
+    const suggested = suggestions.map((id) => byId.get(String(id))).filter(Boolean)
+    const current = select.value || select.dataset.selected || ''
+    const filter = form.querySelector('.do-edit-office-search')?.value || ''
+    select.innerHTML = officeSelectOptions(suggested, current, all, filter)
+    if (!all.length) {
+      message.innerHTML = `No se pudo cargar la lista de oficinas (${esc(result.warning || 'DroPanas no respondió')}). <button class="btn btn-small do-reload-offices" type="button">Reintentar</button>`
+      message.querySelector('.do-reload-offices')?.addEventListener('click', () => { message.textContent = 'Cargando…'; fillOfficeSelect(form, true) })
+    } else {
+      message.textContent = `${all.length} oficinas Tealca${result.source === 'copia' ? ' (copia guardada: DroPanas no respondió ahora)' : ''}.`
+    }
+  } catch (err) {
+    message.textContent = err.message
+  }
 }
 
 function collectOrderEdit(container) {
@@ -372,7 +430,12 @@ function renderOrderQueue(data) {
   }))
   document.querySelectorAll('.do-edit-order').forEach((button) => button.addEventListener('click', () => {
     const form = button.closest('.dp-order-draft')?.querySelector('.dp-order-edit')
-    if (form) form.hidden = !form.hidden
+    if (!form) return
+    form.hidden = !form.hidden
+    if (!form.hidden && !form.dataset.loaded) {
+      form.dataset.loaded = '1'
+      fillOfficeSelect(form)
+    }
   }))
   document.querySelectorAll('.do-use-office').forEach((button) => button.addEventListener('click', () => {
     button.disabled = true
@@ -387,27 +450,7 @@ function renderOrderQueue(data) {
     let timer = null
     input.addEventListener('input', () => {
       clearTimeout(timer)
-      timer = setTimeout(async () => {
-        const q = input.value.trim()
-        if (q.length < 2) return
-        const select = input.closest('.dp-order-edit').querySelector('.do-edit-office')
-        try {
-          const result = await api(`/dropanas-orders/offices?q=${encodeURIComponent(q)}`)
-          const keep = [...select.options].filter((opt) => !opt.dataset.search)
-          select.innerHTML = ''
-          keep.forEach((opt) => select.appendChild(opt))
-          for (const office of result.offices || []) {
-            const opt = document.createElement('option')
-            opt.value = office.id
-            opt.dataset.search = '1'
-            opt.textContent = `${office.nombre}${office.ciudad ? ` · ${office.ciudad}` : ''}`
-            select.appendChild(opt)
-          }
-          if ((result.offices || []).length) select.value = String(result.offices[0].id)
-        } catch (err) {
-          input.title = err.message
-        }
-      }, 350)
+      timer = setTimeout(() => fillOfficeSelect(input.closest('.dp-order-edit')), 200)
     })
   })
   document.querySelectorAll('.do-create-order').forEach((button) => button.addEventListener('click', async () => {

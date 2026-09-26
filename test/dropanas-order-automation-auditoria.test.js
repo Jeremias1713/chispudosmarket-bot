@@ -83,6 +83,9 @@ beforeEach(() => {
   postResponse = { headers: okHeaders(), data: { data: { id: 777, estado_aprobacion: 'pendiente_aprobacion' } } };
   installFakeApi();
   enableUpload();
+  // Sin copia guardada de oficinas: cada prueba decide si DroPanas responde.
+  fs.rmSync(path.join(dataDir, 'dropanas-oficinas.json'), { force: true });
+  automation.resetOfficeCache();
 });
 
 // ---------- 1. ventas que ya existen en DroPanas ----------

@@ -1170,7 +1170,8 @@ router.post('/api/dropanas-orders/config', (req, res) => {
 // Oficinas Tealca del catalogo real de DroPanas (busqueda para el panel).
 router.get('/api/dropanas-orders/offices', async (req, res) => {
   try {
-    res.json(await dropanasOrderAutomation.searchOffices(String(req.query.q || ''), 25));
+    const all = req.query.all === '1';
+    res.json(await dropanasOrderAutomation.searchOffices(String(req.query.q || ''), all ? 3000 : 25, { force: req.query.refresh === '1' }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
