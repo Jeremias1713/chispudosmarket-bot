@@ -2473,3 +2473,22 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
   .more-sheet-grid { grid-template-columns: repeat(2, 1fr); }
   .chat-tools-toggle span { display: none; }
 }
+
+/* Edicion manual de pedidos en la bandeja de DroPanas */
+.dp-order-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s1); color: var(--text); }
+.btn.btn-small { padding: 2px 10px; font-size: 12px; min-height: 0; }
+.dp-order-edit { margin-top: var(--s2); padding: var(--s3); border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2, rgba(0,0,0,0.02)); display: grid; gap: var(--s2); }
+.dp-order-edit[hidden] { display: none; }
+.dp-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--s2); }
+.dp-order-edit label { display: grid; gap: 4px; font-size: 12px; color: var(--muted, #667085); }
+.dp-order-edit input, .dp-order-edit select { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface, #fff); color: var(--text); min-width: 0; }
+.dp-edit-doc { display: flex; gap: 4px; }
+.dp-edit-doc select { width: 58px; }
+.dp-edit-doc input { flex: 1; }
+.dp-edit-items { display: grid; gap: 6px; }
+.dp-edit-label { font-size: 12px; color: var(--muted, #667085); }
+.dp-edit-item { display: grid; grid-template-columns: 1fr 70px 120px; gap: 6px; }
+.dp-edit-office { display: grid; gap: 6px; }
+.dp-edit-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.dp-edit-actions .do-edit-msg { color: var(--danger, #b42318); }
+@media (max-width: 640px) { .dp-edit-item { grid-template-columns: 1fr 60px 100px; } }

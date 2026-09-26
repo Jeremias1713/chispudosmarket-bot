@@ -1167,6 +1167,25 @@ router.post('/api/dropanas-orders/config', (req, res) => {
   }
 });
 
+// Oficinas Tealca del catalogo real de DroPanas (busqueda para el panel).
+router.get('/api/dropanas-orders/offices', async (req, res) => {
+  try {
+    res.json(await dropanasOrderAutomation.searchOffices(String(req.query.q || ''), 25));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Correccion manual de los datos del pedido de esta venta (oficina, nombre,
+// cedula, telefono, productos). No sube nada: solo deja el borrador listo.
+router.post('/api/dropanas-orders/:phone/edit', async (req, res) => {
+  try {
+    res.json({ ok: true, draft: await dropanasOrderAutomation.saveDraftEdit(req.params.phone, req.body || {}) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/api/dropanas-orders/:phone/create', async (req, res) => {
   try {
     res.json(await dropanasOrderAutomation.createForPhone(req.params.phone, { automatic: false }));

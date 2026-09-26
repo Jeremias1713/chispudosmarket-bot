@@ -268,18 +268,95 @@ function orderDraftRow(draft) {
   const detail = [itemDetail || draft.productName || 'Producto pendiente', draft.total ? `Total ${Number(draft.total).toLocaleString('es-VE')} Bs` : null, draft.agency || null].filter(Boolean).join(' · ')
   const issues = (draft.issues || []).filter((issue) => !created || !issue.startsWith('Ya fue subido'))
   const warnings = draft.warnings || []
-  return `<div class="dp-order-draft">
+  const hasGuide = issues.some((issue) => issue.startsWith('Esta venta ya tiene guía'))
+  const editable = !created && !hasGuide
+  const suggestion = (draft.officeSuggestions || [])[0]
+  const officeProblem = issues.some((issue) => /oficina/i.test(issue))
+  const suggestionLine = editable && suggestion && officeProblem
+    ? `<small class="dp-order-suggestion">📍 Oficina que se cree que es: <strong>${esc(suggestion.nombre)}</strong>${suggestion.ciudad ? ` (${esc(suggestion.ciudad)})` : ''}
+        <button class="btn btn-small do-use-office" data-phone="${esc(draft.phone)}" data-office="${esc(suggestion.id)}" type="button">Usar esta</button></small>`
+    : ''
+  return `<div class="dp-order-draft" data-phone="${esc(draft.phone)}">
     <div class="dp-auto-event-body">
-      <div class="dp-auto-event-title"><strong>${esc(draft.name || `+${draft.phone}`)}</strong>${badge}</div>
+      <div class="dp-auto-event-title"><strong>${esc(draft.name || `+${draft.phone}`)}</strong>${badge}${draft.edited ? '<span class="badge">Editado</span>' : ''}</div>
       <div class="dp-auto-event-meta">${esc(detail)}</div>
       ${issues.length ? `<small class="is-missing">${issues.map(esc).join(' ')}</small>` : '<small>Se creará pendiente de aprobación.</small>'}
       ${warnings.length ? `<small class="is-warning">${warnings.map(esc).join(' ')}</small>` : ''}
+      ${suggestionLine}
+      ${editable ? orderEditForm(draft) : ''}
     </div>
     <div class="dp-order-draft-actions">
       <button class="btn do-open-chat" data-phone="${esc(draft.phone)}" type="button">Ver chat</button>
+      ${editable ? `<button class="btn do-edit-order" data-phone="${esc(draft.phone)}" type="button">Editar datos</button>` : ''}
       ${canUpload ? `<button class="btn btn-primary do-create-order" data-phone="${esc(draft.phone)}" data-careful="${warnings.length ? '1' : ''}" type="button">${draft.current && !draft.current.id && draft.current.status ? 'Reintentar subida' : 'Subir pedido'}</button>` : ''}
     </div>
   </div>`
+}
+
+// Formulario para corregir a mano los datos del pedido (oculto hasta que se
+// toca "Editar datos"). La oficina se elige del catalogo real de Tealca.
+function orderEditForm(draft) {
+  const mappings = (dropanasOrderData.config?.mappings || []).filter((m) => m.enabled)
+  const items = (draft.items || []).length ? draft.items : [{}]
+  const itemRow = (item) => `<div class="dp-edit-item">
+      <select class="do-edit-product">${mappings.map((m) => `<option value="${esc(m.id)}"${item.mapping?.id === m.id ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
+      <input class="do-edit-qty" type="number" min="1" max="99" value="${esc(item.quantity || 1)}" title="Cantidad">
+      <input class="do-edit-total" type="number" min="1" step="0.01" value="${esc(item.total || '')}" placeholder="Total Bs" title="Total en Bs">
+    </div>`
+  const suggestions = draft.officeSuggestions || []
+  const selectedId = draft.officeId ?? suggestions[0]?.id ?? ''
+  const officeOptions = [
+    '<option value="">— Sin cambiar —</option>',
+    ...suggestions.map((o) => `<option value="${esc(o.id)}"${String(o.id) === String(selectedId) ? ' selected' : ''}>⭐ ${esc(o.nombre)}${o.ciudad ? ` · ${esc(o.ciudad)}` : ''}</option>`),
+  ].join('')
+  return `<div class="dp-order-edit" hidden>
+    <div class="dp-edit-grid">
+      <label>Nombre<input class="do-edit-nombre" value="${esc(draft.identity?.nombre || '')}"></label>
+      <label>Apellido<input class="do-edit-apellido" value="${esc(draft.identity?.apellido || '')}"></label>
+      <label>Documento<span class="dp-edit-doc"><select class="do-edit-doctype"><option${draft.documentType === 'E' ? '' : ' selected'}>V</option><option${draft.documentType === 'E' ? ' selected' : ''}>E</option></select>
+        <input class="do-edit-cedula" value="${esc(draft.cedula || '')}" inputmode="numeric"></span></label>
+      <label>Teléfono<input class="do-edit-telefono" value="${esc(draft.customerPhone || '')}" placeholder="04141234567" inputmode="numeric"></label>
+    </div>
+    <div class="dp-edit-items"><span class="dp-edit-label">Productos (cantidad y total en Bs)</span>${items.map(itemRow).join('')}</div>
+    <label class="dp-edit-office">Oficina Tealca
+      <select class="do-edit-office">${officeOptions}</select>
+      <input class="do-edit-office-search" placeholder="Buscar otra oficina (ej: Coro, Punto Fijo)…">
+    </label>
+    <div class="dp-edit-actions">
+      <button class="btn btn-primary do-save-edit" data-phone="${esc(draft.phone)}" type="button">Guardar cambios</button>
+      <small class="do-edit-msg"></small>
+    </div>
+  </div>`
+}
+
+function collectOrderEdit(container) {
+  const value = (selector) => container.querySelector(selector)?.value?.trim() || ''
+  const body = {
+    nombre: value('.do-edit-nombre'),
+    apellido: value('.do-edit-apellido'),
+    documentType: value('.do-edit-doctype'),
+    cedula: value('.do-edit-cedula'),
+    telefono: value('.do-edit-telefono'),
+    items: [...container.querySelectorAll('.dp-edit-item')].map((row) => ({
+      mappingId: row.querySelector('.do-edit-product')?.value,
+      quantity: Number(row.querySelector('.do-edit-qty')?.value),
+      total: Number(row.querySelector('.do-edit-total')?.value),
+    })),
+  }
+  const officeId = value('.do-edit-office')
+  if (officeId) body.officeId = officeId
+  return body
+}
+
+async function saveOrderEdit(phone, body, message) {
+  if (message) message.textContent = 'Guardando…'
+  try {
+    await api(`/dropanas-orders/${encodeURIComponent(phone)}/edit`, { method: 'POST', body: JSON.stringify(body) })
+    await loadDropanasOrderQueue()
+  } catch (err) {
+    if (message) message.textContent = err.message
+    else showError(err)
+  }
 }
 
 function renderOrderQueue(data) {
@@ -293,6 +370,46 @@ function renderOrderQueue(data) {
     showView('view-convos')
     selectConversation(button.dataset.phone)
   }))
+  document.querySelectorAll('.do-edit-order').forEach((button) => button.addEventListener('click', () => {
+    const form = button.closest('.dp-order-draft')?.querySelector('.dp-order-edit')
+    if (form) form.hidden = !form.hidden
+  }))
+  document.querySelectorAll('.do-use-office').forEach((button) => button.addEventListener('click', () => {
+    button.disabled = true
+    saveOrderEdit(button.dataset.phone, { officeId: button.dataset.office }).finally(() => { button.disabled = false })
+  }))
+  document.querySelectorAll('.do-save-edit').forEach((button) => button.addEventListener('click', () => {
+    const form = button.closest('.dp-order-edit')
+    button.disabled = true
+    saveOrderEdit(button.dataset.phone, collectOrderEdit(form), form.querySelector('.do-edit-msg')).finally(() => { button.disabled = false })
+  }))
+  document.querySelectorAll('.do-edit-office-search').forEach((input) => {
+    let timer = null
+    input.addEventListener('input', () => {
+      clearTimeout(timer)
+      timer = setTimeout(async () => {
+        const q = input.value.trim()
+        if (q.length < 2) return
+        const select = input.closest('.dp-order-edit').querySelector('.do-edit-office')
+        try {
+          const result = await api(`/dropanas-orders/offices?q=${encodeURIComponent(q)}`)
+          const keep = [...select.options].filter((opt) => !opt.dataset.search)
+          select.innerHTML = ''
+          keep.forEach((opt) => select.appendChild(opt))
+          for (const office of result.offices || []) {
+            const opt = document.createElement('option')
+            opt.value = office.id
+            opt.dataset.search = '1'
+            opt.textContent = `${office.nombre}${office.ciudad ? ` · ${office.ciudad}` : ''}`
+            select.appendChild(opt)
+          }
+          if ((result.offices || []).length) select.value = String(result.offices[0].id)
+        } catch (err) {
+          input.title = err.message
+        }
+      }, 350)
+    })
+  })
   document.querySelectorAll('.do-create-order').forEach((button) => button.addEventListener('click', async () => {
     const question = button.dataset.careful
       ? 'Este pedido tiene avisos (en naranja). Antes de seguir, revisa en DroPanas que no se haya creado ya. ¿Subirlo de todas formas?'

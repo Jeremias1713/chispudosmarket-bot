@@ -345,22 +345,29 @@ function baseDraft(phone, session, config = settings()) {
   const card = session.card || {};
   const order = session.currentOrder || {};
   const historyFacts = historyOrderFacts(session.history);
-  const name = card.nombre || session.name || '';
-  const identity = splitName(name);
+  const mappingPool = matchableMappings(config);
+  const reference = referenceFor(phone, session.soldAt);
+  // Correcciones hechas a mano en el panel. Solo valen para ESTA venta (misma
+  // referencia): una recompra del mismo cliente no hereda datos viejos.
+  const edit = session.dropanasOrderEdit && reference && session.dropanasOrderEdit.reference === reference
+    ? session.dropanasOrderEdit : null;
+  const name = edit?.nombre && edit?.apellido ? `${edit.nombre} ${edit.apellido}` : card.nombre || session.name || '';
+  const identity = edit?.nombre && edit?.apellido ? { nombre: edit.nombre, apellido: edit.apellido } : splitName(name);
+  const rawCedula = edit?.cedula != null ? edit.cedula : card.cedula;
+  const rawPhone = edit?.telefono || card.telefono || phone;
   const structuredItems = Array.isArray(order.items) && order.items.length
     ? order.items
     : Array.isArray(card.productos) && card.productos.length ? card.productos : null;
-  const rawItems = structuredItems || [{
+  const rawItems = edit?.items?.length ? edit.items : structuredItems || [{
     product: order.product || card.producto || '',
     quantity: order.quantity || historyFacts.quantity,
     total: order.total ?? card.monto,
   }];
-  const mappingPool = matchableMappings(config);
-  const reference = referenceFor(phone, session.soldAt);
   const { current, previous } = splitStoredOrder(session.dropanasOrder || null, reference);
   const items = rawItems.map((row) => {
-    const productName = String(row?.product || row?.producto || row?.nombre || '').trim();
-    const mapping = findMapping(productName, mappingPool);
+    const edited = row?.mappingId ? mappingPool.find((m) => m.id === row.mappingId && m.enabled) || null : null;
+    const productName = edited ? edited.label : String(row?.product || row?.producto || row?.nombre || '').trim();
+    const mapping = edited || findMapping(productName, mappingPool);
     const quantity = Number(row?.quantity ?? row?.cantidad ?? 0);
     const explicitTotal = Number(row?.total ?? row?.monto);
     const mappedTotal = Number(mapping?.prices?.[quantity] || 0);
@@ -372,7 +379,7 @@ function baseDraft(phone, session, config = settings()) {
   const mapping = items.length === 1 ? items[0].mapping : null;
   const quantity = items.length === 1 ? items[0].quantity : items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
   const total = items.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
-  const agency = String(order.agency || card.agenciaConfirmadaEnChat || card.agencia || historyFacts.agency || '').trim();
+  const agency = String(edit?.officeLabel || order.agency || card.agenciaConfirmadaEnChat || card.agencia || historyFacts.agency || '').trim();
   const issues = [];
   if (session.orderClosed !== true && !SOLD_STAGES.includes(session.stage || '')) {
     issues.push('La compra todavía no está confirmada.');
@@ -381,10 +388,10 @@ function baseDraft(phone, session, config = settings()) {
     issues.push('Falta una fecha válida de cierre de la venta.');
   }
   if (!identity) issues.push('Falta nombre y apellido.');
-  if (!String(card.cedula || '').replace(/\D/g, '').match(/^\d{6,9}$/)) issues.push('Falta una cédula válida.');
-  const docType = documentType(card.cedula);
+  if (!String(rawCedula || '').replace(/\D/g, '').match(/^\d{6,9}$/)) issues.push('Falta una cédula válida.');
+  const docType = edit?.documentType || documentType(rawCedula);
   if (!docType) issues.push('La cédula tiene un prefijo que DroPanas no recibe (solo V o E). Revísala en la ficha.');
-  if (!localPhone(card.telefono || phone)) issues.push('Falta un teléfono venezolano válido.');
+  if (!localPhone(rawPhone)) issues.push('Falta un teléfono venezolano válido.');
   if (!items.length) issues.push('El pedido no contiene productos.');
   for (const item of items) {
     const label = item.productName || 'Producto sin nombre';
@@ -405,7 +412,8 @@ function baseDraft(phone, session, config = settings()) {
   }
   // El monto cargado a mano en la ficha es lo que se acordó con el cliente.
   // Si no coincide con lo que se va a cobrar contra entrega, no se sube.
-  const agreed = card.monto == null || card.monto === '' ? null : Number(card.monto);
+  // Si el monto se corrigio a mano en el panel, manda lo corregido.
+  const agreed = edit?.items?.length || card.monto == null || card.monto === '' ? null : Number(card.monto);
   if (agreed != null && Number.isFinite(agreed) && agreed > 0 && total > 0 && Math.abs(agreed - total) >= 1) {
     issues.push(`El monto de la ficha (${agreed} Bs) no coincide con el total que se cobraría (${total} Bs). Corrige el monto o la tabla de precios.`);
   }
@@ -438,10 +446,11 @@ function baseDraft(phone, session, config = settings()) {
     }
   }
   return {
-    phone, name, identity, cedula: String(card.cedula || '').replace(/\D/g, ''),
+    phone, name, identity, cedula: String(rawCedula || '').replace(/\D/g, ''),
     documentType: docType,
-    customerPhone: localPhone(card.telefono || phone), productName, mapping, items,
+    customerPhone: localPhone(rawPhone), productName, mapping, items,
     quantity, total, agency, soldAt: session.soldAt || null, reference,
+    officeId: edit?.officeId ?? null, edited: Boolean(edit),
     current, previous, attemptNotes, issues,
   };
 }
@@ -609,9 +618,19 @@ async function apiGeoOffice(label, config) {
 async function prepareDraft(phone, session = getSession(phone)) {
   const draft = baseDraft(phone, session);
   draft.warnings = [...(draft.attemptNotes || [])];
-  if (draft.current?.id || draft.items.some((item) => !item.mapping) || !draft.agency) return draft;
+  if (draft.current?.id) return draft;
+  let live = null;
   try {
-    const live = await snapshot();
+    live = await snapshot();
+  } catch (error) {
+    if (!draft.items.some((item) => !item.mapping) && draft.agency) draft.issues.push(`No se pudo validar con DroPanas: ${error.message}`);
+    return draft;
+  }
+  // Oficinas Tealca que probablemente eligio el cliente (segun el chat), para
+  // poder corregirla en el panel con un clic.
+  draft.officeSuggestions = suggestOffices(draft, session, live.offices);
+  if (draft.items.some((item) => !item.mapping) || !draft.agency) return draft;
+  try {
     if (live.productWarning) draft.warnings.push(live.productWarning);
     const officialItems = draft.items.map((item) => {
       const product = live.products.find((row) => Number(row?.id) === Number(item.mapping.productId));
@@ -629,15 +648,24 @@ async function prepareDraft(phone, session = getSession(phone)) {
       return { ...item, product, stock };
     });
     const localOfficeMatches = agencies.searchByText(draft.agency, 10);
-    let office = resolveOffice(draft.agency, live.offices);
-    if (!office && live.officeWarning) {
+    let office = null;
+    if (draft.officeId != null) {
+      office = live.offices.find((row) => String(row?.id) === String(draft.officeId)) || null;
+      if (!office && !live.officeWarning) draft.issues.push('La oficina elegida ya no aparece en el catálogo de Tealca de DroPanas. Elige otra.');
+      if (!office && live.officeWarning) draft.issues.push('No se pudo confirmar la oficina elegida porque DroPanas no respondió. Intenta de nuevo en unos minutos.');
+    } else {
+      office = resolveOffice(draft.agency, live.offices);
+    }
+    if (!office && draft.officeId == null && live.officeWarning) {
       try {
         office = await apiGeoOffice(draft.agency, dropanasApi.configFromEnv());
       } catch (error) {
         draft.warnings.push(`DroPanas no permitió validar la oficina (${live.officeWarning}; ${error.message}).`);
       }
     }
-    if (!office && live.officeWarning && localOfficeMatches.length === 1) {
+    if (draft.officeId != null) {
+      // Ya se explico arriba si falta.
+    } else if (!office && live.officeWarning && localOfficeMatches.length === 1) {
       draft.issues.push('La oficina sí existe en tu catálogo de Tealca, pero DroPanas bloqueó la consulta de su ID interno. Hace falta habilitar lectura de oficinas/ciudades en la API para subirla con seguridad.');
       draft.localOffice = localOfficeMatches[0];
     } else if (!office) {
@@ -651,6 +679,108 @@ async function prepareDraft(phone, session = getSession(phone)) {
     draft.issues.push(`No se pudo validar con DroPanas: ${error.message}`);
   }
   return draft;
+}
+
+function officeView(office) {
+  return {
+    id: office.id, nombre: office.nombre || '', ciudad: office.ciudad || '', estado: office.estado || '',
+    direccion: office.direccion || '',
+  };
+}
+
+// Puntua cada oficina Tealca del catalogo real segun lo que dijo el cliente:
+// la agencia que quedo en el resumen, la ciudad de la ficha y lo que escribio
+// en el chat (por ejemplo "Coro"). Devuelve las mas probables primero.
+function suggestOffices(draft, session, offices, limit = 5) {
+  if (!Array.isArray(offices) || !offices.length) return [];
+  const history = Array.isArray(session?.history) ? session.history.slice(-60) : [];
+  const agency = ` ${fold(draft?.agency)} `;
+  const city = ` ${fold(session?.card?.ciudad)} `;
+  const userChat = ` ${fold(history.filter((m) => m?.role === 'user').map((m) => m.content).join(' '))} `;
+  const botChat = ` ${fold(history.filter((m) => m?.role !== 'user').map((m) => m.content).join(' '))} `;
+  const has = (text, needle) => Boolean(needle) && needle.length >= 3 && text.includes(` ${needle} `);
+  return offices.map((office) => {
+    const name = fold(office?.nombre).replace(/\b(?:tealca|oficina|agencia)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    const place = fold(office?.ciudad);
+    const state = fold(office?.estado);
+    let score = 0;
+    if (has(agency, name)) score += 10; else if (has(agency, place)) score += 6;
+    if (has(city, place)) score += 5; else if (has(city, state)) score += 1;
+    if (has(userChat, name)) score += 4; else if (has(userChat, place)) score += 3;
+    if (has(botChat, name)) score += 2;
+    return { office, score };
+  }).filter((row) => row.score > 0 && row.office?.id != null)
+    .sort((a, b) => b.score - a.score || String(a.office.nombre).localeCompare(String(b.office.nombre)))
+    .slice(0, limit)
+    .map((row) => ({ ...officeView(row.office), score: row.score }));
+}
+
+// Busqueda libre en el catalogo real de oficinas Tealca (para el panel).
+async function searchOffices(query, limit = 20) {
+  const live = await snapshot();
+  const words = fold(query).split(' ').filter(Boolean);
+  const rows = live.offices.filter((office) => {
+    const text = fold(`${office?.nombre} ${office?.ciudad} ${office?.estado} ${office?.direccion}`);
+    return words.every((word) => text.includes(word));
+  });
+  return { offices: rows.slice(0, limit).map(officeView), warning: live.officeWarning || null };
+}
+
+// Guarda las correcciones hechas a mano en el panel para ESTA venta.
+async function saveDraftEdit(phone, body = {}) {
+  if (!sessionExists(phone)) throw new Error('No existe una conversación con ese teléfono.');
+  const session = getSession(phone);
+  const reference = referenceFor(phone, session.soldAt);
+  if (!reference) throw new Error('Esta venta no tiene fecha de cierre; no se puede editar el pedido.');
+  const clean = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const edit = { reference, updatedAt: new Date().toISOString() };
+  const nombre = clean(body.nombre, 50);
+  const apellido = clean(body.apellido, 50);
+  if (nombre || apellido) {
+    if (!nombre || !apellido) throw new Error('Escribe nombre y apellido.');
+    edit.nombre = nombre;
+    edit.apellido = apellido;
+  }
+  if (body.cedula != null && String(body.cedula).trim()) {
+    const digits = String(body.cedula).replace(/\D/g, '');
+    if (!/^\d{6,9}$/.test(digits)) throw new Error('La cédula debe tener entre 6 y 9 números.');
+    edit.cedula = digits;
+  }
+  if (body.documentType) {
+    const type = String(body.documentType).toUpperCase();
+    if (!['V', 'E'].includes(type)) throw new Error('El tipo de documento debe ser V o E.');
+    edit.documentType = type;
+  }
+  if (body.telefono != null && String(body.telefono).trim()) {
+    const local = localPhone(body.telefono);
+    if (!local) throw new Error('El teléfono debe ser un celular venezolano (0412, 0414, 0416, 0424, 0426 o 0422).');
+    edit.telefono = local;
+  }
+  if (Array.isArray(body.items) && body.items.length) {
+    const pool = matchableMappings(settings());
+    edit.items = body.items.slice(0, 10).map((row) => {
+      const mapping = pool.find((m) => m.id === row?.mappingId && m.enabled);
+      if (!mapping) throw new Error('Elige un producto válido de la lista.');
+      const quantity = Number(row.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) throw new Error('La cantidad debe ser un número entero entre 1 y 99.');
+      const total = Number(String(row.total ?? '').replace(/[^\d.]/g, ''));
+      if (!Number.isFinite(total) || total <= 0) throw new Error('Escribe el total en bolívares de cada producto.');
+      return { mappingId: mapping.id, quantity, total };
+    });
+  }
+  if (body.officeId != null && String(body.officeId).trim()) {
+    const live = await snapshot();
+    const office = live.offices.find((row) => String(row?.id) === String(body.officeId));
+    if (!office) {
+      throw new Error(live.officeWarning
+        ? 'DroPanas no respondió para confirmar la oficina. Intenta de nuevo en unos minutos.'
+        : 'Esa oficina no está en el catálogo de Tealca de DroPanas.');
+    }
+    edit.officeId = office.id;
+    edit.officeLabel = office.nombre || office.ciudad || String(office.id);
+  }
+  updateSession(phone, { dropanasOrderEdit: edit });
+  return prepareDraft(phone, getSession(phone));
 }
 
 async function listDrafts() {
@@ -856,5 +986,5 @@ function stopAutoRetry() {
   autoRetryTimer = null;
 }
 
-module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, buildPayload, externalReference, deterministicIdempotencyKey,
+module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, suggestOffices, searchOffices, saveDraftEdit, buildPayload, externalReference, deterministicIdempotencyKey,
   mentionedProducts, documentType, retryAutomatic, startAutoRetry, stopAutoRetry, AUTO_RETRY_MAX };
