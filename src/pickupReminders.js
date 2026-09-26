@@ -25,6 +25,7 @@ const CONFIRMED_MAX_REMINDERS = 10;
 const MAX_FAILURES_PER_DAY = 3;
 const OFFICE_STATUSES = new Set(['en oficina', 'en agencia', 'listo para retirar']);
 const DP_GUIDE = /^DP(\d+)$/i;
+const MAX_PER_ID_LOOKUPS = 40;
 let timer = null;
 let running = false;
 // Conversaciones ya resueltas hoy (recordadas o descartadas). Asi, en los
@@ -100,6 +101,7 @@ async function officeStatus(sessions, deps) {
   result.apiOk = false;
   let byId = null;
   let byGuia = null;
+  let perIdLookups = 0;
   try {
     const listed = await deps.fetchOrders();
     byId = new Map();
@@ -118,7 +120,11 @@ async function officeStatus(sessions, deps) {
     if (byId) {
       for (const id of keys.ids) order = order || byId.get(id) || null;
       for (const guia of keys.guias) order = order || byGuia.get(guia) || null;
-    } else if (keys.ids.length) {
+    } else if (keys.ids.length && perIdLookups < MAX_PER_ID_LOOKUPS) {
+      // DroPanas limita a 100 consultas por minuto: consultar pedido por
+      // pedido es solo un respaldo, con tope y con pausa entre consultas.
+      perIdLookups += 1;
+      if (perIdLookups > 1) await new Promise((resolve) => setTimeout(resolve, deps.lookupPauseMs ?? 1500));
       try {
         order = (await deps.fetchOrder(keys.ids[0])).order;
         result.apiOk = true;

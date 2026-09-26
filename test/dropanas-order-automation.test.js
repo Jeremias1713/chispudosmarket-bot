@@ -148,6 +148,7 @@ test('la idempotencia es estable entre procesos y cambia para otra venta', () =>
   assert.equal(firstReference, sameReference);
   assert.equal(automation.deterministicIdempotencyKey(firstReference), automation.deterministicIdempotencyKey(sameReference));
   assert.notEqual(automation.deterministicIdempotencyKey(firstReference), automation.deterministicIdempotencyKey(otherReference));
+  assert.match(automation.deterministicIdempotencyKey(firstReference), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
 test('no crea una referencia inestable si falta la fecha de cierre', () => {

@@ -665,9 +665,13 @@ function externalReference(draft) {
   return reference;
 }
 
+// DroPanas exige que la Idempotency-Key sea un UUID v4. Se arma a partir
+// de la referencia de la venta, asi un reintento de la MISMA venta manda
+// siempre la misma clave (y DroPanas no la duplica), pero con formato UUID v4.
 function deterministicIdempotencyKey(reference) {
-  const digest = crypto.createHash('sha256').update(String(reference)).digest('hex');
-  return `chispudos-order-${digest}`;
+  const h = crypto.createHash('sha256').update(String(reference)).digest('hex');
+  const variant = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
 function buildPayload(draft, reference) {

@@ -50,6 +50,7 @@ function fakeDeps({ sessions, orders, failSend = false }) {
     store,
     deps: {
       settings,
+      lookupPauseMs: 0,
       listSessions: () => [...store.values()],
       updateSession: (phone, patch) => { const next = { ...store.get(phone), ...patch }; store.set(phone, next); return next; },
       appendMessage: () => {},
