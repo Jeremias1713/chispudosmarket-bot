@@ -261,6 +261,21 @@ router.use(express.static(path.join(__dirname, '..', '..', 'public', 'panel')));
 
 /* ---------- conversaciones ---------- */
 
+// Cuantos mensajes del cliente quedaron sin contestar: se cuenta desde el
+// final del historial hacia atras mientras el rol sea 'user' (cliente). En
+// cuanto hay un 'assistant' (bot) o 'human' (respuesta manual desde el panel,
+// o una plantilla automatica) el conteo para ahi. Sirve para las
+// conversaciones pausadas (el bot no contesta solo y a veces se olvida
+// contestar a mano) pero tambien avisa si el bot se trabo en una activa.
+function pendingReplyCount(history) {
+  let count = 0;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (!history[i] || history[i].role !== 'user') break;
+    count += 1;
+  }
+  return count;
+}
+
 function toConvo(s) {
   const history = s.history || [];
   const last = history[history.length - 1];
@@ -284,6 +299,7 @@ function toConvo(s) {
     // el texto libre en vez de dejar que WhatsApp lo rebote solo.
     lastInboundAt: inboundAt,
     windowOpen: inboundAt ? Date.now() - new Date(inboundAt).getTime() < WHATSAPP_WINDOW_MS : false,
+    pendingReplyCount: pendingReplyCount(history),
   };
 }
 
@@ -332,6 +348,7 @@ function slimConvo(s) {
     stageLocked: c.stageLocked,
     stageReason: c.stageReason,
     paused: c.paused,
+    pendingReplyCount: c.pendingReplyCount,
     lastMessage: String(c.lastMessage || '').slice(0, LIST_PREVIEW_CHARS),
     lastMessageAt: c.lastMessageAt,
     createdAt: c.createdAt,
@@ -366,16 +383,21 @@ router.get('/api/conversations/feed', (req, res) => {
   const limit = clampInt(req.query.limit, 40, 1, 200);
   const offset = clampInt(req.query.offset, 0, 0, 1e9);
   const cache = listSessionsCached();
-  let items = slimIndex(cache);
+  const full = slimIndex(cache);
+  let items = full;
   if (search) items = items.filter((c) => matchesConversation(cache.byPhone.get(String(c.phone)) || c, search));
   const total = items.length;
+  // Total de conversaciones con mensajes del cliente sin contestar, sobre
+  // TODAS las conversaciones (no solo las que coinciden con la busqueda):
+  // es lo que alimenta el numerito de la pestana "Chats".
+  const pendingTotal = full.reduce((n, c) => n + (c.pendingReplyCount > 0 ? 1 : 0), 0);
 
   const since = Date.parse(String(req.query.since || ''));
   if (Number.isFinite(since)) {
     const changed = items.filter((c) => (Date.parse(c.changedAt || 0) || 0) > since);
-    return res.json({ items: changed, total, cursor, delta: true });
+    return res.json({ items: changed, total, pendingTotal, cursor, delta: true });
   }
-  res.json({ items: items.slice(offset, offset + limit), total, hasMore: offset + limit < total, cursor });
+  res.json({ items: items.slice(offset, offset + limit), total, pendingTotal, hasMore: offset + limit < total, cursor });
 });
 
 // Pipeline agrupado en el servidor: antes el panel bajaba las ~3000
