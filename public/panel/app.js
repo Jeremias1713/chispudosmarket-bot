@@ -596,6 +596,10 @@ tickClock()
 
 function convoInner(convo) {
   const tags = [stageBadge(convo), ...convoTags(convo)].filter(Boolean)
+  const pending = Number(convo.pendingReplyCount || 0)
+  const pendingBadge = pending > 0
+    ? `<span class="pending-badge" title="${pending} mensaje${pending === 1 ? '' : 's'} del cliente sin responder">${pending > 9 ? '9+' : pending}</span>`
+    : ''
   return `<span class="avatar">${esc(initials(convo))}</span>
     <div class="convo-item-body">
       <div class="convo-item-top">
@@ -604,7 +608,8 @@ function convoInner(convo) {
       </div>
       <div class="convo-item-last">${esc(convo.lastMessage || 'Sin mensajes')}</div>
       ${tags.length ? `<div class="convo-item-tags">${tags.join('')}</div>` : ''}
-    </div>`
+    </div>
+    ${pendingBadge}`
 }
 
 // El listado ya no baja las miles de conversaciones enteras cada 4 segundos
@@ -629,7 +634,7 @@ const convoList = {
 }
 
 function convoSig(convo) {
-  return [convo.name, convo.stage, convo.paused, convo.lastMessage, convo.lastMessageAt].join('\u0001')
+  return [convo.name, convo.stage, convo.paused, convo.pendingReplyCount, convo.lastMessage, convo.lastMessageAt].join('\u0001')
 }
 
 function sortConvoOrder() {
@@ -700,6 +705,18 @@ function mergeConvos(items, { onlyVisibleRange } = {}) {
   sortConvoOrder()
 }
 
+// Numerito sobre la pestana "Chats" con el total de conversaciones que
+// tienen mensajes del cliente sin responder (ver pendingReplyCount en el
+// backend). Se actualiza con cada refresco del listado, asi que en cuanto
+// se contesta una desaparece sola.
+function updateChatsPendingBadge(count) {
+  const el = $('chatsPendingBadge')
+  if (!el) return
+  const n = Number(count || 0)
+  el.hidden = n <= 0
+  el.textContent = n > 99 ? '99+' : String(n)
+}
+
 async function loadConvoFirstPage() {
   const generation = ++convoList.generation
   const search = $('convoSearch').value.trim()
@@ -718,6 +735,7 @@ async function loadConvoFirstPage() {
   mergeConvos(data.items)
   $('convoList').scrollTop = 0
   renderConvoList()
+  updateChatsPendingBadge(data.pendingTotal)
 }
 
 async function loadMoreConvos() {
@@ -732,6 +750,7 @@ async function loadMoreConvos() {
     convoList.hasMore = data.hasMore
     mergeConvos(data.items)
     renderConvoList()
+    updateChatsPendingBadge(data.pendingTotal)
   } catch {
     /* se reintenta al volver a llegar abajo */
   } finally {
@@ -761,6 +780,7 @@ async function pollConversations() {
     const more = $('convoMore')
     if (more && !convoList.hasMore) more.textContent = `${convoList.total} conversaciones`
   }
+  updateChatsPendingBadge(data.pendingTotal)
 }
 
 const listObserver = 'IntersectionObserver' in window

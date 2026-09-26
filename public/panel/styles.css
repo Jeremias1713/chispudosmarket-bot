@@ -186,6 +186,23 @@ body {
 .tab:hover { color: var(--view-ink); background: var(--view-soft); }
 .tab[aria-selected="true"] { color: var(--view-ink); background: var(--view-soft); }
 
+/* Numerito del total de conversaciones con mensajes sin responder, sobre el
+   icono de la pestana "Chats". */
+.tab-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger-strong, #dc2626);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
 /* La sección activa se marca con una lengüeta contra el borde del riel: el
    color solo no alcanza para quien no distingue bien los tonos. */
 .tab[aria-selected="true"]::before {
@@ -505,6 +522,25 @@ code {
 .convo-item-time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 .convo-item-last { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .convo-item-tags { display: flex; gap: var(--s1); margin-top: var(--s2); flex-wrap: wrap; }
+
+/* Numerito de mensajes del cliente sin responder (estilo "no leidos" de
+   WhatsApp): aparece solo cuando hay algo pendiente y desaparece solo en
+   cuanto se manda una respuesta (manual o del bot). */
+.pending-badge {
+  align-self: center;
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger-strong, #dc2626);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.convo-item.is-selected .pending-badge { background: #fff; color: var(--primary); }
 
 /* Ancla del selector de fotos, que se posiciona absoluto sobre el hilo. */
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
