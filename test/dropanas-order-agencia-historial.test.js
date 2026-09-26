@@ -62,3 +62,13 @@ test('explica si el 403 viene de la API (codigo) o de un firewall (pagina HTML)'
   assert.match(waf, /firewall de Cloudflare/);
   assert.equal(automation.describeApiError({ code: 'ECONNRESET' }), 'ECONNRESET');
 });
+
+test('un 422 de DroPanas muestra el codigo y los campos rechazados', () => {
+  const text = automation.describeApiError({ response: { status: 422, headers: { 'content-type': 'application/json' }, data: {
+    message: 'Datos invalidos', code: 'VALIDATION_ERROR',
+    errors: { 'cliente.telefono': ['El telefono debe tener 11 digitos'], 'productos.0.variante_id': ['Es obligatorio'] },
+  } } });
+  assert.match(text, /^422 — VALIDATION_ERROR — Datos invalidos/);
+  assert.match(text, /cliente\.telefono: El telefono debe tener 11 digitos/);
+  assert.match(text, /productos\.0\.variante_id: Es obligatorio/);
+});

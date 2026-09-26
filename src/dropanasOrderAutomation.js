@@ -462,6 +462,14 @@ function describeApiError(error) {
     const message = inner.message || data.message;
     if (code) parts.push(String(code));
     if (message) parts.push(String(message).slice(0, 160));
+    // Errores de validacion (422): "campo: detalle" de cada campo rechazado.
+    const fields = data.errors && typeof data.errors === 'object' ? data.errors : inner.errors;
+    if (fields && typeof fields === 'object') {
+      const detail = Object.entries(fields).slice(0, 4)
+        .map(([field, value]) => `${field}: ${[].concat(value).join(', ')}`)
+        .join('; ');
+      if (detail) parts.push(detail.slice(0, 300));
+    }
   } else if (/html/i.test(type) || /^\s*</.test(String(data || ''))) {
     const firewall = response.headers?.['cf-ray'] ? 'firewall de Cloudflare' : 'firewall';
     parts.push(`respuesta HTML (${firewall}), no es un error de permisos de la API`);
@@ -769,6 +777,11 @@ async function createForPhone(phone, { automatic = false } = {}) {
   } catch (error) {
     const session = getSession(phone);
     const { current } = splitStoredOrder(session.dropanasOrder || null, reference);
+    const status = Number(error.response?.status) || null;
+    // 400/422: DroPanas reviso el pedido y lo rechazo, asi que NO se creo.
+    // Se guarda el motivo exacto y se puede reintentar sin miedo a duplicar.
+    const rejected = requestSent && (status === 400 || status === 422);
+    if (requestSent && error.response) error.message = `POST /ordenes: ${describeApiError(error)}`;
     if (reference && !current?.id) {
       saveOrderState(phone, reference, {
         ...(current || {}), externalReference: reference, soldAt: session.soldAt || null,
@@ -778,7 +791,8 @@ async function createForPhone(phone, { automatic = false } = {}) {
         status: 'error', error: error.message, failedAt: new Date().toISOString(),
         // Si el pedido llegó a enviarse, pudo haberse creado igual (por
         // ejemplo, un tiempo de espera agotado): se avisa y no se reintenta solo.
-        requestMaybeSent: Boolean(requestSent || current?.requestMaybeSent),
+        requestMaybeSent: rejected ? false : Boolean(requestSent || current?.requestMaybeSent),
+        ...(rejected ? { rejectedByDropanas: true } : {}),
       });
     }
     throw error;
