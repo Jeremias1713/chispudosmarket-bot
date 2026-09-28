@@ -528,7 +528,7 @@ function pendingAutomationRow(row) {
 function dropanasOrderMatchesFilter(convo) {
   if (dropanasOrderFilter === 'all') return true
   if (dropanasOrderFilter === 'active') return convo.stage !== 'entregado'
-  if (dropanasOrderFilter === 'pending') return ['vendido', 'esperando_guia'].includes(convo.stage)
+  if (dropanasOrderFilter === 'pending') return ['vendido', 'vendido_fecha_futura', 'esperando_guia'].includes(convo.stage)
   return convo.stage === dropanasOrderFilter
 }
 
@@ -568,7 +568,7 @@ function renderDropanasOrders() {
   const counts = {
     all: dropanasOrders.length,
     active: dropanasOrders.filter((c) => c.stage !== 'entregado').length,
-    pending: dropanasOrders.filter((c) => ['vendido', 'esperando_guia'].includes(c.stage)).length,
+    pending: dropanasOrders.filter((c) => ['vendido', 'vendido_fecha_futura', 'esperando_guia'].includes(c.stage)).length,
     en_camino: dropanasOrders.filter((c) => c.stage === 'en_camino').length,
     esperando_retiro: dropanasOrders.filter((c) => c.stage === 'esperando_retiro').length,
     tienda_maracaibo: dropanasOrders.filter((c) => c.stage === 'tienda_maracaibo').length,
