@@ -53,6 +53,7 @@ const STAGE_LABELS = {
   negociando: 'Negociando',
   escribir_mas_tarde: 'Escribir más tarde',
   vendido: 'Vendido',
+  vendido_fecha_futura: 'Vendido - fecha futura',
   esperando_guia: 'Esperando guía',
   tienda_maracaibo: 'Tienda Maracaibo',
   esperando_retiro: 'Esperando retiro',
