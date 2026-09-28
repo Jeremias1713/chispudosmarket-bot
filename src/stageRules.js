@@ -20,19 +20,25 @@
 // conversion), aunque haya pasado por "vendido"/"entregado" antes de
 // devolverse. Sigue existiendo como etapa (classifier.js), solo que a partir
 // de ahi las metricas ya no lo suman.
-const SOLD_STAGES = ['vendido', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'novedad', 'pendiente_devolucion', 'entregado'];
+// "vendido_fecha_futura" cuenta como venta cerrada igual que "vendido": el
+// pedido ya se cerro, solo que el despacho/la entrega quedaron pospuestos a
+// proposito para mas adelante (ver classifier.js). No deja de ser un ingreso
+// real por eso.
+const SOLD_STAGES = ['vendido', 'vendido_fecha_futura', 'esperando_guia', 'tienda_maracaibo', 'esperando_retiro', 'en_camino', 'novedad', 'pendiente_devolucion', 'entregado'];
 
 // Orden logistico real de un pedido ya cerrado, de "recien cerrado" a
 // "entregado". Un rango mayor siempre significa "mas avanzado en el
 // despacho", nunca al reves.
-//   1: cerrado, pendiente de despacho (vendido/esperando_guia), o cerrado
-//      sin necesitar despacho (tienda_maracaibo: retiro en tienda propia).
+//   1: cerrado, pendiente de despacho (vendido/esperando_guia/
+//      vendido_fecha_futura), o cerrado sin necesitar despacho
+//      (tienda_maracaibo: retiro en tienda propia).
 //   2: en_camino - ya se genero/mando la guia, todavia NO llego a la agencia.
 //   3: esperando_retiro - YA LLEGO a la agencia, listo para que el cliente
 //      lo retire.
 //   4: entregado - entrega o retiro confirmado.
 const LOGISTIC_RANK = {
   vendido: 1,
+  vendido_fecha_futura: 1,
   esperando_guia: 1,
   tienda_maracaibo: 1,
   en_camino: 2,
@@ -91,9 +97,11 @@ function isAllowedAutoTransition(currentStage, nextStage) {
 // isNewOrder=true (ver orderGuard.js) fuerza el avance igual, porque en ese
 // caso se confirmo que es una guia de OTRO pedido (uno nuevo, recien
 // cerrado) y no tiene sentido dejarlo colgado en la etapa vieja del pedido
-// anterior.
+// anterior. "vendido_fecha_futura" tambien puede avanzar: si llego una guia
+// real, el negocio (o Dropanas) ya lo esta despachando, asi que el "para
+// adelante" dejo de aplicar.
 function canAdvanceToEnCaminoOnGuia(currentStage, isNewOrder) {
-  return ['vendido', 'esperando_guia'].includes(currentStage) || Boolean(isNewOrder);
+  return ['vendido', 'vendido_fecha_futura', 'esperando_guia'].includes(currentStage) || Boolean(isNewOrder);
 }
 
 module.exports = {

@@ -22,6 +22,16 @@ const STAGES = [
   // vista.
   'escribir_mas_tarde',
   'vendido',
+  // "vendido_fecha_futura" es igual que "vendido" (pedido ya cerrado: todos
+  // los datos, mensaje de cierre mandado) pero el negocio decidio a mano que
+  // el despacho/la entrega van para MAS ADELANTE a proposito (por ejemplo el
+  // cliente pidio que se lo manden en una fecha puntual futura). Es de uso
+  // MANUAL, igual que "esperando_guia": el clasificador de IA nunca la elige
+  // sola (no esta en el prompt de mas abajo), para no confundirla con
+  // "escribir_mas_tarde" (esa es para un pedido que TODAVIA no se cerro). Si
+  // llega una guia real de Dropanas para este pedido, avanza a "en_camino"
+  // como cualquier otro vendido/esperando_guia (ver stageRules.js).
+  'vendido_fecha_futura',
   // "esperando_guia" es una categoria de uso MANUAL (se fija a mano desde el
   // panel, el clasificador de IA nunca la elige sola): sirve para separar,
   // dentro de los pedidos ya vendidos, los que todavia no tienen numero de
