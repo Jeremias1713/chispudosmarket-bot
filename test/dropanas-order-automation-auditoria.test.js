@@ -5,6 +5,9 @@
 // DroPanas ni a WhatsApp de verdad.
 const { setupTempDataDir, cleanup } = require('./helpers/tempDataDir');
 const dataDir = setupTempDataDir('dropanas-order-auditoria');
+// Estas pruebas cubren el modo automatico, que en produccion esta bloqueado
+// por defecto (ver autoCreateAllowed en dropanasOrderAutomation.js).
+process.env.DROPANAS_AUTO_CREATE_ALLOWED = '1';
 const fs = require('node:fs');
 const path = require('node:path');
 fs.copyFileSync(path.join(__dirname, '..', 'data', 'agencies.csv'), path.join(dataDir, 'agencies.csv'));
