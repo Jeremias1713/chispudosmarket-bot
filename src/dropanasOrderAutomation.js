@@ -59,6 +59,14 @@ function defaultMappings() {
   ];
 }
 
+// La subida AUTOMATICA de pedidos a DroPanas esta bloqueada por defecto: cada
+// pedido lo envia una persona con el boton "Enviar a DroPanas" del chat (o de
+// la pestaña Subir pedidos), despues de revisar y corregir los datos. Solo se
+// puede volver a habilitar a proposito con DROPANAS_AUTO_CREATE_ALLOWED=1.
+function autoCreateAllowed() {
+  return process.env.DROPANAS_AUTO_CREATE_ALLOWED === '1';
+}
+
 function settings() {
   const current = settingsStore.getSettings();
   const defaults = defaultMappings();
@@ -71,7 +79,8 @@ function settings() {
     : defaults;
   return {
     uploadEnabled: Boolean(current.dropanasOrderUploadEnabled),
-    autoCreateEnabled: Boolean(current.dropanasOrderAutoCreateEnabled),
+    autoCreateEnabled: autoCreateAllowed() && Boolean(current.dropanasOrderAutoCreateEnabled),
+    autoCreateLocked: !autoCreateAllowed(),
     activatedAt: current.dropanasOrderActivatedAt || null,
     mappings,
   };
@@ -176,7 +185,7 @@ function saveConfig(input) {
   if (errors.length) throw new Error(errors.join(' '));
   const previous = settings();
   const uploadEnabled = Boolean(input.uploadEnabled);
-  const autoCreateEnabled = uploadEnabled && Boolean(input.autoCreateEnabled);
+  const autoCreateEnabled = autoCreateAllowed() && uploadEnabled && Boolean(input.autoCreateEnabled);
   let activatedAt = previous.activatedAt;
   if (autoCreateEnabled && !previous.autoCreateEnabled) activatedAt = new Date().toISOString();
   if (!autoCreateEnabled) activatedAt = null;
@@ -863,6 +872,12 @@ async function saveDraftEdit(phone, body = {}) {
   return prepareDraft(phone, getSession(phone));
 }
 
+// Borrador de UN solo chat (para el boton "Enviar a DroPanas" del chat).
+async function draftForPhone(phone) {
+  if (!sessionExists(phone)) throw new Error('No existe una conversación con ese teléfono.');
+  return prepareDraft(phone, getSession(phone));
+}
+
 async function listDrafts() {
   const rows = listSessions().filter((session) => SOLD_STAGES.includes(session.stage || '') || session.orderClosed === true);
   const drafts = await Promise.all(rows.map((session) => prepareDraft(session.phone, session)));
@@ -1066,5 +1081,5 @@ function stopAutoRetry() {
   autoRetryTimer = null;
 }
 
-module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, suggestOffices, searchOffices, officeCatalog, resetOfficeCache, saveDraftEdit, buildPayload, externalReference, deterministicIdempotencyKey,
+module.exports = { defaultMappings, settings, matchableMappings, validateConfig, saveConfig, baseDraft, prepareDraft, draftForPhone, listDrafts, createForPhone, maybeCreate, splitName, localPhone, findMapping, resolveOffice, historyOrderFacts, cleanAgency, describeApiError, suggestOffices, searchOffices, officeCatalog, resetOfficeCache, saveDraftEdit, buildPayload, externalReference, deterministicIdempotencyKey,
   mentionedProducts, documentType, retryAutomatic, startAutoRetry, stopAutoRetry, AUTO_RETRY_MAX };
