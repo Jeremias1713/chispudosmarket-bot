@@ -28,6 +28,7 @@ const catalog = require('../catalog');
 const library = require('../library');
 const agencies = require('../agencies');
 const settingsStore = require('../settings');
+const { stageAfterArrivalNotice } = require('../stageRules');
 const broadcasts = require('../broadcasts');
 const simulator = require('../simulator');
 const coupons = require('../coupons');
@@ -616,7 +617,22 @@ router.post('/api/conversations/:phone/send-template', async (req, res) => {
   appendMessage(phone, 'human', `[plantilla] ${templateName}`, {
     template: { name: templateName, origin: 'manual', params, snapshot, wamid, status: 'sent' },
   });
-  res.json({ ok: true });
+  // Si lo que se mando a mano es el aviso de "ya llego a la agencia", la
+  // conversacion tiene que pasar a esperando_retiro como cuando lo manda el
+  // bot solo. Antes quedaba en "en_camino" (y fijada, asi que la IA tampoco la
+  // movia), y el chat mostraba una etapa que contradecia el aviso.
+  let stage = null;
+  const pickupTemplate = settingsStore.getSettings().pickupTemplateName || 'pedido_ha_llegado_a_tealca';
+  if (templateName === pickupTemplate) {
+    stage = stageAfterArrivalNotice(getSession(phone).stage);
+    if (stage) {
+      updateSession(phone, {
+        stage, stageLocked: true, stageReason: 'Aviso de llegada enviado desde el chat',
+        arrivalNotifiedAt: new Date().toISOString(),
+      });
+    }
+  }
+  res.json({ ok: true, ...(stage ? { stage } : {}) });
 });
 
 // Mandar una imagen a mano desde el panel (ademas del texto manual de arriba).
