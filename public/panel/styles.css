@@ -2490,8 +2490,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 .dp-edit-doc input { flex: 1; }
 .dp-edit-items { display: grid; gap: 6px; }
 .dp-edit-label { font-size: 12px; color: var(--muted, #667085); }
-.dp-edit-item { display: grid; grid-template-columns: 1fr 70px 120px; gap: 6px; }
+.dp-edit-item { display: grid; grid-template-columns: 1fr 70px 120px 34px; gap: 6px; }
 .dp-edit-office { display: grid; gap: 6px; }
 .dp-edit-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 .dp-edit-actions .do-edit-msg { color: var(--danger, #b42318); }
-@media (max-width: 640px) { .dp-edit-item { grid-template-columns: 1fr 60px 100px; } }
+@media (max-width: 640px) { .dp-edit-item { grid-template-columns: 1fr 60px 100px 34px; } }
+
+/* Boton "Enviar a DroPanas" dentro del chat */
+.dropanas-bar { flex-wrap: wrap; }
+.dp-chat-order { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; }
+.dp-chat-order[hidden] { display: none; }
+.dp-edit-agency { color: var(--text-2, #555); }
+.do-edit-remove { padding: 2px 8px; }

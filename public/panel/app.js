@@ -248,7 +248,11 @@ function parseMappingPrices(value) {
 function renderOrderConfig(config) {
   $('do_uploadEnabled').checked = Boolean(config?.uploadEnabled)
   $('do_autoEnabled').checked = Boolean(config?.autoCreateEnabled)
-  $('do_autoEnabled').disabled = !config?.uploadEnabled
+  $('do_autoEnabled').disabled = !config?.uploadEnabled || Boolean(config?.autoCreateLocked)
+  if (config?.autoCreateLocked) {
+    const autoLabel = $('do_autoEnabled').closest('label')
+    if (autoLabel && autoLabel.lastChild) autoLabel.lastChild.textContent = ' Subida automática bloqueada: cada pedido se envía a mano con el botón "Enviar a DroPanas" del chat'
+  }
   $('do_mappings').innerHTML = (config?.mappings || []).map(mappingRow).join('')
   $('do_activationWarning').hidden = !config?.autoCreateEnabled
 }
@@ -295,17 +299,26 @@ function orderDraftRow(draft) {
 
 // Formulario para corregir a mano los datos del pedido (oculto hasta que se
 // toca "Editar datos"). La oficina se elige del catalogo real de Tealca.
-function orderEditForm(draft) {
-  const mappings = (dropanasOrderData.config?.mappings || []).filter((m) => m.enabled)
+function orderEditForm(draft, opts = {}) {
+  const mappings = (opts.mappings || dropanasOrderData.config?.mappings || []).filter((m) => m.enabled)
   const items = (draft.items || []).length ? draft.items : [{}]
   const itemRow = (item) => `<div class="dp-edit-item">
       <select class="do-edit-product">${mappings.map((m) => `<option value="${esc(m.id)}"${item.mapping?.id === m.id ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
       <input class="do-edit-qty" type="number" min="1" max="99" value="${esc(item.quantity || 1)}" title="Cantidad">
       <input class="do-edit-total" type="number" min="1" step="0.01" value="${esc(item.total || '')}" placeholder="Total Bs" title="Total en Bs">
+      <button class="btn btn-small do-edit-remove" type="button" title="Quitar este producto">✕</button>
     </div>`
   const suggestions = draft.officeSuggestions || []
-  const selectedId = draft.officeId ?? suggestions[0]?.id ?? ''
-  return `<div class="dp-order-edit" hidden>
+  // En el chat no se adivina la oficina: solo queda elegida si el cliente ya
+  // la dejo clara (coincide con una sola) o si se eligio a mano. Si no, hay
+  // que escogerla de la lista.
+  const selectedId = opts.explicitOffice
+    ? (draft.officeId ?? draft.official?.office?.id ?? '')
+    : (draft.officeId ?? suggestions[0]?.id ?? '')
+  const agencyNote = opts.explicitOffice
+    ? `<small class="dp-edit-agency">El cliente dijo: <strong>${esc(draft.agency || 'sin agencia')}</strong>${selectedId === '' ? ' — elige la oficina Tealca de la lista.' : ''}</small>`
+    : ''
+  return `<div class="dp-order-edit"${opts.visible ? '' : ' hidden'}>
     <div class="dp-edit-grid">
       <label>Nombre<input class="do-edit-nombre" value="${esc(draft.identity?.nombre || '')}"></label>
       <label>Apellido<input class="do-edit-apellido" value="${esc(draft.identity?.apellido || '')}"></label>
@@ -313,18 +326,40 @@ function orderEditForm(draft) {
         <input class="do-edit-cedula" value="${esc(draft.cedula || '')}" inputmode="numeric"></span></label>
       <label>Teléfono<input class="do-edit-telefono" value="${esc(draft.customerPhone || '')}" placeholder="04141234567" inputmode="numeric"></label>
     </div>
-    <div class="dp-edit-items"><span class="dp-edit-label">Productos (cantidad y total en Bs)</span>${items.map(itemRow).join('')}</div>
+    <div class="dp-edit-items"><span class="dp-edit-label">Productos (cantidad y total en Bs)</span>${items.map(itemRow).join('')}
+      <button class="btn btn-small do-edit-add" type="button">+ Producto</button></div>
+    ${agencyNote}
     <label class="dp-edit-office">Oficina Tealca
       <select class="do-edit-office" data-selected="${esc(selectedId)}" data-suggested="${esc(JSON.stringify(suggestions.map((o) => o.id)))}">${officeSelectOptions(suggestions, selectedId)}</select>
       <input class="do-edit-office-search" placeholder="Filtrar la lista (ej: Coro, Falcón)…">
       <small class="do-edit-office-msg"></small>
     </label>
     <div class="dp-edit-actions">
-      <button class="btn btn-primary do-save-edit" data-phone="${esc(draft.phone)}" type="button">Guardar cambios</button>
+      ${opts.actions || `<button class="btn btn-primary do-save-edit" data-phone="${esc(draft.phone)}" type="button">Guardar cambios</button>`}
       <small class="do-edit-msg"></small>
     </div>
   </div>`
 }
+
+// Agregar / quitar lineas de producto en cualquier formulario de pedido.
+document.addEventListener('click', (event) => {
+  const remove = event.target.closest?.('.do-edit-remove')
+  if (remove) {
+    const rows = remove.closest('.dp-edit-items')?.querySelectorAll('.dp-edit-item') || []
+    if (rows.length > 1) remove.closest('.dp-edit-item').remove()
+    return
+  }
+  const add = event.target.closest?.('.do-edit-add')
+  if (add) {
+    const box = add.closest('.dp-edit-items')
+    const last = [...box.querySelectorAll('.dp-edit-item')].at(-1)
+    if (!last) return
+    const clone = last.cloneNode(true)
+    clone.querySelector('.do-edit-qty').value = '1'
+    clone.querySelector('.do-edit-total').value = ''
+    box.insertBefore(clone, add)
+  }
+})
 
 // Lista completa de oficinas Tealca (se pide una vez y se reutiliza).
 let tealcaOffices = null
@@ -471,6 +506,123 @@ function renderOrderQueue(data) {
       button.disabled = false
     }
   }))
+}
+
+/* ---------- boton "Enviar a DroPanas" dentro del chat ---------- */
+// Nada se sube solo: la persona revisa/corrige los datos del pedido aca mismo
+// y aprieta el boton. El pedido llega a DroPanas pendiente de aprobacion.
+let dropanasBarPhone = null
+
+function ensureDropanasBar() {
+  let bar = $('dropanasBar')
+  if (bar) return bar
+  bar = document.createElement('div')
+  bar.id = 'dropanasBar'
+  bar.className = 'followup-bar dropanas-bar'
+  bar.innerHTML = `<span class="followup-info">Pedido en DroPanas</span>
+    <button class="btn btn-primary" id="dropanasOpenBtn" type="button">📦 Enviar a DroPanas</button>
+    <div class="dp-chat-order" id="dropanasPanel" hidden></div>`
+  $('chatTools').insertBefore(bar, $('memoryCard'))
+  $('dropanasOpenBtn').addEventListener('click', async () => {
+    const panel = $('dropanasPanel')
+    if (!panel.hidden) { panel.hidden = true; return }
+    panel.hidden = false
+    await loadChatOrder()
+  })
+  return bar
+}
+
+function renderDropanasBar(conversation) {
+  ensureDropanasBar()
+  if (dropanasBarPhone !== conversation.phone) {
+    dropanasBarPhone = conversation.phone
+    $('dropanasPanel').hidden = true
+    $('dropanasPanel').innerHTML = ''
+  }
+}
+
+async function loadChatOrder() {
+  const phone = state.selectedPhone
+  const panel = $('dropanasPanel')
+  if (!phone) return
+  panel.innerHTML = '<small>Cargando el pedido…</small>'
+  try {
+    renderChatOrder(phone, await api(`/dropanas-orders/${encodeURIComponent(phone)}`))
+  } catch (err) {
+    panel.innerHTML = `<small class="is-missing">${esc(err.message)}</small>`
+  }
+}
+
+function renderChatOrder(phone, data) {
+  const panel = $('dropanasPanel')
+  const draft = data.draft
+  const config = data.config || {}
+  const created = draft.current?.id
+  const hasGuide = (draft.issues || []).some((issue) => issue.startsWith('Esta venta ya tiene guía'))
+  const issues = (draft.issues || []).filter((issue) => !created || !issue.startsWith('Ya fue subido'))
+  const warnings = draft.warnings || []
+  const itemDetail = (draft.items || []).map((item) => `${item.quantity || '?'} × ${item.mapping?.label || item.productName || 'Producto pendiente'}${item.total ? ` · ${Number(item.total).toLocaleString('es-VE')} Bs` : ''}`).join(' + ')
+  let body = created
+    ? `<span class="badge">Subido #${esc(draft.current.id)}</span> <small>Ya está en DroPanas (${esc(draft.current.status || 'pendiente de aprobación')}). Aprobarlo se hace allá.</small>`
+    : ''
+  if (!created && !config.uploadEnabled) body += '<small class="is-missing">La subida de pedidos está desactivada en la pestaña "Subir pedidos".</small>'
+  if (itemDetail && created) body += `<div class="dp-auto-event-meta">${esc(itemDetail)}</div>`
+  if (issues.length && !created) body += `<small class="is-missing">${issues.map(esc).join(' ')}</small>`
+  if (warnings.length) body += `<small class="is-warning">${warnings.map(esc).join(' ')}</small>`
+  if (!created && !hasGuide) {
+    const actions = `<button class="btn do-chat-save" type="button">Guardar cambios</button>
+      <button class="btn btn-primary do-chat-send" type="button"${config.uploadEnabled ? '' : ' disabled'}>Enviar a DroPanas</button>`
+    body += orderEditForm(draft, { mappings: config.mappings || [], explicitOffice: true, visible: true, actions })
+  }
+  panel.innerHTML = body
+  const form = panel.querySelector('.dp-order-edit')
+  if (!form) return
+  fillOfficeSelect(form)
+  const msg = form.querySelector('.do-edit-msg')
+  const save = async () => {
+    const edit = collectOrderEdit(form)
+    if (!edit.officeId && !draft.official?.office) throw new Error('Elige la oficina Tealca de la lista.')
+    const result = await api(`/dropanas-orders/${encodeURIComponent(phone)}/edit`, { method: 'POST', body: JSON.stringify(edit) })
+    return result.draft
+  }
+  form.querySelector('.do-chat-save').addEventListener('click', async (event) => {
+    event.target.disabled = true
+    msg.textContent = 'Guardando…'
+    try {
+      renderChatOrder(phone, { config, draft: await save() })
+    } catch (err) {
+      msg.textContent = err.message
+    } finally {
+      event.target.disabled = false
+    }
+  })
+  form.querySelector('.do-chat-send').addEventListener('click', async (event) => {
+    const button = event.target
+    button.disabled = true
+    msg.textContent = 'Revisando…'
+    try {
+      const saved = await save()
+      if ((saved.issues || []).length) {
+        renderChatOrder(phone, { config, draft: saved })
+        return
+      }
+      const careful = (saved.warnings || []).length
+      const question = careful
+        ? 'Este pedido tiene avisos (en naranja). Antes de seguir, revisa en DroPanas que no se haya creado ya. ¿Enviarlo de todas formas?'
+        : 'Se creará este pedido real en DroPanas y quedará pendiente de tu aprobación. ¿Enviarlo?'
+      if (!confirm(question)) { msg.textContent = ''; return }
+      msg.textContent = 'Enviando a DroPanas…'
+      const result = await api(`/dropanas-orders/${encodeURIComponent(phone)}/create`, { method: 'POST', body: '{}' })
+      alert(result.warning
+        ? `Pedido #${result.order.id} creado en DroPanas, pero revísalo: ${result.warning}`
+        : `Pedido #${result.order.id} creado pendiente de aprobación.`)
+      await loadChatOrder()
+    } catch (err) {
+      msg.textContent = err.message
+    } finally {
+      button.disabled = false
+    }
+  })
 }
 
 async function loadDropanasOrderQueue() {
@@ -1216,6 +1368,7 @@ async function loadChat() {
   renderAmount(conversation)
   renderGuia(conversation)
   renderNote(conversation)
+  renderDropanasBar(conversation)
   renderMemory(conversation)
   renderWindowStatus(conversation)
   const isNewChat = lastRenderedChatPhone !== conversation.phone
