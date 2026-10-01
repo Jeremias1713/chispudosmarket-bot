@@ -104,8 +104,21 @@ function canAdvanceToEnCaminoOnGuia(currentStage, isNewOrder) {
   return ['vendido', 'vendido_fecha_futura', 'esperando_guia'].includes(currentStage) || Boolean(isNewOrder);
 }
 
+// Cuando el aviso de "ya llego a la agencia, ya puede retirarlo" sale por
+// cualquier camino (automatico por DroPanas, o a mano desde la plantilla del
+// chat), la etapa tiene que pasar a "esperando_retiro". Devuelve la etapa
+// nueva, o null si no corresponde moverla: solo se avanza un pedido que
+// todavia no llego (rango logistico 1 o 2, por ejemplo "en_camino"); uno que
+// ya esta en la agencia, entregado, en novedad o en devolucion nunca se toca,
+// ni una conversacion que no es una venta.
+function stageAfterArrivalNotice(currentStage) {
+  const rank = logisticRank(currentStage);
+  return rank >= 1 && rank <= 2 ? 'esperando_retiro' : null;
+}
+
 module.exports = {
   SOLD_STAGES,
+  stageAfterArrivalNotice,
   LOGISTIC_RANK,
   NON_LOGISTIC_STAGES,
   logisticRank,
