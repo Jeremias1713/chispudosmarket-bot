@@ -33,6 +33,7 @@ const {
   buildDirectAgencyMessage,
   getDataRequestTemplate,
 } = require('./ai');
+const { missingOrderData, missingDataMessage } = require('./orderDataGuard');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
 const { getImage, MEDIA_DIR } = require('./library');
@@ -721,6 +722,23 @@ async function processReply(from) {
       finalReply = stripped === null ? DATA_REQUEST_REMINDER : stripped;
     }
 
+    // Red de seguridad: si el modelo intenta CERRAR el pedido sin que esten
+    // los tres datos (nombre, cedula, telefono) realmente en la conversacion,
+    // se descarta el cierre y se pide lo que falta (ver orderDataGuard.js).
+    let blockedClose = false;
+    if (!orderClosed && isClosingMessage(reply)) {
+      const missingData = missingOrderData({
+        card: session.card,
+        history,
+        userText,
+        requestMarker: looksLikeEmptyDataRequest,
+      });
+      if (missingData.length) {
+        finalReply = dataAlreadyRequested ? missingDataMessage(missingData) : getDataRequestTemplate();
+        blockedClose = true;
+      }
+    }
+
     // Ver stripPostCloseQuestion en ai.js: con el pedido ya cerrado (turnos
     // POSTERIORES al mensaje de cierre, no el de cierre en si: por eso se usa
     // orderClosed, el flag de sesion de ANTES de este turno, no isNewClose de
@@ -784,10 +802,10 @@ async function processReply(from) {
     }
 
     const patch = { lastAssistantText: finalReply };
-    if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || formFollowUpSent)) {
+    if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || formFollowUpSent || blockedClose)) {
       patch.orderDataRequested = true;
     }
-    const isNewClose = !orderClosed && isClosingMessage(reply);
+    const isNewClose = !orderClosed && !blockedClose && isClosingMessage(reply);
     if (isNewClose) {
       patch.orderClosed = true;
       // El cierre del pedido ES la venta: la marcamos como "vendido" en el
