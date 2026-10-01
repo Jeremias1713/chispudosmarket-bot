@@ -33,7 +33,7 @@ const {
   buildDirectAgencyMessage,
   getDataRequestTemplate,
 } = require('./ai');
-const { missingOrderData, missingDataMessage } = require('./orderDataGuard');
+const { missingOrderData, missingDataMessage, looksLikeOrderSummary } = require('./orderDataGuard');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
 const { getImage, MEDIA_DIR } = require('./library');
@@ -726,7 +726,7 @@ async function processReply(from) {
     // los tres datos (nombre, cedula, telefono) realmente en la conversacion,
     // se descarta el cierre y se pide lo que falta (ver orderDataGuard.js).
     let blockedClose = false;
-    if (!orderClosed && isClosingMessage(reply)) {
+    if (!orderClosed && isClosingMessage(reply) && looksLikeOrderSummary(reply)) {
       const missingData = missingOrderData({
         card: session.card,
         history,
