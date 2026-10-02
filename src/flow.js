@@ -18,7 +18,7 @@ const crypto = require('crypto');
 const { sendText, sendImageByLink, sendAudioByLink, downloadMedia } = require('./whatsapp');
 const { transcribeAudio } = require('./stt');
 const { describeImage } = require('./vision');
-const { getSession, updateSession, resetSession, appendMessage } = require('./state');
+const { getSession, updateSession, resetSession, appendMessage, markLastAssistantAudio } = require('./state');
 const { nearestByCoords, formatAgency, findKnownCityKey } = require('./agencies');
 const {
   getAssistantReply,
@@ -267,6 +267,7 @@ async function maybeSendAudio(to, text) {
     const link = mediaUrl(speech.filename);
     if (!link) return; // sin PUBLIC_URL no hay como mandarlo
     await sendAudioByLink(to, link);
+    try { markLastAssistantAudio(to); } catch (e) { /* la marca es solo informativa */ }
   } catch (err) {
     console.warn('No se pudo mandar la nota de voz, sigo solo con texto:', err.message);
   } finally {

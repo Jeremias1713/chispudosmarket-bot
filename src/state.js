@@ -205,6 +205,25 @@ function appendMessage(phone, role, content, extra) {
   return sessions[phone];
 }
 
+// Marca el ULTIMO mensaje del bot como "se mando tambien como nota de voz"
+// (audioSent: true). No agrega mensajes nuevos al historial (la IA y las
+// reglas leen el historial), solo una marca en el mensaje de texto al que
+// acompano el audio; el panel muestra un aviso en esa burbuja.
+function markLastAssistantAudio(phone) {
+  const sessions = loadAll();
+  const session = sessions[phone];
+  if (!session || !Array.isArray(session.history)) return;
+  const history = [...session.history];
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'assistant') {
+      history[i] = { ...history[i], audioSent: true };
+      sessions[phone] = { ...session, history, audioRepliesCount: (session.audioRepliesCount || 0) + 1 };
+      saveAll(sessions);
+      return;
+    }
+  }
+}
+
 // Pausar deja al bot mudo en esa conversacion (para que un humano tome el
 // control a mano desde el panel); reason queda solo para mostrar por que.
 function setPaused(phone, paused, reason) {
@@ -305,6 +324,7 @@ module.exports = {
   updateSession,
   resetSession,
   appendMessage,
+  markLastAssistantAudio,
   setPaused,
   setStage,
   unlockStage,
