@@ -254,7 +254,7 @@ ${knownCityClean ?`\n  DATO YA CONFIRMADO (viene de la ficha del cliente, no de 
 
   ENTREGA: depende de la ciudad.
   - TODA VENEZUELA (Caracas incluida, y todos los demas estados, Maracaibo tambien): SOLO se retira en agencia (TEALCA), no hay entrega a domicilio en ningun lado, ni siquiera en Caracas. Si un cliente pide que se lo lleven a la casa, decile con naturalidad que por ahora solo se retira en agencia, no ofrezcas ni prometas domicilio en ningun caso, y segui ayudandolo a elegir la agencia mas cercana.
-  - MARACAIBO (estado Zulia): ademas de la agencia Tealca, ahi tambien hay tienda fisica propia del negocio, en Palacio de Eventos, local PBG-16, Maracaibo, estado Zulia 🙏🏻. ESA es la UNICA direccion que podes escribir de memoria, sin llamar a la herramienta: es fija y siempre la misma. Para las agencias Tealca de Maracaibo NUNCA hagas lo mismo: aunque te sepas que en Maracaibo hay varias agencias Tealca, NO inventes ni escribas de memoria ninguna direccion de Tealca (nombre de sector, calle, numero, etc) — eso ya paso de verdad (se le invento a un cliente una direccion de Tealca en Maracaibo que no existe en el listado real) y no puede volver a pasar. Para Maracaibo llama a buscar_agencias_por_zona exactamente igual que para cualquier otra ciudad (esta nota de la tienda propia NO reemplaza ese paso), dejá que la herramienta traiga la lista REAL de agencias Tealca de Maracaibo (suelen ser varias, no una sola), y despues sumale la tienda propia como un dato mas de la conversacion (con algun emoji si corresponde, tipo 📍), no como parte de la lista numerada. Esto es informacion SOLO para Maracaibo puntual, no para el resto del Zulia ni del pais: en cualquier otra ciudad segui con la agencia Tealca como unica opcion.
+  - MARACAIBO (estado Zulia): igual que el resto del pais, SOLO se retira en agencia Tealca. NO ofrezcas, NO menciones y NO sugieras ninguna tienda fisica ni retiro en tienda propia del negocio en Maracaibo (ya no se ofrece). Llama a buscar_agencias_por_zona exactamente igual que para cualquier otra ciudad y dejá que la herramienta traiga la lista REAL de agencias Tealca de Maracaibo (suelen ser varias). NUNCA inventes ni escribas de memoria direcciones de agencias Tealca: eso ya paso de verdad (se le invento a un cliente una direccion de Tealca en Maracaibo que no existe en el listado real) y no puede volver a pasar. Si el cliente de Maracaibo pregunta puntualmente por una tienda o local del negocio, decile con naturalidad que por ahora el retiro es solo en agencia Tealca y segui ayudandolo a elegir la agencia.
 
   HORARIO DE TEALCA: Tealca atiende de lunes a viernes, de 9:00am a 4:00pm. No atiende fines de semana ni feriados. Si el cliente pregunta si Tealca esta abierta, hasta que hora atiende, o cualquier variante de eso (por ejemplo si puede retirar su pedido "ahorita" o "hoy en la noche"), contestale con este horario exacto, sin inventar otro. Si pregunta puntualmente por su pedido fuera de ese horario, decile con naturalidad que en ese momento la agencia esta cerrada y que puede retirarlo en el proximo horario habil.
 
@@ -683,8 +683,9 @@ function capitalizeWords(s) {
 // lista armada por codigo (red de seguridad de completitud). Antes esto
 // dependia de que el modelo se acordara de agregarlo el solo, y paso de
 // verdad que la omitio en su respuesta.
-const MARACAIBO_TIENDA_PROPIA_NOTE =
-  '\n\nAdemas de esas agencias, tambien tenemos tienda propia en Maracaibo 📍: Palacio de Eventos, local PBG-16, Maracaibo, estado Zulia.';
+// Desactivada a pedido del negocio: ya no se ofrece la tienda propia de
+// Maracaibo, solo agencias Tealca. Vacia a proposito (ver tambien el prompt).
+const MARACAIBO_TIENDA_PROPIA_NOTE = '';
 
 // Arma el mensaje final (el que se le manda de verdad al cliente) para una
 // busqueda de agencias ya resuelta. Se separa de buildDirectAgencyMessage
@@ -1077,7 +1078,7 @@ async function getAssistantReply(history, userText, knownCity, knownProduct, ord
   // dependia 100% de que el modelo se acordara solo de mencionarla. Ahora se
   // agrega por codigo, sin pasar por el modelo, cada vez que la lista final
   // que se le manda al cliente es de Maracaibo y todavia no la menciona.
-  if (lastAgencyResult && lastAgencyResult.ciudad === 'maracaibo' && !/tienda propia|palacio de eventos/i.test(text)) {
+  if (MARACAIBO_TIENDA_PROPIA_NOTE && lastAgencyResult && lastAgencyResult.ciudad === 'maracaibo' && !/tienda propia|palacio de eventos/i.test(text)) {
     console.log('[agency-completeness] agregando nota de tienda propia de Maracaibo (no estaba en el texto del modelo)');
     text = text.trim() + MARACAIBO_TIENDA_PROPIA_NOTE;
   }
