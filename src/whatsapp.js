@@ -18,11 +18,23 @@ function client() {
   });
 }
 
+// Meta empezo a mandar algunos mensajes SIN telefono, solo con un identificador
+// de usuario (BSUID, ej. "US.13491208655302741918"): el cliente tiene un
+// nombre de usuario de WhatsApp y su numero no viaja. A esos hay que
+// contestarles con el campo "recipient" en vez de "to".
+function isBsuid(value) {
+  return /^[A-Za-z]{2}\.[A-Za-z0-9.]+$/.test(String(value || ''));
+}
+
+function addressee(to) {
+  return isBsuid(to) ? { recipient: String(to) } : { to };
+}
+
 async function sendText(to, body) {
   const api = client();
   await api.post('/messages', {
     messaging_product: 'whatsapp',
-    to,
+    ...addressee(to),
     type: 'text',
     text: { body },
   });
@@ -32,7 +44,7 @@ async function sendButtons(to, bodyText, buttons) {
   const api = client();
   await api.post('/messages', {
     messaging_product: 'whatsapp',
-    to,
+    ...addressee(to),
     type: 'interactive',
     interactive: {
       type: 'button',
@@ -51,7 +63,7 @@ async function sendLocationRequest(to, bodyText) {
   const api = client();
   await api.post('/messages', {
     messaging_product: 'whatsapp',
-    to,
+    ...addressee(to),
     type: 'interactive',
     interactive: {
       type: 'location_request_message',
@@ -68,7 +80,7 @@ async function sendImageByLink(to, link, caption) {
   const api = client();
   await api.post('/messages', {
     messaging_product: 'whatsapp',
-    to,
+    ...addressee(to),
     type: 'image',
     image: caption ? { link, caption } : { link },
   });
@@ -80,7 +92,7 @@ async function sendAudioByLink(to, link) {
   const api = client();
   await api.post('/messages', {
     messaging_product: 'whatsapp',
-    to,
+    ...addressee(to),
     type: 'audio',
     audio: { link },
   });
@@ -106,7 +118,7 @@ async function sendTemplate(to, templateName, languageCode, params, headerImageU
 // al aceptar el envio (data.messages[0].id).
 const { data } = await api.post('/messages', {
   messaging_product: 'whatsapp',
-  to,
+  ...addressee(to),
   type: 'template',
   template: {
     name: templateName,
@@ -153,4 +165,4 @@ async function markAsRead(messageId) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead, downloadMedia };
+module.exports = { isBsuid, addressee, sendText, sendButtons, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead, downloadMedia };

@@ -177,7 +177,9 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
     // varios en un mismo POST (por ejemplo si el cliente escribio rapido):
     // se procesan todos, uno por uno, en el orden en que llegaron.
     for (const message of messages) {
-      const from = message.from; // numero del cliente
+      // Numero del cliente; si el usuario tiene nombre de usuario de WhatsApp
+      // Meta no manda el numero y solo viene su BSUID (from_user_id).
+      const from = message.from || message.from_user_id;
       if (!from) {
         // Sin numero no hay a quien contestarle ni donde guardar el
         // mensaje: antes esto terminaba creando una conversacion fantasma
@@ -187,7 +189,8 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
         console.warn('Mensaje entrante sin "from", se ignora:', JSON.stringify(message));
         continue;
       }
-      const profileName = value?.contacts?.find((c) => c.wa_id === from)?.profile?.name || null;
+      const contact = value?.contacts?.find((c) => c.wa_id === from || c.user_id === from);
+      const profileName = contact?.profile?.name || contact?.profile?.username || null;
 
       if (message.id) {
         markAsRead(message.id).catch(() => {});
