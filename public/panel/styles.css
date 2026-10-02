@@ -2502,3 +2502,5 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 .dp-chat-order[hidden] { display: none; }
 .dp-edit-agency { color: var(--text-2, #555); }
 .do-edit-remove { padding: 2px 8px; }
+
+.bubble-voice { display: block; font-size: 11px; margin-top: 4px; opacity: .8; }

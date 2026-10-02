@@ -1247,6 +1247,7 @@ function bubbleInner(m) {
     : ''
   return audio + img + video +
     `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
+    (m.audioSent ? '<span class="bubble-voice">🔊 Se envió también como nota de voz</span>' : '') +
     `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
 }
 
@@ -1273,7 +1274,7 @@ function renderMessages(messages, forceScrollBottom) {
   // Solo se agregan los mensajes nuevos al final si lo anterior no cambio
   // (lo normal: llego un mensaje). Redibujar todo cada vez reiniciaba los
   // audios que se estaban escuchando y recargaba las imagenes.
-  const sigs = messages.map((m) => `${m.role}|${m.at}|${m.content}|${m.template?.status || ''}|${m.attachment?.url || ''}`)
+  const sigs = messages.map((m) => `${m.role}|${m.at}|${m.content}|${m.template?.status || ''}|${m.attachment?.url || ''}|${m.audioSent ? 'a' : ''}`)
   const prev = renderedMessageSigs
   const samePrefix = !forceScrollBottom && prev.length && prev.length <= sigs.length
     && prev.every((sig, i) => sig === sigs[i]) && box.querySelector(':scope > .bubble')
