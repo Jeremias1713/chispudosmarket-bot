@@ -1196,7 +1196,7 @@ router.get('/api/dropanas-orders/offices', async (req, res) => {
 
 // Borrador de UN chat + configuracion minima, para el boton "Enviar a DroPanas"
 // dentro del chat del cliente.
-router.get('/api/dropanas-orders/:phone(\\d+)', async (req, res) => {
+router.get('/api/dropanas-orders/:phone([A-Za-z0-9.]+)', async (req, res) => {
   try {
     const config = dropanasOrderAutomation.settings();
     res.json({ config: { uploadEnabled: config.uploadEnabled, mappings: config.mappings.filter((m) => m.enabled) }, draft: await dropanasOrderAutomation.draftForPhone(req.params.phone) });
