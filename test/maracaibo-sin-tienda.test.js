@@ -17,3 +17,10 @@ test('el prompt le prohibe ofrecer la tienda de Maracaibo', () => {
   assert.match(line, /NO ofrezcas/);
   assert.doesNotMatch(line, /PBG-16|Palacio de Eventos/);
 });
+
+test('el prompt contesta que el producto no esta en la tienda fisica y no confunde agencia con tienda', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ai.js'), 'utf8');
+  const line = src.split('\n').find((l) => l.startsWith('  - MARACAIBO (estado Zulia)'));
+  assert.match(line, /no esta en la tienda fisica de Maracaibo ahora mismo/);
+  assert.match(line, /llaman "tienda" a la agencia/);
+});
