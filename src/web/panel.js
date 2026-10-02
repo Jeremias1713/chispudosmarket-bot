@@ -542,6 +542,7 @@ router.get('/api/conversations/:phone', (req, res) => {
     content: m.content,
     at: m.at || null,
     attachment: m.attachment || null,
+    audioSent: Boolean(m.audioSent),
     template: m.template || null,
   }));
   const body = { conversation: toConvo({ ...s, phone }), messages };
