@@ -253,9 +253,29 @@ async function sendSplit(to, text) {
 // prendido en Configuracion y el servidor tiene una URL publica). Cualquier
 // error aca se atrapa y se ignora: el audio es un extra, el bot ya contesto
 // por texto de todas formas.
+// Chats donde el ULTIMO mensaje del cliente fue una nota de voz. Sirve para
+// "contestar con audio solo si el cliente habla por audio" (ver
+// audioReplyOnVoice en settings.js). Es en memoria: si el servidor se
+// reinicia, el siguiente audio del cliente la vuelve a marcar.
+const voiceInbound = new Set();
+
+function setVoiceInbound(phone, isVoice) {
+  if (isVoice) voiceInbound.add(phone);
+  else voiceInbound.delete(phone);
+}
+
+// Cuando mandar la nota de voz de respuesta:
+// - audioReplyEnabled prendido: con TODAS las respuestas (modo anterior).
+// - si no, y audioReplyOnVoice no esta apagado: solo si el cliente escribio
+//   su ultimo mensaje como nota de voz.
+function shouldSendAudio(settings, phone) {
+  if (settings.audioReplyEnabled) return true;
+  return settings.audioReplyOnVoice !== false && voiceInbound.has(phone);
+}
+
 async function maybeSendAudio(to, text) {
   const settings = getSettings();
-  if (!settings.audioReplyEnabled) return;
+  if (!shouldSendAudio(settings, to)) return;
   if (!PUBLIC_URL) return; // sin URL publica no hay como mandar el archivo
 
   const clean = String(text || '').trim();
@@ -409,6 +429,7 @@ function scheduleReply(from) {
 async function handleIncomingMessage(from, message, profileName) {
   const session = getSession(from);
   const type = message.type;
+  setVoiceInbound(from, type === 'audio');
 
   if (profileName && profileName !== session.name) {
     updateSession(from, { name: profileName });
@@ -929,6 +950,8 @@ module.exports = {
   sendRawReply,
   sendGreeting,
   mediaUrl,
+  shouldSendAudio,
+  setVoiceInbound,
   SOLD_STAGES,
   // Exportados para que el simulador (simulator.js) pueda replicar la MISMA
   // red de seguridad de la promesa de agencia incumplida que corre en las

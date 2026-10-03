@@ -55,6 +55,9 @@ const DEFAULTS = {
   splitGapMaxMs: 9500,
   // Ademas del texto, manda una nota de voz con la misma respuesta.
   audioReplyEnabled: true,
+  // Con audioReplyEnabled apagado: igual contesta con nota de voz cuando el
+  // cliente le escribe por nota de voz (espeja el formato del cliente).
+  audioReplyOnVoice: true,
   // Remarketing automatico: si una conversacion queda sin novedad (ver
   // remarketing.js) se le manda un recordatorio a las 2 horas y otro a las 5
   // horas, usando el texto cargado en el producto vinculado a esa charla
