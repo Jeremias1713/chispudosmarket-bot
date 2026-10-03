@@ -72,3 +72,39 @@ test('logisticRank: tienda_maracaibo comparte rango con vendido/esperando_guia (
   assert.equal(logisticRank('tienda_maracaibo'), logisticRank('vendido'));
   assert.equal(logisticRank('tienda_maracaibo'), logisticRank('esperando_guia'));
 });
+
+// ---- Fase 4: que puede mover el clasificador ----
+const { isAllowedClassifierTransition, hasDropanasLink } = require('../src/stageRules');
+
+test('clasificador: nunca retrocede (regla 1)', () => {
+  assert.equal(isAllowedClassifierTransition({ stage: 'esperando_retiro' }, 'interesado'), false);
+  assert.equal(isAllowedClassifierTransition({ stage: 'en_camino' }, 'vendido'), false);
+});
+
+test('clasificador: con pedido vinculado a DroPanas no mueve etapas logisticas (regla 2)', () => {
+  for (const link of [{ dropanasOrder: { id: 1 } }, { card: { dropanasId: '1' } }, { card: { guia: 'G' } }]) {
+    assert.equal(hasDropanasLink(link), true);
+    assert.equal(isAllowedClassifierTransition({ stage: 'vendido', ...link }, 'en_camino'), false);
+    assert.equal(isAllowedClassifierTransition({ stage: 'vendido', ...link }, 'esperando_retiro'), false);
+  }
+  // sin vinculo si puede (el cierre por texto deja el chat en vendido/en_camino sin guia)
+  assert.equal(isAllowedClassifierTransition({ stage: 'vendido', card: {} }, 'en_camino'), true);
+  // la misma etapa y la devolucion siguen permitidas
+  assert.equal(isAllowedClassifierTransition({ stage: 'vendido', card: { guia: 'G' } }, 'vendido'), true);
+  assert.equal(isAllowedClassifierTransition({ stage: 'entregado', card: { guia: 'G' } }, 'devolucion'), true);
+});
+
+test('clasificador: entregado solo si el ultimo mensaje del cliente lo confirma (regla 3)', () => {
+  const base = { stage: 'esperando_retiro', card: {} };
+  const con = (txt) => ({ ...base, history: [{ role: 'user', content: txt }, { role: 'assistant', content: 'ok' }] });
+  assert.equal(isAllowedClassifierTransition(con('Gracias!'), 'entregado'), false);
+  assert.equal(isAllowedClassifierTransition({ ...base, history: [] }, 'entregado'), false);
+  for (const t of ['Ya lo retiré', 'ya me llegó', 'me llegó todo bien', 'ya lo tengo', 'Ya la busqué']) {
+    assert.equal(isAllowedClassifierTransition(con(t), 'entregado'), true, t);
+  }
+});
+
+test('clasificador: el resto se aplica (regla 4)', () => {
+  assert.equal(isAllowedClassifierTransition({ stage: 'nuevo' }, 'interesado'), true);
+  assert.equal(isAllowedClassifierTransition({ stage: 'interesado' }, 'vendido'), true);
+});

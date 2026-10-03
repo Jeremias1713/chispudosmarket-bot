@@ -54,6 +54,7 @@ function activarRemarketingDesdeSiempre() {
     remarketingHourStart: 0,
     remarketingHourEnd: 24, // todo el dia habilitado, no depende de la hora real de la corrida
     remarketingActivatedAt: '2000-01-01T00:00:00.000Z',
+    remarketing5hEnabled: true, // el paso de 5 h esta apagado por defecto; estos casos prueban el paso
   });
 }
 
@@ -187,4 +188,72 @@ test('conversaciones colgadas desde ANTES de activar remarketing (remarketingAct
   await remarketing.revisarUnaVez();
 
   assert.equal(enviosHechos.find((e) => e.to === phone), undefined, 'BUG si se mando: esta conversacion ya estaba colgada ANTES de activar remarketing');
+});
+
+test('por defecto el paso de 5 h esta apagado: una charla de 6 h recibe solo el recordatorio de 2 h', async () => {
+  activarRemarketingDesdeSiempre();
+  updateSettings({ remarketing5hEnabled: false });
+  const phone = '584130000050';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: sesionColgada() }));
+  enviosHechos.length = 0;
+  await remarketing.revisarUnaVez();
+  const e = enviosHechos.filter((x) => x.to === phone);
+  assert.equal(e.length, 1);
+  assert.equal(e[0].texto, PRODUCTO_TEST.remarketing2h);
+  assert.equal(getSession(phone).remarketingSentAt5h, undefined);
+});
+
+test('no manda remarketing si el ultimo mensaje es del cliente (el bot le debe respuesta)', async () => {
+  activarRemarketingDesdeSiempre();
+  const phone = '584130000051';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: sesionColgada({ history: [{ role: 'user', content: 'hola', at: haceHoras(6) }] }) }));
+  enviosHechos.length = 0;
+  await remarketing.revisarUnaVez();
+  assert.equal(enviosHechos.find((x) => x.to === phone), undefined);
+});
+
+test('el tiempo se mide desde el ultimo mensaje, no desde updatedAt', async () => {
+  activarRemarketingDesdeSiempre();
+  const phone = '584130000052';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [phone]: sesionColgada({ updatedAt: new Date().toISOString(), history: [{ role: 'assistant', content: 'hola', at: haceHoras(6) }] }),
+  }));
+  enviosHechos.length = 0;
+  await remarketing.revisarUnaVez();
+  assert.ok(enviosHechos.find((x) => x.to === phone));
+});
+
+test('opt-out y calidad en riesgo frenan el remarketing; pasadas 24 h ya no se manda', async () => {
+  activarRemarketingDesdeSiempre();
+  const optOut = '584130000053';
+  const vieja = '584130000054';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    [optOut]: sesionColgada({ optOut: true }),
+    [vieja]: sesionColgada({ createdAt: haceHoras(30), updatedAt: haceHoras(30) }),
+  }));
+  enviosHechos.length = 0;
+  await remarketing.revisarUnaVez();
+  assert.equal(enviosHechos.length, 0);
+  const calidad = '584130000055';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [calidad]: sesionColgada() }));
+  updateSettings({ qualityGuardActive: true });
+  await remarketing.revisarUnaVez();
+  assert.equal(enviosHechos.length, 0);
+  updateSettings({ qualityGuardActive: false });
+});
+
+test('si el envio falla se deshace la marca y se anota el fallo', async () => {
+  activarRemarketingDesdeSiempre();
+  const phone = '584130000056';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: sesionColgada() }));
+  const real = flowMod.sendRawReply;
+  flowMod.sendRawReply = async () => { throw new Error('meta rechazo'); };
+  delete require.cache[require.resolve('../src/remarketing')];
+  const rm = require('../src/remarketing');
+  await rm.revisarUnaVez();
+  flowMod.sendRawReply = real;
+  const s = getSession(phone);
+  assert.equal(s.remarketingSentAt5h, null);
+  assert.ok(s.remarketingSentAt5hFailedAt);
+  delete require.cache[require.resolve('../src/remarketing')];
 });

@@ -52,13 +52,21 @@ test('H07 (reparado) - una guia guardada CON el aviso ya confirmado (shippingNot
   assert.equal(candidatos.length, 0);
 });
 
-test('H18 (reparado) - una conversacion en etapa "interesado" (no en SOLD_STAGES) ahora SI es candidata', () => {
+test('H18 (reparado) - una conversacion en etapa "interesado" es candidata, pero por NOMBRE solo matchea si el pedido esta cerrado', () => {
+  // Fase 3 (orderMatch.js): un nombre suelto de un lead (sin pedido cerrado) ya
+  // no es evidencia suficiente. Un pedido cerrado que el operador aun no paso a
+  // "vendido" (orderClosed) sigue siendo candidato, que era el caso de H18.
   writeRaw(dataDir, 'sessions.json', JSON.stringify({
     '584120000001': sesion({ stage: 'interesado', card: { nombre: 'Jose Velasquez' } }),
   }));
+  const lead = dropanas.matchRow({ guia: 'GU-999', cliente: 'Jose Velasquez', ciudad: '', producto: '' });
+  assert.equal(lead.matchType, 'sin_match', 'un lead sin pedido cerrado no se matchea por nombre');
 
-  const resultado = dropanas.matchRow({ guia: 'GU-999', cliente: 'Jose Velasquez', ciudad: '', producto: '' });
-  assert.equal(resultado.matchType, 'exacto', 'BUG H18 si esto da sin_match: se descarto solo por la etapa');
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({
+    '584120000001': sesion({ stage: 'interesado', orderClosed: true, card: { nombre: 'Jose Velasquez' } }),
+  }));
+  const cerrado = dropanas.matchRow({ guia: 'GU-999', cliente: 'Jose Velasquez', ciudad: '', producto: '' });
+  assert.equal(cerrado.matchType, 'exacto', 'BUG H18 si esto da sin_match: se descarto solo por la etapa');
 });
 
 test('H18 (reparado) - un segundo nombre intercalado en la ficha SI matchea "exacto" contra el Excel', () => {
