@@ -62,13 +62,16 @@ function guideRelation(session, row) {
   const current = String(session?.card?.guia || '').trim();
   const incoming = String(row?.guia || '').trim();
   const orderId = String(row?.dropanasId || '').trim();
+  const linkedId = String(session?.card?.dropanasId || session?.dropanasOrder?.id || '').trim();
+  if (orderId && linkedId && orderId !== linkedId) return { kind: 'different' };
   if (!current) return { kind: 'none' };
-  if (!incoming || current.toUpperCase() === incoming.toUpperCase()) return { kind: 'same' };
   const sameOrder = Boolean(orderId) && (
     current.toUpperCase() === `DP${orderId}`
     || String(session?.card?.dropanasId || '') === orderId
     || String(session?.dropanasOrder?.id || '') === orderId
   );
+  if (!incoming) return { kind: sameOrder ? 'same' : 'different' };
+  if (current.toUpperCase() === incoming.toUpperCase()) return { kind: 'same' };
   // Una guia distinta sin prueba de que sea la misma orden puede ser OTRA
   // compra del mismo cliente: eso sigue quedando para revision manual.
   if (!sameOrder) return { kind: 'different' };
@@ -111,6 +114,14 @@ function isArrival(row) {
 
 function statusAction(row) {
   const value = foldStatus(row?.estadoPedido);
+  if (['devolucion', 'en devolucion', 'devuelto', 'devuelta'].includes(value)) {
+    return { stage: 'devolucion', notify: null };
+  }
+  // En este negocio Pagado confirma entrega/retiro (criterio confirmado
+  // por el operador). Actualiza el cierre sin agradecimientos retroactivos.
+  if (['pagado', 'pagada'].includes(value)) {
+    return { stage: 'entregado', notify: null };
+  }
   if (value === 'entregado') return { stage: 'entregado', notify: 'maybeNotifyDelivered' };
   if (['en novedad', 'novedad'].includes(value)) return { stage: 'novedad', notify: 'maybeNotifyNovelty' };
   if (['pendiente devolucion', 'pendiente de devolucion'].includes(value)) {
@@ -123,6 +134,15 @@ function statusAction(row) {
 // le agrego el mismo respaldo por nombre exacto/unico que ya tenia el aviso
 // de guia nueva mas abajo (ver comentario del encabezado del archivo).
 function matchOrderToSession(row, sessions) {
+  // Un vínculo de pedido ya registrado es más fuerte que el teléfono del
+  // destinatario, que puede diferir del WhatsApp del comprador.
+  const orderId = String(row?.dropanasId || '').trim();
+  const byOrder = orderId ? sessions.filter(session => (
+    String(session.card?.dropanasId || session.dropanasOrder?.id || '') === orderId
+    || String(session.card?.guia || '').trim().toUpperCase() === `DP${orderId}`
+  )) : [];
+  if (byOrder.length === 1) return { phone: byOrder[0].phone, session: byOrder[0] };
+  if (byOrder.length > 1) return { reason: 'requiere_revision' };
   const phone = require('./dropanasApi').normalizePhone(row?.telefono);
   if (phone) {
     const byPhone = sessions.filter((session) => {
@@ -171,7 +191,7 @@ async function runChanges(changes, overrides = {}) {
     const results = [];
     const acknowledged = [];
     const rows = (Array.isArray(changes) ? changes : [])
-      .filter((change) => change?.order?.guia)
+      .filter((change) => change?.order && (change.order.guia || statusAction(change.order) || isArrival(change.order)))
       .map((change) => ({ ...change.order, _pendingKey: change.key }));
 
     for (const row of deps.matchRows(rows)) {
@@ -183,7 +203,10 @@ async function runChanges(changes, overrides = {}) {
           continue;
         }
         const { phone } = matched;
-        if (!['en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion'].includes(matched.session.stage)) {
+        if (matched.session.newOrderPending || ![
+          'vendido', 'esperando_guia', 'en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion', action.stage,
+          ...(action.stage === 'devolucion' ? ['entregado'] : []),
+        ].includes(matched.session.stage)) {
           results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_logistico_invalido' });
           continue;
         }
@@ -194,13 +217,14 @@ async function runChanges(changes, overrides = {}) {
         }
         const session = guide.session;
         try {
-          const notice = await deps[action.notify](phone, session);
-          if (notice?.sent || notice?.reason === 'ya_avisado') {
-            deps.updateSession(phone, {
-              stage: action.stage,
-              stageLocked: true,
-              stageReason: `DroPanas: ${row.estadoPedido}`,
-            });
+          // La etapa describe el pedido, no el éxito de WhatsApp. Si falla
+          // el aviso, el evento sigue pendiente pero la etapa ya es correcta.
+          const patch = { stage: action.stage, stageLocked: true, stageReason: `DroPanas: ${row.estadoPedido}` };
+          const saved = deps.updateSession(phone, patch);
+          const notice = action.notify
+            ? await deps[action.notify](phone, { ...session, ...(saved || {}), ...patch, card: session.card })
+            : { sent: false, reason: 'sin_aviso_requerido' };
+          if (notice?.sent || ['ya_avisado', 'sin_aviso_requerido'].includes(notice?.reason)) {
             if (row._pendingKey) acknowledged.push(row._pendingKey);
           }
           results.push({ orderId: row.dropanasId, phone, stage: action.stage, sent: Boolean(notice?.sent), notice });
@@ -217,7 +241,7 @@ async function runChanges(changes, overrides = {}) {
           continue;
         }
         const { phone } = matched;
-        if (matched.session.stage !== 'en_camino') {
+        if (matched.session.newOrderPending || !['vendido', 'esperando_guia', 'en_camino', 'esperando_retiro', 'novedad'].includes(matched.session.stage)) {
           results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_no_en_camino' });
           continue;
         }
@@ -228,13 +252,10 @@ async function runChanges(changes, overrides = {}) {
         }
         const session = guide.session;
         try {
-          const notice = await deps.maybeNotifyArrival(phone, session);
+          const patch = { stage: 'esperando_retiro', stageLocked: true, stageReason: 'DroPanas: pedido en oficina' };
+          const saved = deps.updateSession(phone, patch);
+          const notice = await deps.maybeNotifyArrival(phone, { ...session, ...(saved || {}), ...patch, card: session.card });
           if (notice?.sent || notice?.reason === 'ya_avisado') {
-            deps.updateSession(phone, {
-              stage: 'esperando_retiro',
-              stageLocked: true,
-              stageReason: 'DroPanas: pedido en oficina',
-            });
             if (row._pendingKey) acknowledged.push(row._pendingKey);
           }
           results.push({ orderId: row.dropanasId, phone, sent: Boolean(notice?.sent), notice });
@@ -270,7 +291,8 @@ async function runChanges(changes, overrides = {}) {
       if (!row.sendEligible) {
         const current = deps.getSession(row.phone);
         const relation = guideRelation(current, row);
-        if (relation.kind !== 'upgrade') {
+        const retryShipping = relation.kind === 'same' && current.stage === 'en_camino' && !current.shippingNotifiedAt && !current.newOrderPending;
+        if (relation.kind !== 'upgrade' && !retryShipping) {
           results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'estado_no_esperando_guia' });
           continue;
         }
@@ -284,7 +306,7 @@ async function runChanges(changes, overrides = {}) {
           if (row._pendingKey) acknowledged.push(row._pendingKey);
           continue;
         }
-        upgrade = relation;
+        upgrade = relation.kind === 'upgrade' ? relation : null;
       }
 
       try {
@@ -323,7 +345,7 @@ async function runChanges(changes, overrides = {}) {
         const updated = deps.updateSession(row.phone, patch);
         const notice = await deps.maybeNotifyShipping(row.phone, updated);
         results.push({ orderId: row.dropanasId, phone: row.phone, sent: Boolean(notice?.sent), notice });
-        if (notice?.sent && row._pendingKey) acknowledged.push(row._pendingKey);
+        if ((notice?.sent || notice?.reason === 'ya_avisado') && row._pendingKey) acknowledged.push(row._pendingKey);
       } catch (error) {
         results.push({ orderId: row.dropanasId, phone: row.phone, sent: false, reason: 'error', error: error.message });
       }
