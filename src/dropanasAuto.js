@@ -20,6 +20,8 @@ const { mediaUrl } = require('./flow');
 const { detectOrderConflict, buildGuiaPatch } = require('./orderGuard');
 const { foldName, compareNames } = require('./nameMatch');
 const shipping = require('./shipping');
+const { matchOrder } = require('./orderMatch');
+const { logisticRank, hasDropanasLink } = require('./stageRules');
 
 // Cola en serie. Antes, si entraba un cambio mientras otro se estaba
 // procesando, el segundo llamado devolvia el resultado del PRIMERO y su propio
@@ -89,6 +91,20 @@ function upgradeGuidePatch(session, relation, row) {
 // que hay que usar para armar el aviso, o el motivo por el que no se avisa.
 function resolveGuide(deps, phone, session, row) {
   const relation = guideRelation(session, row);
+  // Chat sin guia cargada (pedido subido a mano, o aviso de guia que fallo): el
+  // evento trae la guia real, se completa antes de avisar para que el mensaje
+  // lleve el numero. Antes todos los eventos de ese chat se descartaban.
+  if (relation.kind === 'none' && String(row?.guia || '').trim()) {
+    const patch = deps.buildGuiaPatch({
+      session,
+      guia: row.guia,
+      agencia: row.bodegaDestino || row.ciudad || row.tipoEntrega || row.carrier || '-',
+      isNewOrder: false,
+    });
+    if (row.dropanasId) patch.card.dropanasId = String(row.dropanasId);
+    const saved = deps.updateSession(phone, patch);
+    return { session: saved && saved.card ? saved : { ...session, ...patch }, relation: { kind: 'completed' } };
+  }
   if (relation.kind === 'none' || relation.kind === 'different') return { reason: 'guia_no_coincide' };
   if (relation.kind !== 'upgrade') return { session, relation };
   const patch = upgradeGuidePatch(session, relation, row);
@@ -112,34 +128,73 @@ function isArrival(row) {
 function statusAction(row) {
   const value = foldStatus(row?.estadoPedido);
   if (value === 'entregado') return { stage: 'entregado', notify: 'maybeNotifyDelivered' };
-  if (['en novedad', 'novedad'].includes(value)) return { stage: 'novedad', notify: 'maybeNotifyNovelty' };
+  // En DroPanas/Tealca "En novedad" casi siempre significa que el paquete YA esta
+  // en la oficina y el cliente no fue contactado o no lo retiro: se le avisa la
+  // llegada (en vez de la plantilla de novedad) y el chat pasa a esperando_retiro,
+  // para que tambien entre en los recordatorios de retiro.
+  if (['en novedad', 'novedad'].includes(value)) return { stage: 'esperando_retiro', notify: 'maybeNotifyArrival', source: 'novedad' };
   if (['pendiente devolucion', 'pendiente de devolucion'].includes(value)) {
     return { stage: 'pendiente_devolucion', notify: 'maybeNotifyReturnPending' };
   }
   return null;
 }
 
-// FASE 3i: antes se llamaba matchArrivalByPhone y solo miraba telefono. Se
-// le agrego el mismo respaldo por nombre exacto/unico que ya tenia el aviso
-// de guia nueva mas abajo (ver comentario del encabezado del archivo).
+// Cruce pedido -> conversacion: un solo algoritmo compartido con dropanas.js
+// (orderMatch.js): orden, referencia, guia, telefono (incluido el que el
+// cliente dio en el chat), cedula y nombre. Solo un match 'exacto' avanza; lo
+// ambiguo queda para revision manual y se avisa por push (una vez por pedido).
 function matchOrderToSession(row, sessions) {
-  const phone = require('./dropanasApi').normalizePhone(row?.telefono);
-  if (phone) {
-    const byPhone = sessions.filter((session) => {
-      const candidate = require('./dropanasApi').normalizePhone(session.phone || session.card?.telefono);
-      return candidate && candidate === phone;
-    });
-    if (byPhone.length === 1) return { phone: byPhone[0].phone, session: byPhone[0] };
-    if (byPhone.length > 1) return { reason: 'requiere_revision' };
+  const m = matchOrder(row, sessions);
+  if (m.matchType === 'exacto') return { phone: m.phone, session: m.session, evidence: m.evidence };
+  return { reason: 'requiere_revision', ambiguous: m.matchType === 'ambiguo', candidates: m.candidates };
+}
+
+// Un chat puede recibir eventos de DroPanas si ya esta en una etapa logistica
+// (rango >= 1) o, aunque la etapa sea conversacional, si el pedido esta cerrado
+// o vinculado a DroPanas (pedido que el bot nunca marco como vendido).
+function hasClosedOrder(session) {
+  return session?.orderClosed === true || hasDropanasLink(session);
+}
+const FINISHED_STAGES = ['entregado', 'devolucion'];
+
+// Novedades ya avisadas por push (en memoria): una vez por pedido.
+const noveltyAlerted = new Set();
+
+function alertNovelty(deps, row, session, notified) {
+  const id = String(row?.dropanasId || row?.guia || '');
+  if (!id || noveltyAlerted.has(id)) return;
+  noveltyAlerted.add(id);
+  try {
+    const notify = deps.notifyAdmin || ((title, body) => require('./push').notifyAdmin(title, body));
+    const nombre = session?.card?.nombre || session?.name || row?.cliente || session?.phone || '-';
+    const p = notify('Novedad en un pedido', `Novedad: ${nombre} (${row?.guia || '-'}) ya en oficina. Se le avisó: ${notified ? 'sí' : 'no'}.`);
+    if (p && p.catch) p.catch(() => {});
+  } catch (error) {
+    console.error('No se pudo avisar la novedad:', error.message);
   }
-  const target = foldName(row?.cliente);
-  if (!target) return { reason: 'requiere_revision' };
-  const exactas = sessions.filter((session) => {
-    const nombre = session.card?.nombre || session.name || '';
-    return foldName(nombre) && compareNames(nombre, row.cliente) === 'exacto';
-  });
-  if (exactas.length !== 1) return { reason: 'requiere_revision' };
-  return { phone: exactas[0].phone, session: exactas[0] };
+}
+
+// Pedidos ambiguos ya avisados (en memoria): un push por pedido de DroPanas.
+const ambiguousAlerted = new Set();
+
+function alertAmbiguous(deps, row, candidates) {
+  const id = String(row?.dropanasId || row?.guia || '');
+  if (!id || ambiguousAlerted.has(id) || !Array.isArray(candidates) || candidates.length < 2) return;
+  ambiguousAlerted.add(id);
+  try {
+    const notify = deps.notifyAdmin || ((title, body) => require('./push').notifyAdmin(title, body));
+    const p = notify('Pedido DroPanas sin chat claro', `Pedido DroPanas ${id} (cliente ${row.cliente || '-'}) coincide con ${candidates.length} chats, revisar en el panel.`);
+    if (p && p.catch) p.catch(() => {});
+  } catch (error) {
+    console.error('No se pudo avisar del pedido ambiguo:', error.message);
+  }
+}
+
+// Si el pedido se cruzo por algo distinto del numero de orden y la ficha no lo
+// tenia, se guarda: el proximo evento de ese pedido entra directo por ID.
+function withOrderId(session, row, evidence) {
+  if (evidence === 'orden' || !row?.dropanasId || session?.card?.dropanasId) return {};
+  return { card: { ...(session?.card || {}), dropanasId: String(row.dropanasId) } };
 }
 
 async function processChanges(changes, overrides = {}) {
@@ -179,12 +234,21 @@ async function runChanges(changes, overrides = {}) {
       if (action) {
         const matched = matchOrderToSession(row, deps.listSessions());
         if (!matched.session) {
+          if (matched.ambiguous) alertAmbiguous(deps, row, matched.candidates);
           results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
           continue;
         }
         const { phone } = matched;
-        if (!['en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion'].includes(matched.session.stage)) {
-          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_logistico_invalido' });
+        // DroPanas es la fuente mas fuerte: puede avanzar el chat desde cualquier
+        // etapa anterior. Nunca toca una devolucion ni repite un entregado.
+        const currentStage = matched.session.stage;
+        if (currentStage === 'devolucion' || (currentStage === action.stage && action.stage === 'entregado')) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'ya_finalizado' });
+          if (row._pendingKey) acknowledged.push(row._pendingKey);
+          continue;
+        }
+        if (logisticRank(currentStage) < 1 && !hasClosedOrder(matched.session)) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'sin_pedido_cerrado' });
           continue;
         }
         const guide = resolveGuide(deps, phone, matched.session, row);
@@ -193,13 +257,51 @@ async function runChanges(changes, overrides = {}) {
           continue;
         }
         const session = guide.session;
+        if (action.source === 'novedad') {
+          // Novedad = el paquete ya esta en la oficina. No retrocede un chat que ya
+          // termino o va de vuelta (evento tardio): se confirma y listo.
+          if (['entregado', 'pendiente_devolucion'].includes(currentStage)) {
+            results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'ya_finalizado' });
+            if (row._pendingKey) acknowledged.push(row._pendingKey);
+            continue;
+          }
+          try {
+            // Si ya se le aviso la llegada antes, NO se reenvia.
+            const notice = session.arrivalNotifiedAt ? { sent: false, reason: 'ya_avisado' } : await deps.maybeNotifyArrival(phone, session);
+            if (notice?.sent || notice?.reason === 'ya_avisado') {
+              const nowIso = new Date().toISOString();
+              const patch = { noveltyAt: nowIso, noveltyStatus: row.estadoPedido, ...withOrderId(session, row, matched.evidence) };
+              if (currentStage !== 'esperando_retiro') {
+                Object.assign(patch, {
+                  stage: 'esperando_retiro',
+                  stageLocked: false,
+                  stageSource: 'dropanas_novedad',
+                  stageUpdatedAt: nowIso,
+                  stageReason: notice.sent ? 'DroPanas: En novedad (aviso de llegada enviado)' : 'DroPanas: En novedad',
+                });
+              }
+              // Dia 0 de los recordatorios 1, 3 y 5.
+              if (!session.pickupReminderAnchorDate) patch.pickupReminderAnchorDate = nowIso.slice(0, 10);
+              deps.updateSession(phone, patch);
+              if (row._pendingKey) acknowledged.push(row._pendingKey);
+              alertNovelty(deps, row, session, Boolean(notice.sent) || Boolean(session.arrivalNotifiedAt));
+            }
+            results.push({ orderId: row.dropanasId, phone, stage: 'esperando_retiro', sent: Boolean(notice?.sent), notice });
+          } catch (error) {
+            results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'error', error: error.message });
+          }
+          continue;
+        }
         try {
           const notice = await deps[action.notify](phone, session);
           if (notice?.sent || notice?.reason === 'ya_avisado') {
             deps.updateSession(phone, {
               stage: action.stage,
-              stageLocked: true,
+              stageLocked: false,
+              stageSource: 'dropanas',
+              stageUpdatedAt: new Date().toISOString(),
               stageReason: `DroPanas: ${row.estadoPedido}`,
+              ...withOrderId(session, row, matched.evidence),
             });
             if (row._pendingKey) acknowledged.push(row._pendingKey);
           }
@@ -213,12 +315,22 @@ async function runChanges(changes, overrides = {}) {
       if (isArrival(row)) {
         const matched = matchOrderToSession(row, deps.listSessions());
         if (!matched.session) {
+          if (matched.ambiguous) alertAmbiguous(deps, row, matched.candidates);
           results.push({ orderId: row.dropanasId, sent: false, reason: matched.reason });
           continue;
         }
         const { phone } = matched;
-        if (matched.session.stage !== 'en_camino') {
-          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'estado_no_en_camino' });
+        const currentStage = matched.session.stage;
+        const rank = logisticRank(currentStage);
+        if (FINISHED_STAGES.includes(currentStage) || currentStage === 'pendiente_devolucion') {
+          // Ya termino (o va de vuelta): no se toca y se confirma el evento para
+          // que no quede reintentandose 8 veces.
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'ya_finalizado' });
+          if (row._pendingKey) acknowledged.push(row._pendingKey);
+          continue;
+        }
+        if (rank < 1 && !hasClosedOrder(matched.session)) {
+          results.push({ orderId: row.dropanasId, phone, sent: false, reason: 'sin_pedido_cerrado' });
           continue;
         }
         const guide = resolveGuide(deps, phone, matched.session, row);
@@ -232,8 +344,11 @@ async function runChanges(changes, overrides = {}) {
           if (notice?.sent || notice?.reason === 'ya_avisado') {
             deps.updateSession(phone, {
               stage: 'esperando_retiro',
-              stageLocked: true,
+              stageLocked: false,
+              stageSource: 'dropanas',
+              stageUpdatedAt: new Date().toISOString(),
               stageReason: 'DroPanas: pedido en oficina',
+              ...withOrderId(session, row, matched.evidence),
             });
             if (row._pendingKey) acknowledged.push(row._pendingKey);
           }
@@ -259,6 +374,7 @@ async function runChanges(changes, overrides = {}) {
       // (por telefono o por nombre), manteniendo la misma exigencia de
       // unicidad que ya tenia matchRow().
       if (row.matchType !== 'exacto' || !row.phone) {
+        if (row.matchType === 'ambiguo') alertAmbiguous(deps, row, row.candidates);
         results.push({ orderId: row.dropanasId, sent: false, reason: 'requiere_revision' });
         continue;
       }
@@ -319,6 +435,7 @@ async function runChanges(changes, overrides = {}) {
         if (upgrade && !patch.card.guiaDropanas && DP_GUIDE.test(upgrade.from)) patch.card.guiaDropanas = upgrade.from;
         // Se guarda el numero de orden: asi, cuando DroPanas cambie la guia
         // de este pedido, los avisos siguientes lo siguen reconociendo.
+        // (si el cruce fue por orden ya lo tenia; si fue por telefono/nombre/etc, se aprende aqui)
         if (row.dropanasId) patch.card.dropanasId = String(row.dropanasId);
         const updated = deps.updateSession(row.phone, patch);
         const notice = await deps.maybeNotifyShipping(row.phone, updated);

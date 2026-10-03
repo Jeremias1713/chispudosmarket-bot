@@ -36,11 +36,12 @@ const {
 const { missingOrderData, missingDataMessage, looksLikeOrderSummary } = require('./orderDataGuard');
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
+const { detectOptOut } = require('./optOut');
 const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
-const { SOLD_STAGES, isAllowedAutoTransition } = require('./stageRules');
+const { SOLD_STAGES, isAllowedAutoTransition, isAllowedClassifierTransition, logisticRank } = require('./stageRules');
 const dropanasOrderAutomation = require('./dropanasOrderAutomation');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
@@ -315,7 +316,13 @@ async function sendReply(to, text) {
 // hay que tocarlos ni un poco.
 async function sendRawReply(to, text) {
   await sendText(to, text);
-  appendMessage(to, 'assistant', text);
+  // El mensaje ya salio: si falla el guardado en el historial (disco lleno) no
+  // se relanza, para que quien llama no crea que el envio fallo y lo repita.
+  try {
+    appendMessage(to, 'assistant', text);
+  } catch (err) {
+    console.error('El mensaje salio pero no se pudo guardar en el historial de', `…${String(to).slice(-4)}`, ':', err.message);
+  }
   await maybeSendAudio(to, text);
 }
 
@@ -559,6 +566,24 @@ async function handleIncomingMessage(from, message, profileName) {
     appendMessage(from, 'user', `[${type || 'mensaje'}]`);
   }
 
+  // Opt-out: si el cliente pide con palabras claras que no le escribamos mas, se
+  // marca (session.optOut) y se frena TODO lo automatico de marketing
+  // (outboundGuard). Se contesta una vez y no se llama a la IA en este turno.
+  // Si ya estaba marcado, el flujo sigue normal: el bot igual contesta lo que
+  // el cliente pregunte, el opt-out solo frena lo que el bot manda solo.
+  if (rawText && detectOptOut(rawText) && !session.optOut) {
+    updateSession(from, { optOut: true, optOutAt: new Date().toISOString(), optOutText: rawText.slice(0, 200), optOutSource: 'cliente' });
+    const cfg = getSettings();
+    if (cfg.botEnabled && !session.paused && cfg.optOutAutoReply) {
+      try {
+        await sendRawReply(from, cfg.optOutAutoReply);
+      } catch (err) {
+        console.error('No se pudo confirmar el opt-out a', `…${String(from).slice(-4)}`, err.message);
+      }
+    }
+    return;
+  }
+
   // OJO: antes, cuando llegaba cualquier mensaje nuevo del cliente, se
   // borraban remarketingSentAt2h/5h para que el ciclo de 2h/5h pudiera
   // volver a dispararse si la conversacion se colgaba de nuevo mas
@@ -594,6 +619,83 @@ async function handleIncomingMessage(from, message, profileName) {
   }
 
   scheduleReply(from);
+}
+
+// Texto de un resumen de cierre normalizado para compararlo con otro (sin
+// tildes, minusculas, solo letras y numeros).
+function normalizeCloseSummary(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// Ultimo cierre que mando el bot en este chat: el guardado en la sesion o, en
+// chats anteriores a este campo, el ultimo mensaje del bot que parezca un cierre.
+function lastKnownCloseSummary(session, history) {
+  if (session.lastCloseSummary) return session.lastCloseSummary;
+  for (let i = (history || []).length - 1; i >= 0; i -= 1) {
+    const m = history[i];
+    if (m.role === 'assistant' && isClosingMessage(m.content) && looksLikeOrderSummary(m.content)) return m.content;
+  }
+  return null;
+}
+
+// Pedido NUEVO en un chat que ya tenia uno cerrado: el pedido anterior ya
+// avanzo (en camino o mas), el bot manda un cierre real y su resumen es
+// distinto del ultimo. Sin esto orderClosed quedaba en true para siempre y la
+// segunda compra no marcaba vendido, no ponia soldAt, no subia a DroPanas ni
+// contaba en las metricas.
+function isRepurchaseClose({ orderClosed, closingReal, session, history, reply }) {
+  if (!orderClosed || !closingReal) return false;
+  const previousFinished = logisticRank(session.stage) >= 2 || ['entregado', 'devolucion'].includes(session.stage);
+  if (!previousFinished) return false;
+  const last = lastKnownCloseSummary(session, history);
+  return !last || normalizeCloseSummary(last) !== normalizeCloseSummary(reply);
+}
+
+// Patch de sesion que archiva el pedido anterior y deja el chat listo para el nuevo
+// (mismos reinicios que buildGuiaPatch con isNewOrder).
+function repurchasePatch(session, nowIso) {
+  const card = session.card || {};
+  const archived = {
+    soldAt: session.soldAt || null,
+    stage: session.stage,
+    card: { producto: card.producto || null, productos: card.productos || null, guia: card.guia || null, guiaDropanas: card.guiaDropanas || null, dropanasId: card.dropanasId || null, agencia: card.agencia || null, monto: card.monto ?? null },
+    dropanasOrder: session.dropanasOrder || null,
+    closedAt: nowIso,
+  };
+  const patch = {
+    previousOrders: [...(session.previousOrders || []), archived].slice(-20),
+    card: { ...card, guia: null, guiaImageUrl: null, agencia: null, monto: null, dropanasId: null, guiaDropanas: null },
+    dropanasOrder: null,
+    shippingNotifiedAt: null,
+    arrivalNotifiedAt: null,
+    deliveredNotifiedAt: null,
+    noveltyNotifiedAt: null,
+    returnPendingNotifiedAt: null,
+    noveltyAt: null,
+    noveltyStatus: null,
+    pickupReminderLastDate: null,
+    pickupReminderCount: 0,
+    pickupReminderGuia: null,
+    pickupReminderAnchorDate: null,
+    pickupReminderFailDate: null,
+    pickupReminderFailCount: 0,
+    soldAt: nowIso,
+    orderClosed: true,
+    stage: 'vendido',
+    stageLocked: false,
+    stageSource: 'cierre_bot',
+    stageUpdatedAt: nowIso,
+    stageReason: 'Recompra detectada (cierre nuevo)',
+  };
+  if (session.dropanasOrder?.id) {
+    patch.dropanasOrderHistory = [...(session.dropanasOrderHistory || []), session.dropanasOrder].slice(-20);
+  }
+  return patch;
 }
 
 // Se ejecuta cuando el cliente se quedo callado el tiempo configurado
@@ -770,7 +872,15 @@ async function processReply(from) {
     // paso de verdad (cliente con pedido cerrado pregunto "que mas ofrecen" y
     // el bot, despues de contestar bien, igual cerro con "¿Te interesa
     // alguna de estas presentaciones?" como si siguiera vendiendo).
-    if (orderClosed) {
+    const isRepurchase = isRepurchaseClose({
+      orderClosed,
+      closingReal: !blockedClose && isClosingMessage(reply) && looksLikeOrderSummary(reply),
+      session,
+      history,
+      reply,
+    });
+    // En una recompra el cierre sale completo: no se le recorta la pregunta final.
+    if (orderClosed && !isRepurchase) {
       const strippedClose = stripPostCloseQuestion(finalReply);
       finalReply = strippedClose === null ? POST_CLOSE_REMINDER : strippedClose;
     }
@@ -851,16 +961,25 @@ async function processReply(from) {
       // mensaje de la conversacion.
       if (!session.soldAt) patch.soldAt = new Date().toISOString();
     }
+    // En todo cierre (nuevo o recompra) se guarda el resumen para detectar el siguiente.
+    if (isNewClose || isRepurchase) patch.lastCloseSummary = String(reply).slice(0, 2000);
+    if (isRepurchase) Object.assign(patch, repurchasePatch(session, new Date().toISOString()));
     updateSession(from, patch);
     if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
       push.notifySale(from, getSession(from));
     }
+    if (isRepurchase) push.notifySale(from, getSession(from));
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
     // etapa/ficha simplemente no se actualiza este turno. Si la etapa esta
     // fijada a mano desde el panel, no se toca.
     const current = getSession(from);
-    if (!current.stageLocked) {
+    // El candado (stageLocked) es SOLO de una persona que fijo la etapa a mano
+    // desde el panel: con candado el clasificador sigue corriendo para la
+    // FICHA (card) pero no cambia la etapa. Antes un chat con candado no se
+    // clasificaba nunca mas, y DroPanas ponia ese candado en cada aviso, asi
+    // que despues del primer aviso el chat no actualizaba ni la ficha.
+    {
       const classification = await classifyConversation(current.history.map((m) => ({ role: m.role, content: m.content })));
       if (classification) {
         // OJO: nunca reemplazar la ficha entera por lo que devuelve el
@@ -897,7 +1016,7 @@ async function processReply(from) {
         // implicaria retroceder un rango logistico ya alcanzado; "devolucion"
         // es la unica excepcion (ver esa funcion), porque es evidencia nueva
         // legitima sin importar en que etapa logistica estaba el pedido.
-        const stageChangeAllowed = isAllowedAutoTransition(current.stage, classification.stage);
+        const stageChangeAllowed = !current.stageLocked && isAllowedClassifierTransition(current, classification.stage);
         if (stageChangeAllowed) {
           classPatch.stage = classification.stage;
           classPatch.stageReason = classification.razon || null;
@@ -927,7 +1046,7 @@ async function processReply(from) {
     }
     // Se hace después de clasificar para que los pedidos con varios productos
     // ya tengan card.productos completo antes de preparar la orden DroPanas.
-    if (isNewClose) dropanasOrderAutomation.maybeCreate(from);
+    if (isNewClose || isRepurchase) dropanasOrderAutomation.maybeCreate(from);
   } catch (err) {
     console.error('Error llamando a la IA (diagnostico):', {
       message: err.message,

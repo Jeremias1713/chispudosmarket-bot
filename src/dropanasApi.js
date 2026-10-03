@@ -73,6 +73,23 @@ function productLabel(products) {
     .join(', ');
 }
 
+// Cedula del cliente del pedido, solo digitos. El nombre real del campo en la
+// API no esta documentado (docs/dropanas-api.md): al SUBIR un pedido el bot
+// manda cliente.documento = { tipo, numero }, asi que se espera lo mismo al
+// leerlo; se aceptan ademas varios alias. Si no viene, queda vacia.
+function clientCedula(client) {
+  const doc = client.documento;
+  const candidates = [
+    doc && typeof doc === 'object' ? doc.numero : doc,
+    client.cedula, client.identificacion, client.dni, client.numero_documento,
+  ];
+  for (const c of candidates) {
+    const digits = String(c == null ? '' : c).replace(/\D/g, '');
+    if (digits) return digits;
+  }
+  return '';
+}
+
 function mapOrder(item) {
   if (!item || item.id == null) throw new Error('Orden Dropanas sin id');
   const client = item.cliente || {};
@@ -83,6 +100,7 @@ function mapOrder(item) {
     guia: String(tracking.numero_guia || '').trim(),
     cliente: fullName,
     telefono: normalizePhone(client.telefono),
+    cedula: clientCedula(client),
     ciudad: '',
     producto: productLabel(item.productos),
     estadoPedido: String(tracking.status || item.status || '').trim(),

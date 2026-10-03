@@ -22,6 +22,7 @@ const { listSessions, updateSession } = require('./state');
 const { findProduct } = require('./catalog');
 const { getSettings, updateSettings } = require('./settings');
 const { SOLD_STAGES, sendRawReply } = require('./flow');
+const { canSendAutomatic, reserveAutomatic } = require('./outboundGuard');
 
 const REVISAR_CADA_MS = 5 * 60 * 1000; // cada 5 minutos alcanza de sobra
 const DOS_HORAS_MS = 2 * 60 * 60 * 1000;
@@ -52,13 +53,45 @@ function dentroDelHorarioPermitido(settings) {
 async function mandarSiCorresponde(session, texto, campoFlag) {
   const limpio = String(texto || '').trim();
   if (!limpio) return false;
+  const guard = canSendAutomatic(session, 'remarketing');
+  if (!guard.ok) return false;
+  // Tras un envio fallido no se reintenta en el chequeo siguiente (cada 5
+  // minutos): se espera una hora para no insistirle a un numero que Meta
+  // esta rechazando.
+  const falloAt = Date.parse(session[`${campoFlag}FailedAt`] || '');
+  if (Number.isFinite(falloAt) && Date.now() - falloAt < 60 * 60 * 1000) return false;
   // La marca de "ya se mando" se guarda ANTES de mandar. Antes era al reves:
   // si despues de mandar fallaba el guardado (por ejemplo disco lleno), la
   // marca no quedaba y el recordatorio se volvia a mandar al mismo cliente en
-  // cada chequeo y en cada reinicio.
-  updateSession(session.phone, { [campoFlag]: new Date().toISOString() });
-  await sendRawReply(session.phone, limpio);
+  // cada chequeo y en cada reinicio. Si el guardado falla, se propaga el
+  // error y NO se manda nada.
+  const ahoraIso = new Date().toISOString();
+  reserveAutomatic(session.phone, 'remarketing', new Date(), session);
+  updateSession(session.phone, { [campoFlag]: ahoraIso });
+  try {
+    await sendRawReply(session.phone, limpio);
+  } catch (err) {
+    try {
+      updateSession(session.phone, { [campoFlag]: null, [`${campoFlag}FailedAt`]: new Date().toISOString() });
+    } catch (e) {
+      console.error('No se pudo deshacer la marca de remarketing:', e.message);
+    }
+    console.error('Remarketing no enviado a', `…${String(session.phone).slice(-4)}`, err.message);
+    return false;
+  }
   return true;
+}
+
+// Momento del ULTIMO mensaje de la conversacion (de cualquier rol). No se usa
+// updatedAt: se pisa con cualquier updateSession (clasificador, DroPanas, la
+// propia marca de remarketing) y el tiempo se media desde un evento interno.
+function ultimoMensajeMs(session) {
+  const h = Array.isArray(session.history) ? session.history : [];
+  const last = h[h.length - 1];
+  const at = Date.parse(last?.at || '');
+  if (Number.isFinite(at)) return at;
+  const fallback = Date.parse(session.createdAt || session.updatedAt || '');
+  return Number.isFinite(fallback) ? fallback : null;
 }
 
 // Se fija UNA sola vez (la primera vez que corre esto despues de activarse
@@ -117,22 +150,31 @@ async function revisarUnaVez() {
       const product = findProduct(session.linkedProductId);
       if (!product || product.remarketingEnabled === false) continue;
 
-      const ultimaInteraccion = session.updatedAt || session.createdAt;
-      if (!ultimaInteraccion) continue;
-      const ultimaInteraccionMs = new Date(ultimaInteraccion).getTime();
+      // Si el ultimo mensaje es del cliente, el bot le debe una respuesta, no
+      // un recordatorio (pasa cuando la IA fallo o el chat esta pausado).
+      const hist = Array.isArray(session.history) ? session.history : [];
+      if (hist.length && hist[hist.length - 1].role === 'user') continue;
+      const ultimaInteraccionMs = ultimoMensajeMs(session);
+      if (ultimaInteraccionMs === null) continue;
       // Conversacion vieja, de antes de activar remarketing: nunca le toca,
       // ni aunque siga "colgada" para siempre (ver activatedAtMs arriba).
       if (ultimaInteraccionMs < activadoDesde) continue;
       const transcurrido = ahora - ultimaInteraccionMs;
+      // Pasadas 24 h la ventana de WhatsApp esta cerrada: texto libre ya no sale.
+      if (transcurrido >= 24 * 60 * 60 * 1000) continue;
 
+      // El paso de 5 h queda apagado por defecto (remarketing5hEnabled): dos
+      // recordatorios seguidos a leads de anuncio fue una de las causas
+      // probables de la baja de calidad del numero.
+      const cinco = settings.remarketing5hEnabled === true;
       // Si paso de largo la marca de las 5h y ese paso todavia no se mando,
       // se manda directo el de 5h (mas directo) y se salta el de 2h: evita
       // mandar los dos juntos de una si el servidor estuvo caido un rato.
-      if (transcurrido >= CINCO_HORAS_MS && !session.remarketingSentAt5h) {
+      if (cinco && transcurrido >= CINCO_HORAS_MS && !session.remarketingSentAt5h) {
         await mandarSiCorresponde(session, product.remarketing5h, 'remarketingSentAt5h');
         continue;
       }
-      if (transcurrido >= DOS_HORAS_MS && !session.remarketingSentAt2h) {
+      if (transcurrido >= DOS_HORAS_MS && !session.remarketingSentAt2h && !session.remarketingSentAt5h) {
         await mandarSiCorresponde(session, product.remarketing2h, 'remarketingSentAt2h');
       }
     } catch (err) {

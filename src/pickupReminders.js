@@ -1,27 +1,34 @@
-// Recordatorio diario de retiro: a TODOS los clientes cuyo pedido sigue en
-// la oficina ("esperando_retiro") se les manda la plantilla de "tu pedido ya
-// llego" una vez por dia, a partir de la hora configurada (10:00 Venezuela).
+// Recordatorios de retiro: a los clientes cuyo pedido sigue en la oficina
+// ("esperando_retiro") se les manda la plantilla de "tu pedido ya llego" los
+// dias 1, 3 y 5 despues del aviso de llegada (maximo 3 en total), a partir de
+// la hora configurada (10:00 Venezuela). Antes era uno por dia hasta 10
+// veces: demasiado para quien ya sabe que su pedido llego, y una de las
+// causas probables de la baja de calidad del numero en Meta.
 //
-// Para no escribirle a alguien que YA retiro (muchas conversaciones quedaron
-// en "esperando_retiro" porque el aviso de "entregado" se perdia antes), antes
-// de recordar se confirma con DroPanas que el pedido sigue "En oficina":
-//   - DroPanas dice que sigue en oficina  -> se recuerda (tope de seguridad:
-//     CONFIRMED_MAX_REMINDERS recordatorios por pedido).
+// Para no escribirle a alguien que YA retiro, antes de recordar se confirma
+// con DroPanas que el pedido sigue "En oficina":
+//   - DroPanas dice que sigue en oficina  -> se recuerda si hoy toca (1, 3 o 5).
 //   - DroPanas dice otro estado (entregado, devolucion...) -> no se recuerda.
 //   - No se pudo consultar ese pedido -> solo se recuerda si el bot mismo
-//     aviso la llegada hace pocos dias (pickupReminderMaxDays), como antes.
-// Nunca se manda dos veces el mismo dia, ni el mismo dia del aviso de llegada.
+//     aviso la llegada (arrivalNotifiedAt).
+// Si un dia de la lista se perdio (servidor caido) no se recupera: se espera
+// al siguiente. Si el cliente escribio en las ultimas 48 h esta en
+// conversacion y no se le recuerda. Nunca se manda dos veces el mismo dia.
+// La marca se guarda ANTES de enviar: es preferible perder un recordatorio a
+// mandarlo dos veces si el guardado falla despues.
 const { listSessions, updateSession, appendMessage } = require('./state');
 const { getSettings, updateSettings } = require('./settings');
 const { sendTemplateWithSnapshot } = require('./templateSend');
 const { placeholderValues } = require('./shipping');
+const { canSendAutomatic, nextAutoSends } = require('./outboundGuard');
 
 const CHECK_EVERY_MS = 15 * 60 * 1000;
 const TIME_ZONE = 'America/Caracas';
 // Despues de esta hora ya no se manda nada (si el servidor estuvo caido a la
 // hora configurada, se recupera en cuanto vuelve, pero nunca de noche).
 const LAST_HOUR = 19;
-const CONFIRMED_MAX_REMINDERS = 10;
+const CONFIRMED_MAX_REMINDERS = 3;
+const REMINDER_DAYS = [1, 3, 5];
 const MAX_FAILURES_PER_DAY = 3;
 const OFFICE_STATUSES = new Set(['en oficina', 'en agencia', 'listo para retirar']);
 const DP_GUIDE = /^DP(\d+)$/i;
@@ -58,6 +65,28 @@ function reminderCount(session) {
   return Number(session.pickupReminderCount || 0);
 }
 
+// Fecha (Caracas) desde la que se cuentan los dias: la del aviso de llegada o,
+// si DroPanas confirma la oficina sin que el bot haya avisado, la que se
+// guardo el primer dia que se vio (ese dia cuenta como dia 0).
+function anchorDate(session) {
+  if (session.arrivalNotifiedAt) return localParts(new Date(session.arrivalNotifiedAt)).date;
+  return session.pickupReminderAnchorDate || null;
+}
+
+// El cliente escribio despues del aviso/ultimo recordatorio y hace menos de
+// 48 h: esta conversando, si quiere algo lo pide.
+function clientIsTalking(session, now) {
+  const history = Array.isArray(session.history) ? session.history : [];
+  let lastUser = 0;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i].role === 'user') { lastUser = Date.parse(history[i].at || '') || 0; break; }
+  }
+  if (!lastUser || now.getTime() - lastUser >= 48 * 3600 * 1000) return false;
+  const arrival = Date.parse(session.arrivalNotifiedAt || '') || 0;
+  const lastReminder = session.pickupReminderLastDate ? Date.parse(`${session.pickupReminderLastDate}T00:00:00-04:00`) || 0 : 0;
+  return lastUser > Math.max(arrival, lastReminder);
+}
+
 // confirmation: 'en_oficina' | 'otro_estado' | null (no se pudo consultar).
 function eligible(session, settings, now = new Date(), confirmation = null) {
   if (!settings.pickupReminderEnabled || session.stage !== 'esperando_retiro') return false;
@@ -65,16 +94,18 @@ function eligible(session, settings, now = new Date(), confirmation = null) {
   const today = localParts(now).date;
   if (session.pickupReminderLastDate === today) return false;
   if (session.pickupReminderFailDate === today && Number(session.pickupReminderFailCount || 0) >= MAX_FAILURES_PER_DAY) return false;
-  if (session.arrivalNotifiedAt && localParts(new Date(session.arrivalNotifiedAt)).date === today) return false;
-  const count = reminderCount(session);
   if (confirmation === 'otro_estado') return false;
-  if (confirmation === 'en_oficina') return count < CONFIRMED_MAX_REMINDERS;
-  // Sin confirmacion de DroPanas: solo pedidos cuya llegada aviso el bot hace
-  // pocos dias (evita escribirle a quien ya retiro hace semanas).
-  if (!session.arrivalNotifiedAt) return false;
-  const maxDays = Number(settings.pickupReminderMaxDays || 5);
-  const age = daysBetween(localParts(new Date(session.arrivalNotifiedAt)).date, today);
-  return age >= 1 && age <= maxDays && count < maxDays;
+  // Sin confirmacion de DroPanas: solo si el bot mismo aviso la llegada.
+  if (confirmation !== 'en_oficina' && !session.arrivalNotifiedAt) return false;
+  const anchor = anchorDate(session);
+  if (!anchor) return false;
+  const index = REMINDER_DAYS.indexOf(daysBetween(anchor, today));
+  if (index === -1) return false;
+  const count = reminderCount(session);
+  // Maximo 3; si se perdio un dia anterior, este igual sale (no se recupera el perdido).
+  if (count >= CONFIRMED_MAX_REMINDERS || count > index) return false;
+  if (clientIsTalking(session, now)) return false;
+  return true;
 }
 
 function orderKeys(session) {
@@ -158,23 +189,42 @@ function upgradeGuide(session, order, deps) {
 }
 
 async function sendReminder(session, settings, now = new Date(), deps = defaultDeps()) {
+  const guard = canSendAutomatic(session, 'pickup_reminder', now, settings);
+  if (!guard.ok) return { phone: session.phone, sent: false, reason: guard.reason };
   const values = placeholderValues(session);
   const params = [values.nombre, values.producto, values.guia, values.monto];
   const templateName = settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca';
-  const { wamid, snapshot } = await deps.sendTemplateWithSnapshot({
-    to: session.phone,
-    templateName,
-    languageCode: settings.pickupTemplateLanguage || 'es',
-    values: params,
-  });
-  deps.appendMessage(session.phone, 'human', `[recordatorio automatico] ${templateName}`, {
-    template: { name: templateName, origin: 'seguimiento', params, snapshot, wamid, status: 'sent' },
-  });
+  const previousCount = reminderCount(session);
+  // La marca va ANTES de enviar. Si este guardado falla, se propaga el error y
+  // NO se manda nada.
   deps.updateSession(session.phone, {
     pickupReminderLastDate: localParts(now).date,
-    pickupReminderCount: reminderCount(session) + 1,
+    pickupReminderCount: previousCount + 1,
     pickupReminderGuia: String(session.card?.guia || ''),
+    autoSends: nextAutoSends(session, 'pickup_reminder', now),
   });
+  let wamid;
+  let snapshot;
+  try {
+    ({ wamid, snapshot } = await deps.sendTemplateWithSnapshot({
+      to: session.phone,
+      templateName,
+      languageCode: settings.pickupTemplateLanguage || 'es',
+      values: params,
+    }));
+  } catch (error) {
+    // No salio: el dia queda marcado (no se reintenta hoy) pero el recordatorio
+    // no cuenta para el maximo de 3.
+    try { deps.updateSession(session.phone, { pickupReminderCount: previousCount }); } catch (e) { /* sin disco */ }
+    throw error;
+  }
+  try {
+    deps.appendMessage(session.phone, 'human', `[recordatorio automatico] ${templateName}`, {
+      template: { name: templateName, origin: 'seguimiento', params, snapshot, wamid, status: 'sent' },
+    });
+  } catch (error) {
+    console.error('El recordatorio salio pero no se pudo guardar en el historial de', `…${String(session.phone).slice(-4)}`, ':', error.message);
+  }
   return { phone: session.phone, sent: true };
 }
 
@@ -210,12 +260,14 @@ async function plan(now = new Date(), overrides = {}) {
   const status = waiting.length ? await officeStatus(waiting, deps) : new Map();
   const due = [];
   const skipped = [];
+  const needsAnchor = [];
   for (const session of waiting) {
     const info = status.get(session.phone) || { state: null, order: null };
+    if (info.state === 'en_oficina' && !anchorDate(session)) needsAnchor.push(session);
     if (eligible(session, settings, now, info.state)) due.push({ session, order: info.order, confirmation: info.state });
     else skipped.push({ phone: session.phone, confirmation: info.state, estado: info.order?.estadoPedido || null });
   }
-  return { date: today, due, skipped, deps, settings, apiOk: Boolean(status.apiOk) };
+  return { date: today, due, skipped, needsAnchor, deps, settings, apiOk: Boolean(status.apiOk) };
 }
 
 async function run(now = new Date(), overrides = {}) {
@@ -229,7 +281,11 @@ async function run(now = new Date(), overrides = {}) {
     if (!settings.pickupReminderEnabled) return [];
     const hour = localParts(now).hour;
     if (hour < Number(settings.pickupReminderHour ?? 10) || hour >= LAST_HOUR) return [];
-    const { date, due, skipped, deps, apiOk } = await plan(now, { ...overrides, settings });
+    const { date, due, skipped, needsAnchor, deps, apiOk } = await plan(now, { ...overrides, settings });
+    // Pedido en oficina sin aviso de llegada del bot: hoy es el dia 0.
+    for (const session of needsAnchor) {
+      try { deps.updateSession(session.phone, { pickupReminderAnchorDate: date }); } catch (error) { console.error('No se pudo guardar la fecha ancla de', `…${String(session.phone).slice(-4)}`, error.message); }
+    }
     if (decided.date !== date) decided = { date, phones: new Set() };
     // Si DroPanas no respondio, los descartados se vuelven a mirar en el
     // proximo chequeo (puede haber sido un corte momentaneo).
@@ -244,10 +300,14 @@ async function run(now = new Date(), overrides = {}) {
       } catch (error) {
         console.error('No se pudo mandar recordatorio de retiro a', session.phone, error.response?.data || error.message);
         const today = localParts(now).date;
-        deps.updateSession(session.phone, {
-          pickupReminderFailDate: today,
-          pickupReminderFailCount: (session.pickupReminderFailDate === today ? Number(session.pickupReminderFailCount || 0) : 0) + 1,
-        });
+        try {
+          deps.updateSession(session.phone, {
+            pickupReminderFailDate: today,
+            pickupReminderFailCount: (session.pickupReminderFailDate === today ? Number(session.pickupReminderFailCount || 0) : 0) + 1,
+          });
+        } catch (e) {
+          console.error('No se pudo anotar el fallo del recordatorio de', `…${String(session.phone).slice(-4)}`, e.message);
+        }
         results.push({ phone: session.phone, sent: false, error: error.message });
       }
     }
@@ -270,5 +330,5 @@ function start() {
 
 module.exports = {
   start, run, plan, eligible, resetDecided, localParts, sendReminder, officeStatus, orderKeys,
-  CONFIRMED_MAX_REMINDERS, LAST_HOUR,
+  CONFIRMED_MAX_REMINDERS, REMINDER_DAYS, LAST_HOUR,
 };

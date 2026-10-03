@@ -116,7 +116,51 @@ function stageAfterArrivalNotice(currentStage) {
   return rank >= 1 && rank <= 2 ? 'esperando_retiro' : null;
 }
 
+// Etapas logisticas que solo mueve una fuente fuerte (DroPanas, guia cargada,
+// panel). El clasificador de IA nunca las propone por su cuenta cuando el
+// pedido esta vinculado a DroPanas: DroPanas manda en la logistica.
+const LOGISTIC_OWNED_STAGES = ['esperando_guia', 'en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion', 'vendido_fecha_futura', 'tienda_maracaibo'];
+
+// Un pedido esta vinculado a DroPanas si ya tiene orden, id o guia cargada.
+function hasDropanasLink(session) {
+  return Boolean(session?.dropanasOrder?.id || session?.card?.dropanasId || session?.card?.guia);
+}
+
+function foldText(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+// El cliente confirma que ya retiro o recibio el pedido.
+const DELIVERY_CONFIRMATION_RE = /\bya (lo |la |los |las )?(retire|busque|recibi|tengo)\b|\bya me llego\b|\bme llego (bien|todo|el pedido)\b|\blo retire\b/;
+
+function lastUserText(session) {
+  const history = Array.isArray(session?.history) ? session.history : [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i] && history[i].role === 'user') return String(history[i].content || '');
+  }
+  return '';
+}
+
+// Decide si la etapa que propone el CLASIFICADOR de IA se puede aplicar.
+//  1) nunca retrocede (isAllowedAutoTransition);
+//  2) con pedido vinculado a DroPanas no mueve etapas logisticas;
+//  3) "entregado" solo si el ULTIMO mensaje del cliente confirma el retiro o la
+//     entrega (el clasificador por si solo no alcanza: ya paso un "entregado"
+//     por paso del tiempo);
+//  4) el resto se aplica.
+function isAllowedClassifierTransition(session, nextStage) {
+  if (!isAllowedAutoTransition(session?.stage, nextStage)) return false;
+  if (hasDropanasLink(session) && LOGISTIC_OWNED_STAGES.includes(nextStage)) return false;
+  if (nextStage === 'entregado' && session?.stage !== 'entregado') {
+    return DELIVERY_CONFIRMATION_RE.test(foldText(lastUserText(session)));
+  }
+  return true;
+}
+
 module.exports = {
+  LOGISTIC_OWNED_STAGES,
+  hasDropanasLink,
+  isAllowedClassifierTransition,
   SOLD_STAGES,
   stageAfterArrivalNotice,
   LOGISTIC_RANK,

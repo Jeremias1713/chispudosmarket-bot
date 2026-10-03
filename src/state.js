@@ -154,8 +154,29 @@ function saveAll(sessions) {
     console.error('AVISO: fallo la copia de seguridad de sesiones, se sigue guardando:', err.message);
   }
   const tmpPath = `${STATE_PATH}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(sessions));
-  fs.renameSync(tmpPath, STATE_PATH);
+  const data = JSON.stringify(sessions);
+  const write = () => {
+    fs.writeFileSync(tmpPath, data);
+    fs.renameSync(tmpPath, STATE_PATH);
+  };
+  try {
+    write();
+  } catch (err) {
+    if (err.code !== 'ENOSPC') throw err;
+    // Disco lleno: se libera lo que se pueda (temporal, copias, medios viejos)
+    // y se reintenta UNA vez. Si vuelve a fallar se relanza: quien llama tiene
+    // que saber que no se guardo.
+    try { fs.unlinkSync(tmpPath); } catch (e) { /* puede no existir */ }
+    pruneBackups(0);
+    try {
+      const janitor = require('./diskJanitor'); // require perezoso: evita ciclo de modulos
+      janitor.markEnospc();
+      janitor.runOnce({ aggressive: true });
+    } catch (e) {
+      console.error('AVISO: fallo la limpieza de emergencia del disco:', e.message);
+    }
+    write();
+  }
   readCache = null;
 }
 
@@ -365,8 +386,39 @@ function applyTemplateStatus(statusEvent) {
   return resultado;
 }
 
+// Archiva los historiales viejos de chats inactivos para que sessions.json no
+// crezca sin tope. Solo toca sesiones SIN mensajes en los ultimos `olderThanMs`
+// (se mide por el `at` del ultimo mensaje, no por updatedAt, que se pisa con
+// cualquier updateSession) y con mas de `keepLast` mensajes: lo mas viejo va a
+// <archiveDir>/<phone>.jsonl.gz (se agrega al final) y la sesion conserva los
+// ultimos `keepLast`. Una sola lectura y un solo saveAll.
+function compactHistories({ olderThanMs, keepLast = 150, archiveDir, now = Date.now() } = {}) {
+  const zlib = require('zlib');
+  const dir = archiveDir || path.join(DATA_DIR, 'archive');
+  const sessions = loadAll();
+  let touched = 0;
+  let archived = 0;
+  for (const [phone, s] of Object.entries(sessions)) {
+    const h = Array.isArray(s.history) ? s.history : [];
+    if (h.length <= keepLast) continue;
+    const lastAt = Date.parse(h[h.length - 1]?.at || '');
+    if (!Number.isFinite(lastAt) || now - lastAt < olderThanMs) continue;
+    const moved = h.slice(0, h.length - keepLast);
+    const safeName = String(phone).replace(/[^A-Za-z0-9._-]/g, '_');
+    fs.mkdirSync(dir, { recursive: true });
+    // Un .gz con varios miembros concatenados es un .gz valido: se agrega sin releer.
+    fs.appendFileSync(path.join(dir, `${safeName}.jsonl.gz`), zlib.gzipSync(moved.map((m) => JSON.stringify(m)).join('\n') + '\n'));
+    sessions[phone] = { ...s, history: h.slice(h.length - keepLast), historyArchivedCount: (s.historyArchivedCount || 0) + moved.length };
+    touched += 1;
+    archived += moved.length;
+  }
+  if (touched > 0) saveAll(sessions);
+  return { sessions: touched, messages: archived };
+}
+
 module.exports = {
   getSession,
+  compactHistories,
   updateSession,
   resetSession,
   appendMessage,
