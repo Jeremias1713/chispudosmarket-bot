@@ -290,6 +290,7 @@ function toConvo(s) {
     stageReason: s.stageReason || null,
     paused: Boolean(s.paused),
     pausedReason: s.pausedReason || null,
+    optOut: Boolean(s.optOut),
     card: s.card || {},
     lastMessage: last ? last.content : '',
     lastMessageAt: last ? last.at : s.updatedAt || s.createdAt || null,
@@ -628,7 +629,8 @@ router.post('/api/conversations/:phone/send-template', async (req, res) => {
     stage = stageAfterArrivalNotice(getSession(phone).stage);
     if (stage) {
       updateSession(phone, {
-        stage, stageLocked: true, stageReason: 'Aviso de llegada enviado desde el chat',
+        stage, stageLocked: false, stageSource: 'panel_aviso_llegada', stageUpdatedAt: new Date().toISOString(),
+        stageReason: 'Aviso de llegada enviado desde el chat',
         arrivalNotifiedAt: new Date().toISOString(),
       });
     }
@@ -680,6 +682,18 @@ router.post('/api/conversations/:phone/pause', (req, res) => {
   const paused = Boolean(req.body?.paused);
   const s = setPaused(phone, paused, paused ? 'manual' : null);
   res.json({ ok: true, paused: s.paused });
+});
+
+// Opt-out: el cliente pidio no recibir mas mensajes automaticos (o Meta aviso
+// que dejo de recibir marketing). Se saca desde aqui, a mano.
+router.post('/api/conversations/:phone/opt-out', (req, res) => {
+  const phone = req.params.phone;
+  const optOut = Boolean(req.body?.optOut);
+  const patch = optOut
+    ? { optOut: true, optOutAt: new Date().toISOString(), optOutSource: 'panel' }
+    : { optOut: false, optOutAt: null, optOutSource: null, optOutText: null };
+  const s = updateSession(phone, patch);
+  res.json({ ok: true, optOut: Boolean(s.optOut) });
 });
 
 router.post('/api/conversations/:phone/stage', (req, res) => {
@@ -1530,6 +1544,10 @@ function sanitizeProductInput(body) {
   if (body.intro != null) patch.intro = String(body.intro);
   if (body.upsell != null) patch.upsell = String(body.upsell);
   if (body.remarketingEnabled != null) patch.remarketingEnabled = Boolean(body.remarketingEnabled);
+  if (body.remarketing5hEnabled != null) patch.remarketing5hEnabled = Boolean(body.remarketing5hEnabled);
+  // Guardia de calidad: la prende solo el webhook de Meta; se apaga a mano aqui.
+  if (body.qualityGuardActive != null) patch.qualityGuardActive = Boolean(body.qualityGuardActive);
+  if (body.optOutAutoReply != null) patch.optOutAutoReply = String(body.optOutAutoReply);
   if (body.remarketing2h != null) patch.remarketing2h = String(body.remarketing2h);
   if (body.remarketing5h != null) patch.remarketing5h = String(body.remarketing5h);
   if (body.introImageIds !== undefined) {
@@ -1681,6 +1699,9 @@ const NUMERIC_SETTINGS_RULES = {
   splitGapMaxMs: { min: 0, integer: true },
   remarketingHourStart: { min: 0, max: 23, integer: true },
   remarketingHourEnd: { min: 0, max: 23, integer: true },
+  maxAutoSendsPerDay: { min: 1, max: 10, integer: true },
+  autoSendHourStart: { min: 0, max: 23, integer: true },
+  autoSendHourEnd: { min: 1, max: 24, integer: true },
 };
 
 // Devuelve { patch, errors }: patch trae listos para guardar los campos
