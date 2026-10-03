@@ -211,7 +211,7 @@ test('en oficina avisa llegada y solo después mueve de en camino a esperando re
   assert.equal(updates[0].stage, 'esperando_retiro');
 });
 
-test('en oficina no avisa si el teléfono no es exacto o el pedido no está en camino', async () => {
+test('en oficina recupera esperando guía cuando el pedido ya tiene la guía exacta', async () => {
   let sends = 0;
   const base = [{ key: 'k5', order: { dropanasId: '14', guia: 'ABC14', telefono: '04120000004', estadoPedido: 'En oficina', carrier: 'tealca' } }];
   const result = await auto.processChanges(base, {
@@ -220,13 +220,13 @@ test('en oficina no avisa si el teléfono no es exacto o el pedido no está en c
     listSessions: () => [{ phone: '584120000004', stage: 'esperando_guia', card: { guia: 'ABC14' } }],
     maybeNotifyArrival: async () => { sends++; return { sent: true }; },
   });
-  assert.equal(result.results[0].reason, 'estado_no_en_camino');
-  assert.equal(sends, 0);
-  assert.deepEqual(result.acknowledged, []);
+  assert.equal(result.results[0].sent, true);
+  assert.equal(sends, 1);
+  assert.deepEqual(result.acknowledged, ['k5']);
 });
 
-test('si falla el aviso de llegada conserva en camino y deja el cambio pendiente', async () => {
-  let updated = false;
+test('si falla el aviso de llegada actualiza la etapa pero deja el aviso pendiente', async () => {
+  let updated = null;
   const result = await auto.processChanges(
     [{ key: 'k6', order: { dropanasId: '15', guia: 'ABC15', telefono: '04120000005', estadoPedido: 'En oficina', carrier: 'tealca' } }],
     {
@@ -234,11 +234,11 @@ test('si falla el aviso de llegada conserva en camino y deja el cambio pendiente
       matchRows: (rows) => rows,
       listSessions: () => [{ phone: '584120000005', stage: 'en_camino', card: { guia: 'ABC15' } }],
       maybeNotifyArrival: async () => ({ sent: false, reason: 'error', error: 'Meta rechazó la plantilla' }),
-      updateSession: () => { updated = true; },
+      updateSession: (_phone, patch) => { updated = patch; },
     }
   );
   assert.equal(result.results[0].notice.reason, 'error');
-  assert.equal(updated, false);
+  assert.equal(updated.stage, 'esperando_retiro');
   assert.deepEqual(result.acknowledged, []);
 });
 
@@ -326,8 +326,8 @@ for (const scenario of [
   });
 }
 
-test('si falla una plantilla de estado no cambia la etapa ni confirma el evento', async () => {
-  let updated = false;
+test('si falla una plantilla de estado actualiza la etapa sin confirmar el aviso', async () => {
+  let updated = null;
   const result = await auto.processChanges(
     [{ key: 'k8', order: { dropanasId: '18', guia: 'ABC18', telefono: '04120000008', estadoPedido: 'Entregado', carrier: 'tealca' } }],
     {
@@ -335,10 +335,10 @@ test('si falla una plantilla de estado no cambia la etapa ni confirma el evento'
       matchRows: (rows) => rows,
       listSessions: () => [{ phone: '584120000008', stage: 'esperando_retiro', card: { guia: 'ABC18' } }],
       maybeNotifyDelivered: async () => ({ sent: false, reason: 'error', error: 'plantilla no aprobada' }),
-      updateSession: () => { updated = true; },
+      updateSession: (_phone, patch) => { updated = patch; },
     }
   );
-  assert.equal(updated, false);
+  assert.equal(updated.stage, 'entregado');
   assert.equal(result.results[0].notice.reason, 'error');
   assert.deepEqual(result.acknowledged, []);
 });
