@@ -24,7 +24,13 @@ const STATE_PATH = path.join(DATA_DIR, 'sessions.json');
 //     lanza un error (nunca se sigue de largo con un {} que despues se
 //     guardaria encima de lo corrupto).
 const BACKUPS_DIR = path.join(DATA_DIR, 'backups', 'sessions');
-const MAX_BACKUPS = 20;
+// Cada copia es el sessions.json ENTERO (con miles de chats pesa varios MB):
+// antes se guardaba una copia en CADA guardado (cada mensaje) y se conservaban
+// 20, con lo que el disco del servidor se llenaba ("ENOSPC: no space left on
+// device"), el bot se caia al guardar un mensaje y se reiniciaba en bucle.
+// Ahora: pocas copias y separadas en el tiempo.
+const MAX_BACKUPS = 5;
+const BACKUP_MIN_INTERVAL_MS = 30 * 60 * 1000;
 
 function listBackupFiles() {
   try {
@@ -41,7 +47,33 @@ function listBackupFiles() {
 // sobrescribirlo) con una marca de tiempo en el nombre, y recorta las copias
 // mas viejas para no llenar el disco. Si sessions.json todavia no existe (primer
 // arranque) no hay nada que respaldar.
+// Borra las copias mas viejas y deja solo las ultimas `keep`.
+function pruneBackups(keep) {
+  const files = listBackupFiles();
+  const excess = files.length - keep;
+  for (let i = 0; i < excess; i++) {
+    try {
+      fs.unlinkSync(path.join(BACKUPS_DIR, files[i]));
+    } catch (err) {
+      // si ya no esta, no importa
+    }
+  }
+}
+
+function newestBackupAgeMs() {
+  const files = listBackupFiles();
+  if (!files.length) return Infinity;
+  try {
+    return Date.now() - fs.statSync(path.join(BACKUPS_DIR, files[files.length - 1])).mtimeMs;
+  } catch (err) {
+    return Infinity;
+  }
+}
+
 function backupCurrentFile() {
+  // Si ya hay una copia reciente, no se hace otra: no hace falta una copia por
+  // cada mensaje y cada una ocupa todo el archivo de sesiones.
+  if (newestBackupAgeMs() < BACKUP_MIN_INTERVAL_MS) return;
   let current;
   try {
     current = fs.readFileSync(STATE_PATH, 'utf8');
@@ -50,17 +82,27 @@ function backupCurrentFile() {
   }
   fs.mkdirSync(BACKUPS_DIR, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  fs.writeFileSync(path.join(BACKUPS_DIR, `sessions-${stamp}.json`), current);
-
-  const files = listBackupFiles();
-  const excess = files.length - MAX_BACKUPS;
-  for (let i = 0; i < excess; i++) {
-    try {
-      fs.unlinkSync(path.join(BACKUPS_DIR, files[i]));
-    } catch (err) {
-      // si ya no esta, no importa
-    }
+  const target = path.join(BACKUPS_DIR, `sessions-${stamp}.json`);
+  try {
+    fs.writeFileSync(target, current);
+  } catch (err) {
+    // Disco lleno: se borran copias viejas y se sigue. La copia de seguridad
+    // NUNCA debe impedir guardar el mensaje del cliente.
+    try { fs.unlinkSync(target); } catch (e) { /* puede no existir */ }
+    pruneBackups(1);
+    console.error('AVISO: no se pudo crear la copia de seguridad de sesiones:', err.message);
+    return;
   }
+  pruneBackups(MAX_BACKUPS);
+}
+
+// Al arrancar: si el disco ya esta lleno de copias viejas, se liberan antes
+// de que el bot intente guardar su primer mensaje.
+try {
+  pruneBackups(MAX_BACKUPS);
+  fs.unlinkSync(`${STATE_PATH}.tmp`);
+} catch (err) {
+  // no hay nada que limpiar
 }
 
 // Busca, de la mas nueva a la mas vieja, la primera copia de seguridad que
@@ -106,9 +148,13 @@ function saveAll(sessions) {
   // filesystem es una operacion atomica) para que una interrupcion a mitad de
   // camino (reinicio, caida del proceso) nunca deje sessions.json a medio
   // escribir/corrupto.
-  backupCurrentFile();
+  try {
+    backupCurrentFile();
+  } catch (err) {
+    console.error('AVISO: fallo la copia de seguridad de sesiones, se sigue guardando:', err.message);
+  }
   const tmpPath = `${STATE_PATH}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(sessions, null, 2));
+  fs.writeFileSync(tmpPath, JSON.stringify(sessions));
   fs.renameSync(tmpPath, STATE_PATH);
   readCache = null;
 }

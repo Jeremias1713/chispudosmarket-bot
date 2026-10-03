@@ -52,8 +52,12 @@ function dentroDelHorarioPermitido(settings) {
 async function mandarSiCorresponde(session, texto, campoFlag) {
   const limpio = String(texto || '').trim();
   if (!limpio) return false;
-  await sendRawReply(session.phone, limpio);
+  // La marca de "ya se mando" se guarda ANTES de mandar. Antes era al reves:
+  // si despues de mandar fallaba el guardado (por ejemplo disco lleno), la
+  // marca no quedaba y el recordatorio se volvia a mandar al mismo cliente en
+  // cada chequeo y en cada reinicio.
   updateSession(session.phone, { [campoFlag]: new Date().toISOString() });
+  await sendRawReply(session.phone, limpio);
   return true;
 }
 
