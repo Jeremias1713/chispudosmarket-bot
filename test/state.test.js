@@ -55,6 +55,10 @@ test('H04 - un sessions.json corrupto se restaura desde la ultima copia de segur
   // Primero, una escritura "legitima" via el modulo (updateSession), para
   // que saveAll() ya haya generado al menos una copia de seguridad antes de
   // que el archivo se corrompa.
+  // Las copias se espacian (minimo 30 min entre una y otra): los tests anteriores
+  // de este archivo ya dejaron una reciente, asi que se limpia la carpeta para
+  // que el guardado de abajo cree la copia con las dos sesiones del fixture.
+  require('node:fs').rmSync(require('node:path').join(dataDir, 'backups', 'sessions'), { recursive: true, force: true });
   const fixture = loadFixture('sesiones-nombres-parecidos.json');
   writeRaw(dataDir, 'sessions.json', JSON.stringify(fixture));
   state.updateSession('584120000001', { name: 'Ana María (confirmada)' }); // dispara saveAll -> crea backup del contenido anterior
@@ -73,4 +77,11 @@ test('H04 - un sessions.json corrupto se restaura desde la ultima copia de segur
   assert.ok(sessions['584120000001'], 'BUG H04 corregido: Ana María sigue existiendo (restaurada del backup)');
   assert.ok(sessions['584120000002'], 'BUG H04 corregido: Ana Isabel sigue existiendo (restaurada del backup)');
   assert.ok(sessions['584120099999'], 'la sesion nueva tambien quedo guardada');
+});
+test('copias de seguridad espaciadas: dos updateSession seguidos crean una sola copia', () => {
+  const dir = require('node:path').join(dataDir, 'backups', 'sessions');
+  require('node:fs').rmSync(dir, { recursive: true, force: true });
+  state.updateSession('584120000001', { name: 'uno' });
+  state.updateSession('584120000001', { name: 'dos' });
+  assert.equal(require('node:fs').readdirSync(dir).length, 1);
 });

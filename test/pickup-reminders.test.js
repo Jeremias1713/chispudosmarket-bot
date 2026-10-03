@@ -13,11 +13,12 @@ const settings = {
   pickupTemplateName: 'pedido_ha_llegado_a_tealca',
 };
 const NOW = new Date('2026-09-23T14:10:00.000Z'); // 10:10 en Venezuela
-const inOffice = (extra = {}) => ({ phone: '584120000001', stage: 'esperando_retiro', card: { guia: '84800001', nombre: 'Ana Perez' }, ...extra });
+// Llego el 22 -> el 23 es el dia 1 de los recordatorios (dias 1, 3 y 5).
+const ARRIVED_D1 = '2026-09-22T14:00:00.000Z';
+const inOffice = (extra = {}) => ({ phone: '584120000001', stage: 'esperando_retiro', card: { guia: '84800001', nombre: 'Ana Perez' }, arrivalNotifiedAt: ARRIVED_D1, ...extra });
 
-test('con DroPanas confirmando "en oficina" recuerda a todos, aunque el bot no haya avisado la llegada', () => {
+test('con DroPanas confirmando "en oficina" recuerda el dia 1 desde el aviso de llegada', () => {
   assert.equal(reminders.eligible(inOffice(), settings, NOW, 'en_oficina'), true);
-  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: '2026-09-10T14:00:00.000Z' }), settings, NOW, 'en_oficina'), true);
 });
 
 test('no recuerda si DroPanas dice que ya no esta en oficina, ni si no es "esperando_retiro"', () => {
@@ -27,19 +28,42 @@ test('no recuerda si DroPanas dice que ya no esta en oficina, ni si no es "esper
   assert.equal(reminders.eligible(inOffice(), { ...settings, pickupReminderEnabled: false }, NOW, 'en_oficina'), false);
 });
 
-test('sin confirmacion de DroPanas solo recuerda llegadas recientes avisadas por el bot', () => {
-  assert.equal(reminders.eligible(inOffice(), settings, NOW, null), false);
-  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: '2026-09-22T14:00:00.000Z' }), settings, NOW, null), true);
-  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: '2026-09-10T14:00:00.000Z' }), settings, NOW, null), false);
+test('solo salen los dias 1, 3 y 5: dia 2 no, dia 3 si, dia 6 no', () => {
+  const day = (n) => new Date(Date.parse('2026-09-22T14:10:00.000Z') + n * 86400000);
+  assert.equal(reminders.eligible(inOffice(), settings, day(0), 'en_oficina'), false); // el dia del aviso
+  assert.equal(reminders.eligible(inOffice(), settings, day(1), 'en_oficina'), true);
+  assert.equal(reminders.eligible(inOffice({ pickupReminderCount: 1, pickupReminderGuia: '84800001' }), settings, day(2), 'en_oficina'), false);
+  assert.equal(reminders.eligible(inOffice({ pickupReminderCount: 1, pickupReminderGuia: '84800001' }), settings, day(3), 'en_oficina'), true);
+  assert.equal(reminders.eligible(inOffice({ pickupReminderCount: 2, pickupReminderGuia: '84800001' }), settings, day(5), 'en_oficina'), true);
+  assert.equal(reminders.eligible(inOffice({ pickupReminderCount: 3, pickupReminderGuia: '84800001' }), settings, day(5), 'en_oficina'), false);
+  assert.equal(reminders.eligible(inOffice({ pickupReminderCount: 2, pickupReminderGuia: '84800001' }), settings, day(6), 'en_oficina'), false);
+  // un dia perdido no se recupera: el dia 3 sale aunque el dia 1 no salio
+  assert.equal(reminders.eligible(inOffice(), settings, day(3), 'en_oficina'), true);
 });
 
-test('no duplica el mismo dia, ni el dia de la llegada, y respeta los topes', () => {
+test('un cliente que escribio ayer esta en conversacion: no se le recuerda', () => {
+  const hist = [{ role: 'user', content: 'ya voy', at: '2026-09-22T20:00:00.000Z' }];
+  assert.equal(reminders.eligible(inOffice({ history: hist }), settings, NOW, 'en_oficina'), false);
+  // si escribio hace mas de 48 h, o antes del aviso de llegada, si se recuerda
+  assert.equal(reminders.eligible(inOffice({ history: [{ role: 'user', content: 'hola', at: '2026-09-22T10:00:00.000Z' }] }), settings, NOW, 'en_oficina'), true);
+});
+
+test('sin aviso de llegada del bot, la fecha ancla nueva es el dia 0 y no manda', () => {
+  const s = inOffice({ arrivalNotifiedAt: undefined, pickupReminderAnchorDate: '2026-09-23' });
+  assert.equal(reminders.eligible(s, settings, NOW, 'en_oficina'), false);
+  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: undefined }), settings, NOW, 'en_oficina'), false); // sin ancla todavia
+  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: undefined, pickupReminderAnchorDate: '2026-09-22' }), settings, NOW, 'en_oficina'), true);
+});
+
+test('sin confirmacion de DroPanas solo recuerda si el bot aviso la llegada', () => {
+  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: undefined }), settings, NOW, null), false);
+  assert.equal(reminders.eligible(inOffice(), settings, NOW, null), true);
+});
+
+test('no duplica el mismo dia y respeta el tope', () => {
   assert.equal(reminders.eligible(inOffice({ pickupReminderLastDate: '2026-09-23' }), settings, NOW, 'en_oficina'), false);
-  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: '2026-09-23T12:00:00.000Z' }), settings, NOW, 'en_oficina'), false);
-  assert.equal(reminders.eligible(inOffice({ pickupReminderCount: reminders.CONFIRMED_MAX_REMINDERS, pickupReminderGuia: '84800001' }), settings, NOW, 'en_oficina'), false);
   // Si la guia cambio (compra nueva), el contador vuelve a cero.
   assert.equal(reminders.eligible(inOffice({ pickupReminderCount: 99, pickupReminderGuia: 'OTRA' }), settings, NOW, 'en_oficina'), true);
-  assert.equal(reminders.eligible(inOffice({ arrivalNotifiedAt: '2026-09-18T14:00:00.000Z', pickupReminderCount: 5 }), settings, NOW, null), false);
 });
 
 function fakeDeps({ sessions, orders, failSend = false }) {
@@ -95,10 +119,13 @@ test('run manda la plantilla una sola vez por dia solo a los que DroPanas confir
   const again = await reminders.run(new Date('2026-09-23T15:10:00.000Z'), deps);
   assert.equal(again.length, 0);
   assert.equal(sent.length, 2);
-  // Al dia siguiente vuelve a recordar.
-  const tomorrow = await reminders.run(new Date('2026-09-24T14:05:00.000Z'), deps);
-  assert.equal(tomorrow.length, 2);
+  // El dia 2 no toca; el dia 3 vuelve a recordar.
+  const day2 = await reminders.run(new Date('2026-09-24T14:05:00.000Z'), deps);
+  assert.equal(day2.length, 0);
+  const day3 = await reminders.run(new Date('2026-09-25T14:05:00.000Z'), deps);
+  assert.equal(day3.length, 2);
   assert.equal(store.get('58412000001').pickupReminderCount, 2);
+  assert.equal(store.get('58412000001').autoSends.count, 1); // el contador diario es por dia
 });
 
 test('no manda antes de la hora configurada ni de noche', async () => {
@@ -116,7 +143,7 @@ test('si DroPanas no responde, solo recuerda llegadas recientes y vuelve a inten
   const { deps, sent } = fakeDeps({
     sessions: [
       inOffice({ phone: '58412000011', arrivalNotifiedAt: '2026-09-22T14:00:00.000Z' }),
-      inOffice({ phone: '58412000012' }),
+      inOffice({ phone: '58412000012', arrivalNotifiedAt: undefined }),
     ],
     orders: null,
   });
@@ -125,10 +152,27 @@ test('si DroPanas no responde, solo recuerda llegadas recientes y vuelve a inten
   assert.equal(sent.length, 1);
 });
 
-test('un envio que falla se reintenta, con un maximo de 3 intentos por dia', async () => {
+test('un envio que falla no se reintenta el mismo dia (la marca va antes) y no cuenta para el maximo', async () => {
   reminders.resetDecided();
   const { deps, store } = fakeDeps({ sessions: [inOffice()], orders: [{ dropanasId: '1', guia: '84800001', estadoPedido: 'En oficina' }], failSend: true });
   for (let i = 0; i < 5; i += 1) await reminders.run(new Date(NOW.getTime() + i * 15 * 60 * 1000), deps);
-  assert.equal(store.get('584120000001').pickupReminderFailCount, 3);
-  assert.equal(store.get('584120000001').pickupReminderLastDate, undefined);
+  const s = store.get('584120000001');
+  assert.equal(s.pickupReminderFailCount, 1);
+  assert.equal(s.pickupReminderLastDate, '2026-09-23');
+  assert.equal(s.pickupReminderCount, 0);
+});
+
+test('si el guardado de la marca falla, NO se manda nada', async () => {
+  reminders.resetDecided();
+  const { deps, sent } = fakeDeps({ sessions: [inOffice()], orders: [{ dropanasId: '1', guia: '84800001', estadoPedido: 'En oficina' }] });
+  deps.updateSession = () => { throw new Error('ENOSPC'); };
+  await reminders.run(NOW, deps);
+  assert.equal(sent.length, 0);
+});
+
+test('con opt-out igual se recuerda? No: es marketing y se salta', async () => {
+  reminders.resetDecided();
+  const { deps, sent } = fakeDeps({ sessions: [inOffice({ optOut: true })], orders: [{ dropanasId: '1', guia: '84800001', estadoPedido: 'En oficina' }] });
+  await reminders.run(NOW, deps);
+  assert.equal(sent.length, 0);
 });

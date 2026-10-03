@@ -211,18 +211,56 @@ test('en oficina avisa llegada y solo después mueve de en camino a esperando re
   assert.equal(updates[0].stage, 'esperando_retiro');
 });
 
-test('en oficina no avisa si el teléfono no es exacto o el pedido no está en camino', async () => {
+// Fase 4: DroPanas es la fuente mas fuerte y puede avanzar el chat desde cualquier
+// etapa anterior (antes solo desde en_camino: "estado_no_en_camino").
+test('en oficina avisa tambien si el chat sigue en esperando_guia (aviso de guia que fallo)', async () => {
   let sends = 0;
   const base = [{ key: 'k5', order: { dropanasId: '14', guia: 'ABC14', telefono: '04120000004', estadoPedido: 'En oficina', carrier: 'tealca' } }];
   const result = await auto.processChanges(base, {
     env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
     matchRows: (rows) => rows,
     listSessions: () => [{ phone: '584120000004', stage: 'esperando_guia', card: { guia: 'ABC14' } }],
+    updateSession: (_p, patch) => patch,
     maybeNotifyArrival: async () => { sends++; return { sent: true }; },
   });
-  assert.equal(result.results[0].reason, 'estado_no_en_camino');
+  assert.equal(sends, 1);
+  assert.deepEqual(result.acknowledged, ['k5']);
+});
+
+test('en oficina no toca un chat ya entregado o en devolucion: lo confirma como ya_finalizado', async () => {
+  let sends = 0;
+  for (const stage of ['entregado', 'devolucion']) {
+    const result = await auto.processChanges(
+      [{ key: `kf-${stage}`, order: { dropanasId: '14', guia: 'ABC14', telefono: '04120000004', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+      {
+        env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+        matchRows: (rows) => rows,
+        listSessions: () => [{ phone: '584120000004', stage, card: { guia: 'ABC14' } }],
+        maybeNotifyArrival: async () => { sends++; return { sent: true }; },
+      }
+    );
+    assert.equal(result.results[0].reason, 'ya_finalizado');
+    assert.deepEqual(result.acknowledged, [`kf-${stage}`]);
+  }
   assert.equal(sends, 0);
-  assert.deepEqual(result.acknowledged, []);
+});
+
+test('en oficina con el chat sin guia cargada: completa la guia del evento y avisa', async () => {
+  let notified = null;
+  const patches = [];
+  const result = await auto.processChanges(
+    [{ key: 'kg', order: { dropanasId: '50', guia: 'GG50', telefono: '04120000050', estadoPedido: 'En oficina', carrier: 'tealca' } }],
+    {
+      env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+      matchRows: (rows) => rows,
+      listSessions: () => [{ phone: '584120000050', stage: 'vendido', orderClosed: true, card: { nombre: 'Ana' } }],
+      updateSession: (_p, patch) => { patches.push(patch); return { phone: '584120000050', stage: 'en_camino', card: patch.card }; },
+      maybeNotifyArrival: async (_p, session) => { notified = session; return { sent: true }; },
+    }
+  );
+  assert.equal(notified.card.guia, 'GG50');
+  assert.deepEqual(result.acknowledged, ['kg']);
+  assert.ok(patches.some((p) => p.stage === 'esperando_retiro' && p.stageLocked === false));
 });
 
 test('si falla el aviso de llegada conserva en camino y deja el cambio pendiente', async () => {
@@ -291,7 +329,9 @@ test('en oficina no avisa si ni el telefono ni el nombre matchean de forma exact
     {
       env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
       matchRows: (rows) => rows,
-      listSessions: () => [{ phone: '584120009998', stage: 'en_camino', card: { guia: 'ABC19', nombre: 'Ana Maria Perez' } }],
+      // Fase 3: una guia IGUAL ya es evidencia fuerte (orderMatch.js, regla 'guia'); para probar el
+      // caso de evidencia debil (solo un nombre parcial) la ficha tiene otra guia.
+      listSessions: () => [{ phone: '584120009998', stage: 'en_camino', card: { guia: 'OTRA19', nombre: 'Ana Maria Perez' } }],
       maybeNotifyArrival: async () => { sends++; return { sent: true }; },
     }
   );
@@ -302,7 +342,8 @@ test('en oficina no avisa si ni el telefono ni el nombre matchean de forma exact
 
 for (const scenario of [
   { status: 'Entregado', stage: 'entregado', notify: 'maybeNotifyDelivered' },
-  { status: 'En novedad', stage: 'novedad', notify: 'maybeNotifyNovelty' },
+  // Fase 5: "En novedad" ya NO manda la plantilla de novedad: avisa la llegada y pasa a
+  // esperando_retiro (ver test/dropanas-novedad-llegada.test.js).
   { status: 'Pendiente de devolución', stage: 'pendiente_devolucion', notify: 'maybeNotifyReturnPending' },
 ]) {
   test(`${scenario.status} envía su plantilla y después actualiza la etapa`, async () => {

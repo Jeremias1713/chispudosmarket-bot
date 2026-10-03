@@ -27,6 +27,50 @@ const { sendRawReply } = require('./flow');
 const { getSettings } = require('./settings');
 const { isWindowOpen } = require('./whatsappWindow');
 const { loadProducts, findProduct } = require('./catalog');
+const { canSendAutomatic, reserveAutomatic } = require('./outboundGuard');
+
+const MARKER_KIND = {
+  shippingNotifiedAt: 'shipping',
+  arrivalNotifiedAt: 'arrival',
+  deliveredNotifiedAt: 'delivered',
+  noveltyNotifiedAt: 'novelty',
+  returnPendingNotifiedAt: 'return_pending',
+};
+
+// Patron "marcar ANTES de enviar": si el guardado de la marca falla (disco
+// lleno), NO se manda nada; antes se mandaba y despues se marcaba, y el mismo
+// aviso salia otra vez en cada reintento. Devuelve null si se puede enviar, o
+// el resultado { sent:false, reason } que hay que devolver.
+function claimNotification(phone, session, marker) {
+  const guard = canSendAutomatic(session, MARKER_KIND[marker] || 'shipping');
+  if (!guard.ok) return { sent: false, reason: guard.reason };
+  try {
+    reserveAutomatic(phone, MARKER_KIND[marker] || 'shipping', new Date(), session);
+    updateSession(phone, { [marker]: new Date().toISOString() });
+  } catch (err) {
+    console.error('No se pudo guardar la marca', marker, 'de', `…${String(phone).slice(-4)}`, ':', err.message);
+    return { sent: false, reason: 'error_guardado', error: err.message };
+  }
+  return null;
+}
+
+// El envio fallo: se quita la marca para que se pueda reintentar y se anota el fallo.
+function releaseNotification(phone, marker) {
+  try {
+    updateSession(phone, { [marker]: null, [`${marker}FailedAt`]: new Date().toISOString() });
+  } catch (err) {
+    console.error('No se pudo deshacer la marca', marker, 'de', `…${String(phone).slice(-4)}`, ':', err.message);
+  }
+}
+
+// El mensaje ya salio: si falla el registro en el historial, no se relanza.
+function safeAppend(phone, role, content, extra) {
+  try {
+    appendMessage(phone, role, content, extra);
+  } catch (err) {
+    console.error('El mensaje salio pero no se pudo guardar en el historial de', `…${String(phone).slice(-4)}`, ':', err.message);
+  }
+}
 
 const DEFAULT_FREE_TEXT =
   'Hola {{nombre}}! Tu pedido de {{producto}} ya esta en camino. Numero de guia: {{guia}}.';
@@ -91,7 +135,18 @@ function fillPlaceholders(text, values) {
   return String(text || '')
     .replace(/\{\{\s*nombre\s*\}\}/gi, values.nombre)
     .replace(/\{\{\s*producto\s*\}\}/gi, values.producto)
-    .replace(/\{\{\s*guia\s*\}\}/gi, values.guia);
+    .replace(/\{\{\s*guia\s*\}\}/gi, values.guia)
+    .replace(/\{\{\s*agencia\s*\}\}/gi, values.agencia ?? '-')
+    .replace(/\{\{\s*monto\s*\}\}/gi, values.monto ?? '-');
+}
+
+// Texto libre del aviso de llegada. Si la agencia o el monto no se conocen
+// ('-'), se omiten en vez de escribir "agencia -" o "Monto: -".
+function arrivalText(template, values) {
+  let text = String(template || '');
+  if (!values.agencia || values.agencia === '-') text = text.replace(/ \{\{\s*agencia\s*\}\}/gi, '');
+  if (!values.monto || values.monto === '-') text = text.replace(/ Monto a pagar al retirar: \{\{\s*monto\s*\}\}\.?/gi, '');
+  return fillPlaceholders(text, values);
 }
 
 // phone: numero del cliente. session: la sesion ya cargada (opcional, para
@@ -104,6 +159,9 @@ async function maybeNotifyShipping(phone, session) {
   const settings = getSettings();
   const abierta = isWindowOpen(s);
   const values = placeholderValues(s);
+  if (!abierta && !settings.shippingTemplateName) return { sent: false, reason: 'sin_plantilla' };
+  const blocked = claimNotification(phone, s, 'shippingNotifiedAt');
+  if (blocked) return blocked;
 
   let imageSent = false;
   try {
@@ -119,7 +177,7 @@ async function maybeNotifyShipping(phone, session) {
         // muestre la foto real dentro del chat, igual que cualquier otra
         // imagen — antes solo quedaba el texto "[imagen] Guia de envio" sin
         // nada para ver.
-        appendMessage(phone, 'assistant', '[imagen] Guia de envio', { attachment: { kind: 'image', url: s.card.guiaImageUrl } });
+        safeAppend(phone, 'assistant', '[imagen] Guia de envio', { attachment: { kind: 'image', url: s.card.guiaImageUrl } });
         imageSent = true;
       } catch (err) {
         console.error('No se pudo mandar la foto de la guia a', phone, err.response?.data || err.message);
@@ -130,7 +188,6 @@ async function maybeNotifyShipping(phone, session) {
       const texto = fillPlaceholders(settings.shippingFreeText || DEFAULT_FREE_TEXT, values);
       await sendRawReply(phone, texto);
     } else {
-      if (!settings.shippingTemplateName) return { sent: false, reason: 'sin_plantilla' };
       // Orden de los parametros de la plantilla "guia_del_pedido": nombre,
       // producto, guia, agencia de destino, monto (en ese orden). Tiene que
       // coincidir con el orden de las variables {{1}}..{{5}} tal cual
@@ -151,16 +208,17 @@ async function maybeNotifyShipping(phone, session) {
         values: paramsPlantilla,
         headerImageUrl: s.card?.guiaImageUrl || null,
       });
-      appendMessage(phone, 'human', `[plantilla automatica] ${settings.shippingTemplateName}`, {
+      safeAppend(phone, 'human', `[plantilla automatica] ${settings.shippingTemplateName}`, {
         template: { name: settings.shippingTemplateName, origin: 'bot', params: paramsPlantilla, snapshot, wamid, status: 'sent' },
       });
     }
   } catch (err) {
     console.error('No se pudo mandar el aviso automatico de guia a', phone, err.response?.data || err.message);
+    // Si la foto ya salio, el cliente ya recibio algo: la marca se queda.
+    if (!imageSent) releaseNotification(phone, 'shippingNotifiedAt');
     return { sent: false, reason: 'error', error: err.message };
   }
 
-  updateSession(phone, { shippingNotifiedAt: new Date().toISOString() });
   return {
     sent: true,
     viaTemplate: !abierta,
@@ -178,7 +236,7 @@ async function maybeNotifyShipping(phone, session) {
 // (DEFAULT_FREE_TEXT dice "ya esta en camino", que seria mentira aca: si ya
 // llego, ya no esta "en camino").
 const DEFAULT_ARRIVAL_FREE_TEXT =
-  'Hola {{nombre}}! Tu pedido de {{producto}} ya llego a la agencia y esta listo para que lo retires. Numero de guia: {{guia}}.';
+  'Hola {{nombre}}! Tu pedido de {{producto}} ya llegó a la agencia {{agencia}} y está listo para que lo retires. Número de guía: {{guia}}. Monto a pagar al retirar: {{monto}}.';
 
 // Aviso de LLEGADA a la agencia (pedido disponible para retiro), separado a
 // proposito de maybeNotifyShipping (aviso de DESPACHO). Bug real que esto
@@ -197,10 +255,14 @@ async function maybeNotifyArrival(phone, session) {
   const settings = getSettings();
   const abierta = isWindowOpen(s);
   const values = placeholderValues(s);
+  const arrivalTemplate = settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca';
+  if (!abierta && !arrivalTemplate) return { sent: false, reason: 'sin_plantilla' };
+  const blocked = claimNotification(phone, s, 'arrivalNotifiedAt');
+  if (blocked) return blocked;
 
   try {
     if (abierta) {
-      const texto = fillPlaceholders(settings.arrivalFreeText || DEFAULT_ARRIVAL_FREE_TEXT, values);
+      const texto = arrivalText(settings.arrivalFreeText || DEFAULT_ARRIVAL_FREE_TEXT, values);
       await sendRawReply(phone, texto);
     } else {
       // Misma plantilla de "ya llego, ya lo podes retirar" que usa el
@@ -209,7 +271,6 @@ async function maybeNotifyArrival(phone, session) {
       // obligatorio (a diferencia de "guia_del_pedido", la de despacho).
       const templateName = settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca';
       const languageCode = settings.pickupTemplateLanguage || 'es';
-      if (!templateName) return { sent: false, reason: 'sin_plantilla' };
       const paramsPlantilla = [values.nombre, values.producto, values.guia, values.monto];
       const { wamid, snapshot } = await sendTemplateWithSnapshot({
         to: phone,
@@ -217,16 +278,16 @@ async function maybeNotifyArrival(phone, session) {
         languageCode,
         values: paramsPlantilla,
       });
-      appendMessage(phone, 'human', `[plantilla automatica] ${templateName}`, {
+      safeAppend(phone, 'human', `[plantilla automatica] ${templateName}`, {
         template: { name: templateName, origin: 'bot', params: paramsPlantilla, snapshot, wamid, status: 'sent' },
       });
     }
   } catch (err) {
     console.error('No se pudo mandar el aviso automatico de llegada a', phone, err.response?.data || err.message);
+    releaseNotification(phone, 'arrivalNotifiedAt');
     return { sent: false, reason: 'error', error: err.message };
   }
 
-  updateSession(phone, { arrivalNotifiedAt: new Date().toISOString() });
   return { sent: true, viaTemplate: !abierta };
 }
 
@@ -235,6 +296,8 @@ async function notifyStatusTemplate(phone, session, options) {
   if (s[options.marker]) return { sent: false, reason: 'ya_avisado' };
   const values = placeholderValues(s);
   const params = [values.nombre, values.producto];
+  const blocked = claimNotification(phone, s, options.marker);
+  if (blocked) return blocked;
   // Si el cliente escribio en las ultimas 24 horas, WhatsApp deja mandar un
   // mensaje normal: se usa ese texto en vez de la plantilla. Fuera de esa
   // ventana WhatsApp solo acepta plantillas aprobadas.
@@ -244,9 +307,9 @@ async function notifyStatusTemplate(phone, session, options) {
     } catch (err) {
       const detail = err.response?.data?.error?.message || err.message;
       console.error(`No se pudo mandar el mensaje de ${options.marker} a`, phone, detail);
+      releaseNotification(phone, options.marker);
       return { sent: false, reason: 'error', error: detail };
     }
-    updateSession(phone, { [options.marker]: new Date().toISOString() });
     return { sent: true, viaTemplate: false };
   }
   try {
@@ -256,15 +319,15 @@ async function notifyStatusTemplate(phone, session, options) {
       languageCode: options.languageCode || 'es',
       values: params,
     });
-    appendMessage(phone, 'human', `[plantilla automatica] ${options.templateName}`, {
+    safeAppend(phone, 'human', `[plantilla automatica] ${options.templateName}`, {
       template: { name: options.templateName, origin: 'dropanas', params, snapshot, wamid, status: 'sent' },
     });
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.message;
     console.error(`No se pudo mandar ${options.templateName} a`, phone, detail);
+    releaseNotification(phone, options.marker);
     return { sent: false, reason: 'error', error: detail };
   }
-  updateSession(phone, { [options.marker]: new Date().toISOString() });
   return { sent: true, viaTemplate: true };
 }
 

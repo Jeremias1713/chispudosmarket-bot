@@ -51,6 +51,14 @@ function applyStatusUpdate(sessions, statusEvent) {
       if (statusEvent.status === 'failed' && Array.isArray(statusEvent.errors) && statusEvent.errors[0]) {
         const e = statusEvent.errors[0];
         msg.template.failReason = e.title || e.message || 'Error desconocido de WhatsApp';
+        msg.template.failCode = e.code || null;
+        // 131050: el cliente dejo de recibir mensajes de marketing del negocio.
+        // Se marca como opt-out para que ningun envio automatico le insista.
+        if (Number(e.code) === 131050 && !session.optOut) {
+          session.optOut = true;
+          session.optOutAt = new Date().toISOString();
+          session.optOutSource = 'meta_131050';
+        }
       }
       return { updated: true, phone, messageIndex: i };
     }

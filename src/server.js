@@ -4,6 +4,7 @@ const express = require('express');
 const { handleIncomingMessage, SOLD_STAGES } = require('./flow');
 const { markAsRead } = require('./whatsapp');
 const { MEDIA_DIR } = require('./library');
+const metaEvents = require('./metaEvents');
 const { listSessions, updateSession, applyTemplateStatus } = require('./state');
 const panelRouter = require('./web/panel');
 const siteRouter = require('./web/site');
@@ -167,9 +168,14 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
   // Responder rapido a Meta; procesar despues.
   res.sendStatus(200);
 
+  // Se recorren TODOS los entry y TODOS los changes (antes solo se leia
+  // entry[0].changes[0] y el resto se perdia en silencio). Cada change va en su
+  // propio try/catch: un problema en uno no tumba a los demas.
+  const changes = [];
+  for (const entry of req.body?.entry || []) for (const change of entry?.changes || []) changes.push(change);
+
+  for (const change of changes) {
   try {
-    const entry = req.body.entry?.[0];
-    const change = entry?.changes?.[0];
     const value = change?.value;
     const messages = value?.messages || [];
 
@@ -201,6 +207,7 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
   } catch (err) {
     console.error('Error procesando mensaje entrante:', err);
   }
+  }
 
   // FASE 5 (H35): eventos de status de un mensaje YA mandado por nosotros
   // (sent/delivered/read/failed), separados de los mensajes entrantes de
@@ -209,15 +216,18 @@ app.post('/webhook', verifyWebhookSignature, async (req, res) => {
   // su propio try/catch para que un problema aca (ej. un formato de evento
   // inesperado) nunca tumbe el procesamiento de mensajes entrantes de
   // arriba, que es lo critico para el bot.
-  try {
-    const entry = req.body.entry?.[0];
-    const change = entry?.changes?.[0];
-    const statuses = change?.value?.statuses || [];
-    for (const statusEvent of statuses) {
-      applyTemplateStatus(statusEvent);
+  for (const change of changes) {
+    try {
+      const statuses = change?.value?.statuses || [];
+      for (const statusEvent of statuses) {
+        applyTemplateStatus(statusEvent);
+        metaEvents.noteFailedStatus(statusEvent);
+      }
+      // Calidad del numero / de plantillas (ver metaEvents.js). Nunca lanza.
+      metaEvents.handleAccountChange(change);
+    } catch (err) {
+      console.error('Error procesando status de WhatsApp:', err);
     }
-  } catch (err) {
-    console.error('Error procesando status de WhatsApp:', err);
   }
 });
 
@@ -287,6 +297,7 @@ if (require.main === module) {
     dropanasMonitor.startPendingRetry();
     dropanasOrderAutomation.startAutoRetry();
     pickupReminders.start();
+    require('./diskJanitor').start();
   });
 }
 

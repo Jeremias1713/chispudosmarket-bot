@@ -1169,6 +1169,28 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
 
             <details class="card cfg">
               <summary class="cfg-head">
+                <span class="cfg-title">Calidad del número</span>
+                <span class="cfg-sub">Avisos de Meta y guardia de envíos automáticos</span>
+              </summary>
+              <div class="cfg-body">
+                <div class="field">
+                  <pre class="help" id="cfg_qualityInfo" style="white-space:pre-wrap"></pre>
+                </div>
+                <div class="field field-master">
+                  <label class="switch">
+                    <input type="checkbox" id="cfg_qualityGuard">
+                    <span>Pausar remarketing, recordatorios y masivos (guardia de calidad)</span>
+                  </label>
+                  <div class="help">
+                    Se prende sola cuando Meta avisa que bajó la calidad del número. No se
+                    apaga sola: la apagás vos acá cuando la calidad se recupere.
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="card cfg">
+              <summary class="cfg-head">
                 <span class="cfg-title">Remarketing automático</span>
                 <span class="cfg-sub">Recordatorios a las 2h y 5h para pedidos colgados</span>
               </summary>

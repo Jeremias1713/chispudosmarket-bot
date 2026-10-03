@@ -10,9 +10,11 @@ const crypto = require('crypto');
 const { sendTemplateWithSnapshot } = require('./templateSend');
 const { listSessions, appendMessage } = require('./state');
 const { DATA_DIR } = require('./dataDir');
+const { canSendAutomatic, reserveAutomatic } = require('./outboundGuard');
 
 const RUNS_PATH = path.join(DATA_DIR, 'broadcasts.json');
-const SEND_GAP_MS = 300;
+// Pausa entre mensajes: mas lenta a proposito (antes 300 ms) para no parecer spam.
+const SEND_GAP_MS = 1500;
 
 function loadRuns() {
   try {
@@ -79,6 +81,7 @@ async function startRun({ templateName, languageCode, params, target, headerImag
     total: phones.length,
     sent: 0,
     failed: 0,
+    skipped: 0,
     status: 'running',
     startedAt: new Date().toISOString(),
     finishedAt: null,
@@ -90,11 +93,21 @@ async function startRun({ templateName, languageCode, params, target, headerImag
   saveRuns(runs);
 
   (async () => {
+    const byPhone = new Map(listSessions().map((x) => [x.phone, x]));
     for (const phone of phones) {
       let ok = true;
       let error = null;
       let wamid = null;
+      let skippedReason = null;
+      const session = byPhone.get(phone) || null;
+      // Guardia comun de envios automaticos: opt-out, tope diario, horario y
+      // calidad en riesgo. Los saltados quedan en el resultado con su motivo.
+      const guard = canSendAutomatic(session, 'broadcast');
+      if (!guard.ok) {
+        skippedReason = guard.reason;
+      } else {
       try {
+        if (session) reserveAutomatic(phone, 'broadcast', new Date(), session);
         // FASE 2/5 (H06/H35): antes se mandaba con sendTemplate directo y en
         // el historial solo quedaba el string "[plantilla masiva] nombre",
         // sin el contenido real armado ni el wamid (necesario para saber
@@ -111,23 +124,33 @@ async function startRun({ templateName, languageCode, params, target, headerImag
         // SI mandaba de verdad la plantilla por WhatsApp, pero nunca quedaba
         // guardado en el historial de la conversacion de cada cliente, asi
         // que en el chat individual no se veia ningun rastro del envio.
-        appendMessage(phone, 'human', `[plantilla masiva] ${templateName}`, {
-          template: { name: templateName, origin: 'broadcast', params: run.params, snapshot: resultado.snapshot, wamid, status: 'sent' },
-        });
+        try {
+          appendMessage(phone, 'human', `[plantilla masiva] ${templateName}`, {
+            template: { name: templateName, origin: 'broadcast', params: run.params, snapshot: resultado.snapshot, wamid, status: 'sent' },
+          });
+        } catch (logErr) {
+          console.error('La plantilla masiva salio pero no se pudo guardar en el historial de', `…${String(phone).slice(-4)}`, logErr.message);
+        }
       } catch (err) {
         ok = false;
         error = err.response?.data?.error?.message || err.message;
+      }
       }
 
       const current = loadRuns();
       const r = current.find((x) => x.id === run.id);
       if (!r) break; // el run se borro mientras corria
-      r.results.push({ phone, ok, error, wamid, at: new Date().toISOString() });
-      r.sent += ok ? 1 : 0;
-      r.failed += ok ? 0 : 1;
+      if (skippedReason) {
+        r.results.push({ phone, ok: false, skipped: true, reason: skippedReason, error: null, wamid: null, at: new Date().toISOString() });
+        r.skipped = (r.skipped || 0) + 1;
+      } else {
+        r.results.push({ phone, ok, error, wamid, at: new Date().toISOString() });
+        r.sent += ok ? 1 : 0;
+        r.failed += ok ? 0 : 1;
+      }
       saveRuns(current);
 
-      await sleep(SEND_GAP_MS);
+      if (!skippedReason) await sleep(SEND_GAP_MS);
     }
 
     const current = loadRuns();

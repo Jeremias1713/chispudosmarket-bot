@@ -1372,6 +1372,7 @@ async function loadChat() {
   renderDropanasBar(conversation)
   renderMemory(conversation)
   renderWindowStatus(conversation)
+  renderOptOut(conversation)
   const isNewChat = lastRenderedChatPhone !== conversation.phone
   lastRenderedChatPhone = conversation.phone
   renderMessages(messages, isNewChat)
@@ -1393,6 +1394,36 @@ async function ensureTemplatesLoaded() {
   }
   $('wcTemplateList').innerHTML = templatesCache.map((t) => `<option value="${esc(t.name)}"></option>`).join('')
   return templatesCache
+}
+
+// Opt-out: el cliente pidio no recibir mas mensajes automaticos (o Meta aviso
+// que dejo de recibir marketing). Insignia en el encabezado + boton para quitarla.
+function renderOptOut(convo) {
+  let btn = document.getElementById('chatOptOutBtn')
+  if (!btn) {
+    btn = document.createElement('button')
+    btn.id = 'chatOptOutBtn'
+    btn.type = 'button'
+    btn.className = 'btn chat-optout'
+    $('chatSub').insertAdjacentElement('afterend', btn)
+  }
+  const on = Boolean(convo.optOut)
+  btn.textContent = on ? 'No escribir (activo) · quitar' : 'Marcar: no escribir'
+  btn.classList.toggle('is-on', on)
+  btn.title = on
+    ? 'Este cliente pidió no recibir mensajes automáticos (remarketing, recordatorios, masivos). Tocá para quitarlo.'
+    : 'Frena remarketing, recordatorios y masivos para este cliente.'
+  btn.onclick = async () => {
+    try {
+      await api('/conversations/' + encodeURIComponent(state.selectedPhone) + '/opt-out', {
+        method: 'POST',
+        body: JSON.stringify({ optOut: !on }),
+      })
+    } catch (err) {
+      showError(err)
+    }
+    loadChat()
+  }
 }
 
 function renderWindowStatus(convo) {
@@ -3393,6 +3424,27 @@ const updateSplitMinWordsDisplay = bindRangeDisplay('cfg_splitMinWords', 'cfg_sp
 const updateSplitGapMinDisplay = bindRangeDisplay('cfg_splitGapMin', 'cfg_splitGapMin_val', ' s')
 const updateSplitGapMaxDisplay = bindRangeDisplay('cfg_splitGapMax', 'cfg_splitGapMax_val', ' s')
 
+// Calidad del numero de WhatsApp (solo lectura) + interruptor de la guardia.
+function renderQualityInfo(s) {
+  const q = s.whatsappQuality
+  const lines = []
+  lines.push(q ? `Número: ${q.event || '-'}${q.currentLimit ? ' · límite ' + q.currentLimit : ''} (${q.at ? new Date(q.at).toLocaleString() : ''})` : 'Meta todavía no avisó cambios de calidad del número.')
+  const tq = s.templateQuality || {}
+  for (const [name, v] of Object.entries(tq)) lines.push(`Plantilla ${name}: ${v.score || '-'}${v.previous ? ' (antes ' + v.previous + ')' : ''}`)
+  const ts = s.templateStatus || {}
+  for (const [name, v] of Object.entries(ts)) lines.push(`Plantilla ${name}: estado ${v.event || '-'}`)
+  $('cfg_qualityInfo').textContent = lines.join('\n')
+  $('cfg_qualityGuard').checked = s.qualityGuardActive === true
+}
+
+$('cfg_qualityGuard')?.addEventListener('change', async () => {
+  try {
+    await api('/settings', { method: 'POST', body: JSON.stringify({ qualityGuardActive: $('cfg_qualityGuard').checked }) })
+  } catch (err) {
+    showError(err)
+  }
+})
+
 async function loadSettings() {
   let s
   try { s = await api('/settings') } catch { return }
@@ -3415,6 +3467,7 @@ async function loadSettings() {
   $('cfg_splitGapMax').value = (s.splitGapMaxMs ?? 9500) / 1000
   $('cfg_audioEnabled').checked = s.audioReplyEnabled !== false
   $('cfg_remarketingEnabled').checked = s.remarketingEnabled !== false
+  renderQualityInfo(s)
   $('cfg_remarketingHourStart').value = s.remarketingHourStart ?? 8
   $('cfg_remarketingHourEnd').value = s.remarketingHourEnd ?? 21
   $('cfg_shippingTemplateName').value = s.shippingTemplateName || ''

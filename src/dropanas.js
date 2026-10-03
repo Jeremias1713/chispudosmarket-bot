@@ -18,6 +18,7 @@ const { listSessions } = require('./state');
 // en cada archivo con reglas levemente distintas.
 const { foldName, compareNames } = require('./nameMatch');
 const { normalizePhone } = require('./dropanasApi');
+const { matchOrder } = require('./orderMatch');
 const { canAdvanceToEnCaminoOnGuia } = require('./stageRules');
 
 // Encuentra el indice de la primera columna del header cuyo nombre (ya
@@ -51,6 +52,9 @@ function parseExportBuffer(buffer) {
   // columna en USD que tiene el mismo prefijo.
   const idxTotalVentaBs = findCol(header, 'total venta bs');
   const idxBodegaDestino = findCol(header, 'bodega destino');
+  // Opcionales: ayudan a cruzar el pedido con la conversacion (orderMatch.js).
+  const idxCedula = findCol(header, 'cedula', 'documento', 'identificacion');
+  const idxTelefono = findCol(header, 'telefono', 'celular');
 
   if (idxGuia === -1 || idxCliente === -1) {
     throw new Error('No reconozco las columnas de guia/cliente en este Excel. Revisa que sea la exportacion de pedidos de Dropanas.');
@@ -67,6 +71,8 @@ function parseExportBuffer(buffer) {
       estadoPedido: idxEstado !== -1 ? String(r[idxEstado] || '').trim() : '',
       totalVentaBs: idxTotalVentaBs !== -1 ? r[idxTotalVentaBs] : '',
       bodegaDestino: idxBodegaDestino !== -1 ? String(r[idxBodegaDestino] || '').trim() : '',
+      ...(idxCedula !== -1 ? { cedula: String(r[idxCedula] || '').replace(/\D/g, '') } : {}),
+      ...(idxTelefono !== -1 ? { telefono: normalizePhone(r[idxTelefono]) } : {}),
     }));
 }
 
@@ -113,84 +119,28 @@ function candidateInfo(s) {
 // pero "Ana" adentro de "Ana Maria" NO). Cualquier otra coincidencia parcial
 // cae en 'parcial'/'ambiguo': se sugiere, nunca se auto-marca.
 function matchRow(row) {
-  // La API sí trae teléfono. Es una evidencia mucho más fuerte que comparar
-  // nombres: se usa primero y solo se cae al algoritmo histórico de nombres
-  // cuando el teléfono falta o no corresponde a una conversación única.
-  const apiPhone = normalizePhone(row.telefono);
-  if (apiPhone) {
-    const byPhone = candidateSessions(row.guia).filter((session) => {
-      const sessionPhone = normalizePhone(session.phone || session.card?.telefono);
-      return sessionPhone && sessionPhone === apiPhone;
-    });
-    if (byPhone.length === 1) {
-      const session = byPhone[0];
-      return {
-        matchType: 'exacto',
-        matchEvidence: 'telefono',
-        phone: session.phone,
-        matchedName: session.card?.nombre || session.name,
-        shippingStage: session.stage,
-        // BUG encontrado: esto exigia session.stage === 'esperando_guia'
-        // exacto, pero esa etapa SOLO se fija a mano desde el panel (ver
-        // classifier.js) -- un pedido recien vendido normalmente se queda
-        // en "vendido" hasta que se le carga la guia, nunca pasa por
-        // "esperando_guia" a menos que alguien lo marque asi manualmente.
-        // Con este chequeo tal como estaba, el aviso automatico de "guia
-        // recien generada" (webhook order.guide_generated,
-        // DROPANAS_AUTO_SEND_ENABLED=true) nunca se disparaba en el uso
-        // real, aunque el resto de la logica (encontrar el telefono
-        // correcto) funcionara perfecto. Se usa el mismo criterio
-        // compartido que ya decide si una guia puede avanzar el pedido a
-        // "en_camino" (canAdvanceToEnCaminoOnGuia, stageRules.js) --
-        // "vendido" o "esperando_guia" son igual de validos para recibir
-        // la primera guia de un pedido.
-        sendEligible: canAdvanceToEnCaminoOnGuia(session.stage),
-        candidates: [candidateInfo(session)],
-      };
-    }
-    if (byPhone.length > 1) {
-      return { matchType: 'ambiguo', matchEvidence: 'telefono_duplicado', candidates: byPhone.map(candidateInfo) };
-    }
-  }
-  const target = foldName(row.cliente);
-  if (!target) return { matchType: 'sin_match', candidates: [] };
-
-  const candidates = candidateSessions(row.guia);
-  const exactas = [];
-  const parciales = [];
-  for (const s of candidates) {
-    const nombre = s.card?.nombre || s.name || '';
-    if (!foldName(nombre)) continue;
-    const resultado = compareNames(nombre, row.cliente);
-    if (resultado === 'exacto') exactas.push(s);
-    else if (resultado === 'parcial') parciales.push(s);
-  }
-
-  if (exactas.length === 1) {
-    const s = exactas[0];
+  // Un solo cruce, compartido con dropanasAuto (orderMatch.js): orden,
+  // referencia, guia, telefono (incluido el que el cliente dio en el chat),
+  // cedula y nombre. Los nombres de campos de la respuesta se mantienen para
+  // no romper el panel ni los tests.
+  const m = matchOrder(row, candidateSessions(row.guia));
+  if (m.matchType === 'exacto') {
+    const session = m.session;
     return {
       matchType: 'exacto',
-      phone: s.phone,
-      matchedName: s.card?.nombre || s.name,
-      shippingStage: s.stage,
-      // Mismo arreglo que en el match por telefono, mas arriba: "vendido" o
-      // "esperando_guia" son igual de validos para recibir la primera guia.
-      sendEligible: canAdvanceToEnCaminoOnGuia(s.stage),
-      candidates: [candidateInfo(s)],
+      matchEvidence: m.evidence,
+      phone: session.phone,
+      matchedName: session.card?.nombre || session.name,
+      shippingStage: session.stage,
+      // "vendido" o "esperando_guia" son igual de validos para recibir la
+      // primera guia de un pedido (canAdvanceToEnCaminoOnGuia, stageRules.js).
+      sendEligible: canAdvanceToEnCaminoOnGuia(session.stage),
+      candidates: [candidateInfo(session)],
     };
   }
-
-  // Dos o mas coincidencias "exactas" a la vez (mismo nombre en dos
-  // conversaciones distintas) tambien requieren eleccion manual: no hay
-  // forma de saber sola cual de las dos es.
-  if (exactas.length > 1) {
-    return { matchType: 'ambiguo', candidates: exactas.map(candidateInfo) };
+  if (m.matchType === 'ambiguo') {
+    return { matchType: 'ambiguo', matchEvidence: m.evidence, candidates: m.candidates };
   }
-
-  if (parciales.length) {
-    return { matchType: 'ambiguo', candidates: parciales.map(candidateInfo) };
-  }
-
   return { matchType: 'sin_match', candidates: [] };
 }
 

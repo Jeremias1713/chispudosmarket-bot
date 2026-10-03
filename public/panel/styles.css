@@ -2504,3 +2504,5 @@ input:focus, textarea:focus, select:focus { border-color: var(--view); }
 .do-edit-remove { padding: 2px 8px; }
 
 .bubble-voice { display: block; font-size: 11px; margin-top: 4px; opacity: .8; }
+.chat-optout { margin-left: 8px; font-size: 11px; padding: 2px 8px; }
+.chat-optout.is-on { background: #fde8e8; color: #9b1c1c; border-color: #f5b5b5; }

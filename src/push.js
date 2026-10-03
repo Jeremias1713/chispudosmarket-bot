@@ -177,4 +177,15 @@ function notifySale(phone, session) {
   });
 }
 
-module.exports = { getPublicKey, addSubscription, removeSubscription, sendToAll, notifySale, testSaleNotifyWhatsapp, listSubscriptions };
+// Alerta al administrador (Jere) por push. Nunca rompe el flujo que la llama:
+// cualquier error se registra y se traga.
+async function notifyAdmin(title, body) {
+  try {
+    return await sendToAll({ title, body, tag: `admin-${String(title).slice(0, 40)}`, url: '/panel/' });
+  } catch (err) {
+    console.error('Error en notifyAdmin:', err.message);
+    return { sent: 0, total: 0 };
+  }
+}
+
+module.exports = { notifyAdmin, getPublicKey, addSubscription, removeSubscription, sendToAll, notifySale, testSaleNotifyWhatsapp, listSubscriptions };

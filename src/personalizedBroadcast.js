@@ -8,7 +8,8 @@
 // No inventa a quien mandarle nada: si falta el telefono en una fila, esa
 // fila se marca como invalida y no se manda (se lo avisa antes de confirmar).
 const { sendTemplateWithSnapshot } = require('./templateSend');
-const { appendMessage } = require('./state');
+const { appendMessage, listSessions } = require('./state');
+const { canSendAutomatic, reserveAutomatic } = require('./outboundGuard');
 
 function foldHeader(s) {
   return String(s || '')
@@ -91,7 +92,7 @@ function sleep(ms) {
 
 // Espera entre cada envio (mismo criterio que broadcasts.js/dropanas.js) para
 // no mandar todo de una y que WhatsApp lo tome como spam.
-const DELAY_MS = 1200;
+const DELAY_MS = 2000;
 
 // order: array con el orden de variables de la plantilla, ej.
 // ['nombre','apellido','monto'] si la plantilla aprobada tiene {{1}}=nombre,
@@ -99,6 +100,7 @@ const DELAY_MS = 1200;
 // que devuelve parsePersonalizedList (telefono/nombre/apellido/monto).
 async function sendPersonalized({ templateName, languageCode, order, rows }) {
   const results = [];
+  const byPhone = new Map(listSessions().map((x) => [x.phone, x]));
   for (const row of rows) {
     if (!row.telefono) {
       results.push({ fila: row.fila, telefono: row.telefono, ok: false, error: 'Sin telefono' });
@@ -114,7 +116,14 @@ async function sendPersonalized({ templateName, languageCode, order, rows }) {
       const v = String(row[campo] ?? '').trim();
       return v || '-';
     });
+    const session = byPhone.get(String(row.telefono).replace(/^\+/, '')) || null;
+    const guard = canSendAutomatic(session, 'broadcast');
+    if (!guard.ok) {
+      results.push({ fila: row.fila, telefono: row.telefono, ok: false, skipped: true, reason: guard.reason, error: `Omitido: ${guard.reason}` });
+      continue;
+    }
     try {
+      if (session) reserveAutomatic(session.phone, 'broadcast', new Date(), session);
       // FASE 2/5 (H06/H35): igual que en broadcasts.js/panel.js -- se usa el
       // armado unico (mismo que preview/prueba) y se guarda el snapshot +
       // wamid en el historial, ademas del string de siempre.
@@ -124,9 +133,13 @@ async function sendPersonalized({ templateName, languageCode, order, rows }) {
         languageCode: languageCode || 'es',
         values: params,
       });
-      appendMessage(row.telefono, 'human', `[plantilla masiva personalizada] ${templateName} (${params.join(', ')})`, {
-        template: { name: templateName, origin: 'broadcast', params, snapshot, wamid, status: 'sent' },
-      });
+      try {
+        appendMessage(row.telefono, 'human', `[plantilla masiva personalizada] ${templateName} (${params.join(', ')})`, {
+          template: { name: templateName, origin: 'broadcast', params, snapshot, wamid, status: 'sent' },
+        });
+      } catch (logErr) {
+        console.error('La plantilla masiva salio pero no se pudo guardar en el historial de', `…${String(row.telefono).slice(-4)}`, logErr.message);
+      }
       results.push({ fila: row.fila, telefono: row.telefono, ok: true, wamid });
     } catch (err) {
       const detail = err.response?.data?.error?.message || err.message;

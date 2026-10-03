@@ -139,6 +139,20 @@ const DEFAULTS = {
   // Mapeos editables producto del catálogo/bot -> ID real de DroPanas.
   // Si está vacío, dropanasOrderAutomation usa sus valores iniciales seguros.
   dropanasOrderMappings: [],
+  // Guardia de envios automaticos (src/outboundGuard.js): tope por cliente y
+  // por dia, horario de Caracas, y el texto del opt-out automatico.
+  maxAutoSendsPerDay: 2,
+  autoSendHourStart: 8,
+  autoSendHourEnd: 20,
+  // Se prende solo cuando Meta avisa que bajo la calidad del numero; lo apaga
+  // Jere desde el panel. Frena remarketing, recordatorios y masivos.
+  qualityGuardActive: false,
+  whatsappQuality: null,
+  templateQuality: {},
+  templateStatus: {},
+  // El segundo recordatorio de remarketing (a las 5 h) queda apagado.
+  remarketing5hEnabled: false,
+  optOutAutoReply: 'Listo, no te enviaremos más mensajes automáticos. Si necesitas algo de tu pedido, escríbenos por aquí cuando quieras.',
 };
 
 function load() {
