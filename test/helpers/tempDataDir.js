@@ -16,6 +16,9 @@ function setupTempDataDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), (prefix || 'chispudos-test-') + '-'));
   fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
   process.env.BOT_DATA_DIR = dir;
+  // Los tests corren a cualquier hora: el horario de envios automaticos
+  // (outboundGuard) se desactiva salvo que un test lo pruebe (borra esta var).
+  process.env.AUTO_SEND_ANYTIME = '1';
   return dir;
 }
 
