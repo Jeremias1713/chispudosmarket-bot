@@ -495,7 +495,7 @@ function webhookOrder(payload) {
         : 'desconocida';
   return {
     dropanasId: String(orderId),
-    guia: String(guide).trim(),
+    guia: String(guide || '').trim(),
     cliente: String(client.nombre || '').trim(),
     telefono: api.normalizePhone(client.telefono),
     ciudad: '',

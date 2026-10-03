@@ -15,6 +15,12 @@ test('envía encabezados compatibles con la API sin perder Bearer ni Accept', ()
 });
 const monitor = require('../src/dropanasMonitor');
 
+test('un webhook de estado sin número de guía no inventa una guía undefined', () => {
+  const order = monitor.webhookOrder({ evento: 'order.delivered', datos: { orden_id: 123 } });
+  assert.equal(order.guia, '');
+  assert.equal(order.estadoPedido, 'Entregado');
+});
+
 after(() => cleanup(dataDir));
 
 const config = {
