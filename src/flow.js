@@ -33,7 +33,13 @@ const {
   buildDirectAgencyMessage,
   getDataRequestTemplate,
 } = require('./ai');
-const { missingOrderData, missingDataMessage, looksLikeOrderSummary } = require('./orderDataGuard');
+const { missingOrderData, missingDataMessage, looksLikeOrderSummary, mentionsAllDataFields } = require('./orderDataGuard');
+
+// Etapas de venta que solo se pueden alcanzar por el clasificador si ya estan
+// nombre, cedula y telefono.
+const NEEDS_DATA_STAGES = ['vendido', 'vendido_fecha_futura', 'esperando_guia', 'esperando_retiro'];
+// El cliente acepta lo que se le propuso (por ejemplo la agencia).
+const AFFIRM_RE = /^\s*(?:s[ií]+\b|ok+\b|okey\b|dale\b|listo\b|perfecto\b|claro\b|de acuerdo\b|est[aá] bien\b|me queda\b|me sirve\b|bueno\b|excelente\b|genial\b|esa\b|va\b|👍)|\bme queda bien\b|\bme sirve\b/i;
 const { classifyConversation } = require('./classifier');
 const { matchTrigger, findProduct } = require('./catalog');
 const { detectOptOut } = require('./optOut');
@@ -849,16 +855,23 @@ async function processReply(from) {
     // Red de seguridad: si el modelo intenta CERRAR el pedido sin que esten
     // los tres datos (nombre, cedula, telefono) realmente en la conversacion,
     // se descarta el cierre y se pide lo que falta (ver orderDataGuard.js).
+    // Ademas: un mensaje que menciona Tealca + pago + guia pero NO es un
+    // resumen (por ejemplo, el bot explicando "como hay que pagar" a mitad de
+    // la charla) antes marcaba la venta como cerrada sin tener los datos. Eso
+    // paso de verdad (chat marcado "vendido" sin nombre, cedula ni telefono).
+    // Ahora ese mensaje se deja pasar tal cual, pero NO cuenta como cierre
+    // mientras falten datos (ver closeMissing en isNewClose).
     let blockedClose = false;
-    if (!orderClosed && isClosingMessage(reply) && looksLikeOrderSummary(reply)) {
-      const missingData = missingOrderData({
+    let closeMissing = [];
+    if (!orderClosed && isClosingMessage(reply)) {
+      closeMissing = missingOrderData({
         card: session.card,
         history,
         userText,
         requestMarker: looksLikeEmptyDataRequest,
       });
-      if (missingData.length) {
-        finalReply = dataAlreadyRequested ? missingDataMessage(missingData) : getDataRequestTemplate();
+      if (closeMissing.length && looksLikeOrderSummary(reply)) {
+        finalReply = dataAlreadyRequested ? missingDataMessage(closeMissing) : getDataRequestTemplate();
         blockedClose = true;
       }
     }
@@ -874,7 +887,7 @@ async function processReply(from) {
     // alguna de estas presentaciones?" como si siguiera vendiendo).
     const isRepurchase = isRepurchaseClose({
       orderClosed,
-      closingReal: !blockedClose && isClosingMessage(reply) && looksLikeOrderSummary(reply),
+      closingReal: !blockedClose && isClosingMessage(reply) && looksLikeOrderSummary(reply) && closeMissing.length === 0,
       session,
       history,
       reply,
@@ -933,11 +946,28 @@ async function processReply(from) {
       formFollowUpSent = true;
     }
 
+    // Red de seguridad: pedir los datos es una instruccion al modelo y a veces
+    // no lo hace (el cliente acepta la agencia y la charla sigue sin pedirle
+    // nombre, cedula y telefono). Si ya se resolvio la agencia (el cliente
+    // acepto lo que el bot le propuso) o el bot explico el pago/guia sin tener
+    // los datos, y todavia no se pidieron, los pedimos nosotros con la
+    // plantilla fija.
+    const botAskedData = looksLikeEmptyDataRequest(reply) || mentionsAllDataFields(finalReply);
+    if (!dataAlreadyRequested && !botAskedData && !blockedClose && !formFollowUpSent && !orderClosed) {
+      const lastBot = [...(history || [])].reverse().find((m) => m.role !== 'user');
+      const agencyAccepted = lastBot && /agencia/i.test(String(lastBot.content || '')) && /\?\s*$/.test(String(lastBot.content || '').trim()) && AFFIRM_RE.test(String(userText || ''));
+      if (agencyAccepted || closeMissing.length) {
+        await sleep(randomGap());
+        await sendReply(from, getDataRequestTemplate());
+        formFollowUpSent = true;
+      }
+    }
+
     const patch = { lastAssistantText: finalReply };
-    if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || formFollowUpSent || blockedClose)) {
+    if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || botAskedData || formFollowUpSent || blockedClose)) {
       patch.orderDataRequested = true;
     }
-    const isNewClose = !orderClosed && !blockedClose && isClosingMessage(reply);
+    const isNewClose = !orderClosed && !blockedClose && isClosingMessage(reply) && closeMissing.length === 0;
     if (isNewClose) {
       patch.orderClosed = true;
       // El cierre del pedido ES la venta: la marcamos como "vendido" en el
@@ -1016,7 +1046,17 @@ async function processReply(from) {
         // implicaria retroceder un rango logistico ya alcanzado; "devolucion"
         // es la unica excepcion (ver esa funcion), porque es evidencia nueva
         // legitima sin importar en que etapa logistica estaba el pedido.
-        const stageChangeAllowed = !current.stageLocked && isAllowedClassifierTransition(current, classification.stage);
+        let stageChangeAllowed = !current.stageLocked && isAllowedClassifierTransition(current, classification.stage);
+        // El clasificador por IA tampoco puede dar por vendido un chat al que
+        // todavia le faltan nombre, cedula o telefono (paso de verdad: lo
+        // marco "vendido" porque el cliente "confirmo que lo quiere").
+        if (stageChangeAllowed && NEEDS_DATA_STAGES.includes(classification.stage) && !SOLD_STAGES.includes(current.stage)) {
+          const stillMissing = missingOrderData({ card: mergedCard, history: current.history, userText: '', requestMarker: looksLikeEmptyDataRequest });
+          if (stillMissing.length) {
+            stageChangeAllowed = false;
+            console.log(`flow: clasificador propuso ${classification.stage} para ${from} pero faltan datos (${stillMissing.join(', ')}); no se mueve la etapa`);
+          }
+        }
         if (stageChangeAllowed) {
           classPatch.stage = classification.stage;
           classPatch.stageReason = classification.razon || null;
