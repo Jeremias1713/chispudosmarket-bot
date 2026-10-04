@@ -1736,15 +1736,139 @@ function validateNumericSettings(body) {
   return { patch, errors };
 }
 
+// FASE 7: ajustes nuevos (todos con su propio interruptor, apagados por
+// defecto). Se validan aca porque la ruta de abajo solo guarda campos conocidos.
+// Un campo que llega vacio/null se guarda como null (= "Jere todavia no lo cargo"),
+// asi el calendario y la fecha limite siguen apagados hasta que haya dato real.
+const FASE7_BOOLS = [
+  'orderConfirmEnabled', 'calendarEnabled', 'dispatchOnSaturday', 'tealcaStorageBusinessDays',
+  'quickPickupCouponEnabled', 'lastNoticeEnabled',
+];
+const FASE7_NUMS = {
+  orderConfirmDelayMin: { min: 0, max: 240 },
+  orderConfirmNearCutoffDelayMin: { min: 0, max: 240 },
+  orderConfirmReminderAfterH: { min: 1, max: 48 },
+  orderConfirmExpireAfterH: { min: 1, max: 72 },
+  dispatchCutoffHour: { min: 0, max: 23, nullable: true },
+  dispatchCutoffMinute: { min: 0, max: 59 },
+  tealcaStorageDays: { min: 1, max: 60, nullable: true },
+  quickPickupHours: { min: 1, max: 720 },
+  quickPickupDiscountPercent: { min: 1, max: 90 },
+  quickPickupCouponValidDays: { min: 1, max: 365 },
+  lastNoticeHour: { min: 0, max: 23 },
+};
+const FASE7_TEXTS = ['pickupDeadlineTemplateName', 'pickupDeadlineTemplateLanguage', 'lastNoticeTemplateName', 'lastNoticeTemplateLanguage'];
+
+function validateFase7Settings(body) {
+  const patch = {};
+  const errors = [];
+  for (const f of FASE7_BOOLS) {
+    if (body[f] === undefined) continue;
+    patch[f] = body[f] === null && f === 'dispatchOnSaturday' ? null : Boolean(body[f]);
+  }
+  for (const [f, rule] of Object.entries(FASE7_NUMS)) {
+    if (body[f] === undefined) continue;
+    if ((body[f] === null || body[f] === '') && rule.nullable) { patch[f] = null; continue; }
+    const n = Number(body[f]);
+    if (!Number.isInteger(n) || n < rule.min || n > rule.max) {
+      errors.push(`"${f}" tiene que ser un entero entre ${rule.min} y ${rule.max} (recibido: ${JSON.stringify(body[f])}).`);
+      continue;
+    }
+    patch[f] = n;
+  }
+  for (const f of FASE7_TEXTS) {
+    if (body[f] === undefined) continue;
+    const t = String(body[f] || '').trim();
+    patch[f] = t || (f.endsWith('Language') ? 'es' : null);
+  }
+  if (body.holidays !== undefined) {
+    const list = Array.isArray(body.holidays) ? body.holidays : String(body.holidays || '').split(/[\s,;]+/);
+    const clean = list.map((t) => String(t).trim()).filter(Boolean);
+    const bad = clean.filter((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d));
+    if (bad.length) errors.push(`"holidays": fechas con formato invalido (usa AAAA-MM-DD): ${bad.join(', ')}.`);
+    else patch.holidays = [...new Set(clean)].sort();
+  }
+  if (body.transitDaysDefault !== undefined) {
+    const min = Number(body.transitDaysDefault?.min);
+    const max = Number(body.transitDaysDefault?.max);
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) errors.push('"transitDaysDefault" necesita min >= 1 y max >= min.');
+    else patch.transitDaysDefault = { min, max };
+  }
+  return { patch, errors };
+}
+
+// Vista previa (y, solo con confirm:true, guardado) de los dias de transito
+// reales por region, calculados con los pedidos que ya llegaron.
+router.post('/api/calendar/recalculate-transit', (req, res) => {
+  const transitStats = require('../transitStats');
+  const settings = settingsStore.getSettings();
+  const result = transitStats.compute(listSessions(), settings);
+  if (req.body?.confirm === true) {
+    settingsStore.updateSettings({ transitDaysByRegion: result.suggested });
+    return res.json({ ok: true, saved: true, ...result });
+  }
+  res.json({ ok: true, saved: false, ...result });
+});
+
+// Fase 7A: pedidos que todavia esperan la confirmacion del cliente.
+router.get('/api/order-confirm/unconfirmed', (_req, res) => {
+  const orderConfirm = require('../orderConfirm');
+  const rows = listSessions()
+    .filter((s) => s.orderConfirm && s.orderConfirm.status !== 'confirmed' && orderConfirm.isGated(s))
+    .map((s) => ({ phone: s.phone, name: s.name || s.card?.nombre || '', status: s.orderConfirm.status, sentAt: s.orderConfirm.sentAt || null, scheduledFor: s.orderConfirm.scheduledFor || null }));
+  res.json({ unconfirmed: rows });
+});
+
+// "Marcar confirmado por telefono": el pedido se sube igual que si el cliente tocara el boton.
+router.post('/api/order-confirm/:phone/confirm', (req, res) => {
+  const phone = String(req.params.phone);
+  if (!getSession(phone)?.soldAt) return res.status(404).json({ error: 'No hay una venta para ese telefono.' });
+  const changed = require('../orderConfirm').confirm(phone, 'panel_telefono');
+  res.json({ ok: true, changed });
+});
+
+// Fase 7E: reporte de devoluciones (solo lectura). ?from=AAAA-MM-DD&to=AAAA-MM-DD&format=csv
+router.get('/api/reports/returns', (req, res) => {
+  const ymd = /^\d{4}-\d{2}-\d{2}$/;
+  const from = ymd.test(String(req.query.from || '')) ? String(req.query.from) : undefined;
+  const to = ymd.test(String(req.query.to || '')) ? String(req.query.to) : undefined;
+  const returnsReport = require('../returnsReport');
+  const report = returnsReport.compute(listSessions(), { from, to });
+  if (req.query.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="devoluciones.csv"');
+    return res.send(returnsReport.toCsv(report));
+  }
+  res.json(report);
+});
+
+// Fase 7D: lista "Llamar hoy" y marca "Contactado hoy" (con ella el ultimo aviso no se manda ese dia).
+router.get('/api/last-notice/call-today', (_req, res) => {
+  res.json({ rows: require('../lastNotice').callToday(listSessions()) });
+});
+router.post('/api/last-notice/:phone/contacted', (req, res) => {
+  const phone = String(req.params.phone);
+  if (!getSession(phone)?.stage) return res.status(404).json({ error: 'No existe esa conversacion.' });
+  const s = require('../lastNotice').setPhoneContact(phone, req.body?.note);
+  res.json({ ok: true, phoneContactAt: s.phoneContactAt });
+});
+
 router.post('/api/settings', (req, res) => {
   const body = req.body || {};
+  const f7 = validateFase7Settings(body);
+  if (f7.errors.length) return res.status(400).json({ error: 'Configuracion invalida: ' + f7.errors.join(' ') });
   // FASE 1 (H13): se valida primero; si algo no pasa, se corta aca con 400
   // y no se toca settings.json (ni siquiera los campos de texto de abajo).
   const { patch: numericPatch, errors } = validateNumericSettings(body);
   if (errors.length) {
     return res.status(400).json({ error: 'Configuracion invalida: ' + errors.join(' ') });
   }
-  const patch = { ...numericPatch };
+  const patch = { ...numericPatch, ...f7.patch };
+  // Fase 7A: al prender la confirmacion se guarda desde cuando rige; las ventas
+  // anteriores no se bloquean (ver orderConfirm.isGated).
+  if (f7.patch.orderConfirmEnabled === true && !settingsStore.getSettings().orderConfirmActivatedAt) {
+    patch.orderConfirmActivatedAt = new Date().toISOString();
+  }
   const fields = [
     'businessName',
     'welcomeMessage',
