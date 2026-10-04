@@ -29,6 +29,14 @@ const TIME_ZONE = 'America/Caracas';
 const LAST_HOUR = 19;
 const CONFIRMED_MAX_REMINDERS = 3;
 const REMINDER_DAYS = [1, 3, 5];
+
+// Fase 7C/7D: si Jere cargo los dias de guarda de Tealca y el ultimo aviso esta
+// prendido, el recordatorio del dia 5 lo reemplaza el ULTIMO AVISO (lastNotice),
+// que sale la vispera de la fecha limite.
+function reminderDays(session, settings) {
+  const replaced = settings.lastNoticeEnabled === true && require('./pickupDeadline').deadlineFor(session, settings);
+  return replaced ? [1, 3] : REMINDER_DAYS;
+}
 const MAX_FAILURES_PER_DAY = 3;
 const OFFICE_STATUSES = new Set(['en oficina', 'en agencia', 'listo para retirar']);
 const DP_GUIDE = /^DP(\d+)$/i;
@@ -99,11 +107,12 @@ function eligible(session, settings, now = new Date(), confirmation = null) {
   if (confirmation !== 'en_oficina' && !session.arrivalNotifiedAt) return false;
   const anchor = anchorDate(session);
   if (!anchor) return false;
-  const index = REMINDER_DAYS.indexOf(daysBetween(anchor, today));
+  const days = reminderDays(session, settings);
+  const index = days.indexOf(daysBetween(anchor, today));
   if (index === -1) return false;
   const count = reminderCount(session);
-  // Maximo 3; si se perdio un dia anterior, este igual sale (no se recupera el perdido).
-  if (count >= CONFIRMED_MAX_REMINDERS || count > index) return false;
+  // Maximo 3 (2 si el dia 5 lo reemplaza el ultimo aviso); si se perdio un dia anterior, este igual sale.
+  if (count >= days.length || count > index) return false;
   if (clientIsTalking(session, now)) return false;
   return true;
 }
@@ -192,8 +201,15 @@ async function sendReminder(session, settings, now = new Date(), deps = defaultD
   const guard = canSendAutomatic(session, 'pickup_reminder', now, settings);
   if (!guard.ok) return { phone: session.phone, sent: false, reason: guard.reason };
   const values = placeholderValues(session);
-  const params = [values.nombre, values.producto, values.guia, values.monto];
-  const templateName = settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca';
+  // Fase 7C: con plantilla de fecha limite aprobada y fecha conocida, el
+  // recordatorio dice hasta cuando puede retirar. Sin eso, la de siempre.
+  const limite = require('./pickupDeadline').deadlineText(session, settings);
+  const useDeadline = Boolean(settings.pickupDeadlineTemplateName && limite);
+  const params = useDeadline
+    ? [values.nombre, values.producto, values.agencia, limite]
+    : [values.nombre, values.producto, values.guia, values.monto];
+  const templateName = useDeadline ? settings.pickupDeadlineTemplateName : (settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca');
+  const templateLanguage = useDeadline ? (settings.pickupDeadlineTemplateLanguage || 'es') : (settings.pickupTemplateLanguage || 'es');
   const previousCount = reminderCount(session);
   // La marca va ANTES de enviar. Si este guardado falla, se propaga el error y
   // NO se manda nada.
@@ -209,7 +225,7 @@ async function sendReminder(session, settings, now = new Date(), deps = defaultD
     ({ wamid, snapshot } = await deps.sendTemplateWithSnapshot({
       to: session.phone,
       templateName,
-      languageCode: settings.pickupTemplateLanguage || 'es',
+      languageCode: templateLanguage,
       values: params,
     }));
   } catch (error) {

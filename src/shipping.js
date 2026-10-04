@@ -25,6 +25,7 @@ const { sendImageByLink } = require('./whatsapp');
 const { sendTemplateWithSnapshot } = require('./templateSend');
 const { sendRawReply } = require('./flow');
 const { getSettings } = require('./settings');
+const calendar = require('./calendar');
 const { isWindowOpen } = require('./whatsappWindow');
 const { loadProducts, findProduct } = require('./catalog');
 const { canSendAutomatic, reserveAutomatic } = require('./outboundGuard');
@@ -185,7 +186,12 @@ async function maybeNotifyShipping(phone, session) {
     }
 
     if (abierta) {
-      const texto = fillPlaceholders(settings.shippingFreeText || DEFAULT_FREE_TEXT, values);
+      let texto = fillPlaceholders(settings.shippingFreeText || DEFAULT_FREE_TEXT, values);
+      // Fase 7B: rango de llegada calculado por codigo (solo texto libre; la
+      // plantilla guia_del_pedido no se toca). Si el calendario no esta
+      // configurado, el texto queda como antes.
+      const fechas = calendar.datesForSession({ ...s, shippingNotifiedAt: new Date().toISOString() }, new Date());
+      if (fechas) texto = `${texto} Llegaría ${fechas.rangeText} (estimado).`;
       await sendRawReply(phone, texto);
     } else {
       // Orden de los parametros de la plantilla "guia_del_pedido": nombre,
@@ -262,7 +268,10 @@ async function maybeNotifyArrival(phone, session) {
 
   try {
     if (abierta) {
-      const texto = arrivalText(settings.arrivalFreeText || DEFAULT_ARRIVAL_FREE_TEXT, values);
+      let texto = arrivalText(settings.arrivalFreeText || DEFAULT_ARRIVAL_FREE_TEXT, values);
+      // Fase 7C: fecha limite de retiro (solo si Jere cargo los dias de guarda de Tealca).
+      const limite = require('./pickupDeadline').deadlineText({ ...s, arrivalNotifiedAt: new Date().toISOString() }, settings);
+      if (limite) texto += ` Tienes hasta ${limite} para retirarlo, después Tealca lo devuelve.`;
       await sendRawReply(phone, texto);
     } else {
       // Misma plantilla de "ya llego, ya lo podes retirar" que usa el
@@ -303,7 +312,7 @@ async function notifyStatusTemplate(phone, session, options) {
   // ventana WhatsApp solo acepta plantillas aprobadas.
   if (options.freeText && isWindowOpen(s)) {
     try {
-      await require('./flow').sendRawReply(phone, fillPlaceholders(options.freeText, values));
+      await require('./flow').sendRawReply(phone, fillPlaceholders(options.freeText, values) + (options.freeTextSuffix ? options.freeTextSuffix(s, phone) : ''));
     } catch (err) {
       const detail = err.response?.data?.error?.message || err.message;
       console.error(`No se pudo mandar el mensaje de ${options.marker} a`, phone, detail);
@@ -336,10 +345,33 @@ async function notifyStatusTemplate(phone, session, options) {
 const DEFAULT_DELIVERED_FREE_TEXT =
   '¡Hola {{nombre}}! 🙌 Vimos que ya retiraste tu pedido de {{producto}}. ¡Muchas gracias por tu compra! Si tienes cualquier duda sobre cómo tomarlo, aquí estamos para ayudarte. 😊';
 
+// Cupon si retiro rapido (dentro de quickPickupHours desde el aviso de llegada).
+// Se llama DESPUES de reservar el envio, asi no queda un cupon huerfano.
+function quickPickupCouponText(session, settings, now = new Date()) {
+  try {
+    if (settings.quickPickupCouponEnabled !== true || !session.arrivalNotifiedAt) return '';
+    const hours = (now - new Date(session.arrivalNotifiedAt)) / 3600000;
+    if (hours > Number(settings.quickPickupHours ?? 48)) return '';
+    const guia = String(session.card?.guia || '');
+    if (session.quickPickupCoupon && session.quickPickupCoupon.guia === guia) return '';
+    const coupon = require('./coupons').createQuickPickupCoupon({
+      phone: session.phone, discountPercent: settings.quickPickupDiscountPercent, validDays: settings.quickPickupCouponValidDays, now,
+    });
+    updateSession(session.phone, { quickPickupCoupon: { code: coupon.code, guia, createdAt: now.toISOString() } });
+    return ` Por retirarlo tan rápido te regalamos ${coupon.discountPercent}% de descuento en tu próxima compra con el código ${coupon.code} (válido ${settings.quickPickupCouponValidDays} días).`;
+  } catch (err) {
+    console.error('No se pudo crear el cupon de retiro rapido:', err.message);
+    return '';
+  }
+}
+
 function maybeNotifyDelivered(phone, session) {
   const settings = getSettings();
   return notifyStatusTemplate(phone, session, {
     freeText: settings.deliveredFreeText || DEFAULT_DELIVERED_FREE_TEXT,
+    // Fase 7C: cupon por retiro rapido, SOLO en texto libre (una plantilla de
+    // Utilidad no puede llevar promociones).
+    freeTextSuffix: (s, p) => quickPickupCouponText({ ...s, phone: p }, settings),
     marker: 'deliveredNotifiedAt',
     templateName: settings.deliveredTemplateName || 'pedido_entregado_gracias',
     languageCode: settings.deliveredTemplateLanguage || 'es',
@@ -414,6 +446,7 @@ async function testSend(phone, datos) {
 }
 
 module.exports = {
+  quickPickupCouponText,
   maybeNotifyShipping,
   maybeNotifyArrival,
   maybeNotifyDelivered,

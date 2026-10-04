@@ -952,6 +952,8 @@ async function createForPhone(phone, { automatic = false } = {}) {
     if (!config.uploadEnabled) throw new Error('La subida de pedidos está desactivada en el panel.');
     if (automatic && !config.autoCreateEnabled) return { skipped: true, reason: 'automatico_desactivado' };
     const session = getSession(phone);
+    // Fase 7A: la subida automatica espera la confirmacion del cliente (la manual del panel no).
+    if (automatic && !require('./orderConfirm').gate(session).ok) return { skipped: true, reason: 'esperando_confirmacion' };
     reference = referenceFor(phone, session.soldAt);
     const before = splitStoredOrder(session.dropanasOrder || null, reference).current || {};
     if (automatic) autoAttempts = (Number(before.autoAttempts) || 0) + 1;
@@ -1035,6 +1037,9 @@ function maybeCreate(phone) {
   if (!config.uploadEnabled || !config.autoCreateEnabled || !config.activatedAt) return;
   const session = getSession(phone);
   if (!session.soldAt || new Date(session.soldAt) < new Date(config.activatedAt)) return;
+  // Fase 7A: con la confirmacion activa, primero se le pregunta al cliente; la subida sale al confirmar.
+  const confirmation = require('./orderConfirm');
+  if (!confirmation.gate(session).ok) { confirmation.scheduleForClose(phone); return; }
   setImmediate(() => createForPhone(phone, { automatic: true }).catch((error) => {
     console.error(`Pedido DroPanas no creado para ${phone}:`, error.message);
   }));

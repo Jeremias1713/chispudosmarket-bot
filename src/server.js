@@ -297,6 +297,8 @@ if (require.main === module) {
     dropanasMonitor.startPendingRetry();
     dropanasOrderAutomation.startAutoRetry();
     pickupReminders.start();
+    require('./orderConfirm').start();
+    require('./lastNotice').start();
     require('./diskJanitor').start();
   });
 }
