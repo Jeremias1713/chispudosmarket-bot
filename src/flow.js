@@ -661,6 +661,16 @@ function normalizeCloseSummary(text) {
     .trim();
 }
 
+// ¿Lo ultimo que dijo el negocio (bot o persona desde el panel) fue pedirle al
+// cliente que confirme el envio / el retiro en agencia? Solo mira el ultimo
+// mensaje que NO es del cliente y exige que sea una pregunta.
+function askedToConfirmShipment(history) {
+  const last = [...(history || [])].reverse().find((m) => m.role !== 'user');
+  const text = String(last?.content || '');
+  if (!text.includes('?')) return false;
+  return /confirm|conforme|de acuerdo|est[aá]s? seguro/i.test(text) && /(envi|retir|agencia|tealca|recog)/i.test(text);
+}
+
 // Ultimo cierre que mando el bot en este chat: el guardado en la sesion o, en
 // chats anteriores a este campo, el ultimo mensaje del bot que parezca un cierre.
 function lastKnownCloseSummary(session, history) {
@@ -1001,7 +1011,19 @@ async function processReply(from) {
     if (!dataAlreadyRequested && (looksLikeEmptyDataRequest(reply) || botAskedData || formFollowUpSent || blockedClose)) {
       patch.orderDataRequested = true;
     }
-    const isNewClose = !orderClosed && !blockedClose && isClosingMessage(reply) && closeMissing.length === 0;
+    // Cierre por confirmacion: un humano (desde el panel) o el bot pregunto
+    // "¿confirmas que te lo enviemos / que lo retiras en la agencia?" y el
+    // cliente contesto que si. Antes la venta SOLO se cerraba si la respuesta
+    // del bot sonaba a mensaje de cierre; si el que preguntaba era una persona,
+    // la IA contestaba cualquier cosa y el chat se quedaba en "Negociando" con
+    // todos los datos ya cargados (caso real de Alfonso Rojas). Sigue exigiendo
+    // nombre, cedula y telefono completos.
+    const affirmClose = !orderClosed && !blockedClose && !isClosingMessage(reply)
+      && AFFIRM_RE.test(String(userText || ''))
+      && askedToConfirmShipment(history)
+      && missingOrderData({ card: session.card, history, userText, requestMarker: looksLikeEmptyDataRequest }).length === 0;
+    const isNewClose = !orderClosed && !blockedClose
+      && ((isClosingMessage(reply) && closeMissing.length === 0) || affirmClose);
     if (isNewClose) {
       patch.orderClosed = true;
       // El cierre del pedido ES la venta: la marcamos como "vendido" en el
@@ -1026,7 +1048,7 @@ async function processReply(from) {
       if (!session.soldAt) patch.soldAt = new Date().toISOString();
     }
     // En todo cierre (nuevo o recompra) se guarda el resumen para detectar el siguiente.
-    if (isNewClose || isRepurchase) patch.lastCloseSummary = String(reply).slice(0, 2000);
+    if ((isNewClose && !affirmClose) || isRepurchase) patch.lastCloseSummary = String(reply).slice(0, 2000);
     if (isRepurchase) Object.assign(patch, repurchasePatch(session, new Date().toISOString()));
     updateSession(from, patch);
     if (isNewClose && !session.stageLocked && !SOLD_STAGES.includes(session.stage)) {
