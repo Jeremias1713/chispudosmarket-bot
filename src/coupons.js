@@ -60,7 +60,56 @@ function deleteCoupon(id) {
   return next.length !== coupons.length;
 }
 
+// Fase 7C: cupon por retiro rapido. Codigo unico RETIRO-XXXXXX, ligado al
+// telefono del cliente y con vencimiento; se usa una sola vez.
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin 0/O/1/I para dictarlo sin errores
+
+function newCode(existing) {
+  for (let i = 0; i < 20; i += 1) {
+    const bytes = crypto.randomBytes(6);
+    const code = `RETIRO-${[...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('')}`;
+    if (!existing.some((c) => c.code === code)) return code;
+  }
+  throw new Error('No se pudo generar un codigo de cupon unico.');
+}
+
+function createQuickPickupCoupon({ phone, discountPercent, validDays, now = new Date() }) {
+  const coupons = loadCoupons();
+  const coupon = {
+    ...blankCoupon(),
+    code: newCode(coupons),
+    discountPercent: Number(discountPercent),
+    description: 'Retiro rapido',
+    kind: 'quick_pickup',
+    phone: String(phone),
+    expiresAt: new Date(now.getTime() + Number(validDays) * 86400000).toISOString(),
+    usedAt: null,
+  };
+  coupons.push(coupon);
+  saveCoupons(coupons);
+  return coupon;
+}
+
+// Valida (y, con redeem:true, consume) un cupon de retiro rapido: debe estar
+// activo, no vencido, sin usar y pertenecer al MISMO telefono.
+function redeemQuickPickup(code, phone, { redeem = true, now = new Date() } = {}) {
+  const coupons = loadCoupons();
+  const i = coupons.findIndex((c) => c.code === String(code || '').trim().toUpperCase() && c.kind === 'quick_pickup');
+  if (i === -1) return { ok: false, reason: 'no_existe' };
+  const c = coupons[i];
+  if (c.usedAt || c.active === false) return { ok: false, reason: 'ya_usado' };
+  if (c.expiresAt && new Date(c.expiresAt) < now) return { ok: false, reason: 'vencido' };
+  if (String(c.phone) !== String(phone)) return { ok: false, reason: 'otro_telefono' };
+  if (redeem) {
+    coupons[i] = { ...c, usedAt: now.toISOString(), active: false };
+    saveCoupons(coupons);
+  }
+  return { ok: true, coupon: coupons[i] };
+}
+
 module.exports = {
+  createQuickPickupCoupon,
+  redeemQuickPickup,
   listCoupons,
   createCoupon,
   updateCoupon,

@@ -11,7 +11,7 @@ const { getSettings } = require('./settings');
 const { updateSession } = require('./state');
 
 const MARKETING_KINDS = ['remarketing', 'pickup_reminder', 'broadcast'];
-const TRANSACTIONAL_KINDS = ['shipping', 'arrival', 'delivered', 'novelty', 'return_pending'];
+const TRANSACTIONAL_KINDS = ['shipping', 'arrival', 'delivered', 'novelty', 'return_pending', 'order_confirm', 'last_notice', 'return_reason'];
 const TIME_ZONE = 'America/Caracas';
 
 function caracasParts(now) {

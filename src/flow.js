@@ -47,6 +47,9 @@ const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
+const calendar = require('./calendar');
+const orderConfirm = require('./orderConfirm');
+const lastNotice = require('./lastNotice');
 const { SOLD_STAGES, isAllowedAutoTransition, isAllowedClassifierTransition, logisticRank } = require('./stageRules');
 const dropanasOrderAutomation = require('./dropanasOrderAutomation');
 
@@ -572,6 +575,26 @@ async function handleIncomingMessage(from, message, profileName) {
     appendMessage(from, 'user', `[${type || 'mensaje'}]`);
   }
 
+  // Fase 7: los botones propios del bot (confirmacion del pedido, "oc_...") se
+  // atienden con textos fijos: no pasan por la IA ni por el clasificador. El id
+  // llega en interactive.button_reply.id (botones del bot) o button.payload
+  // (botones de plantilla).
+  {
+    const buttonId = message.interactive?.button_reply?.id || message.button?.payload || '';
+    const lastNoticeId = lastNotice.buttonIdFrom(message);
+    if (/^oc_/.test(buttonId)) {
+      if (await orderConfirm.handleReply(from, buttonId)) return;
+    } else if (lastNoticeId) {
+      if (await lastNotice.handleReply(from, lastNoticeId)) return;
+    } else if (rawText && type === 'text' && await lastNotice.captureReason(from, rawText)) {
+      return;
+    } else if (rawText && orderConfirm.confirmByText(from, rawText)) {
+      const reply = '¡Perfecto! Tu pedido queda confirmado y lo enviamos en el próximo despacho.';
+      try { await sendRawReply(from, reply); } catch (err) { console.warn('orderConfirm: respuesta:', err.message); }
+      return;
+    }
+  }
+
   // Opt-out: si el cliente pide con palabras claras que no le escribamos mas, se
   // marca (session.optOut) y se frena TODO lo automatico de marketing
   // (outboundGuard). Se contesta una vez y no se llama a la IA en este turno.
@@ -833,7 +856,18 @@ async function processReply(from) {
       cedula: session.card?.cedula || null,
       telefono: session.card?.telefono || null,
     };
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer);
+    // Fechas de despacho/llegada calculadas por codigo (Fase 7B); null si el
+    // calendario no esta configurado. Si el pedido va atrasado, avisa a Jere una vez.
+    const deliveryDates = calendar.datesForSession(session, new Date());
+    if (deliveryDates?.late && !session.lateNotifiedAt) {
+      try {
+        updateSession(from, { lateNotifiedAt: new Date().toISOString() });
+        push.notifyAdmin('Pedido atrasado', `${session.card?.nombre || session.name || 'Cliente'} ${session.card?.guia || ''}`.trim());
+      } catch (err) {
+        console.error('No se pudo avisar del pedido atrasado:', err.message);
+      }
+    }
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, deliveryDates);
 
     // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
     // habia pedido nombre/cedula/telefono antes y el modelo igual intento

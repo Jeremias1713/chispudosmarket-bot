@@ -152,6 +152,42 @@ const DEFAULTS = {
   templateStatus: {},
   // El segundo recordatorio de remarketing (a las 5 h) queda apagado.
   remarketing5hEnabled: false,
+  // ---- Fase 7: bajar devoluciones. Todo arranca APAGADO; Jere lo prende cuando carga los datos. ----
+  // 7A. Confirmacion del pedido con botones antes de subirlo a DroPanas.
+  orderConfirmEnabled: false,
+  orderConfirmDelayMin: 20,
+  orderConfirmNearCutoffDelayMin: 5,
+  orderConfirmReminderAfterH: 4,
+  orderConfirmExpireAfterH: 20,
+  orderConfirmActivatedAt: null,
+  // 7B. Calendario de despacho. Sin hora de corte y sin saber si se despacha el
+  // sabado (null) el calendario NO se activa y nadie muestra fechas.
+  calendarEnabled: false,
+  dispatchCutoffHour: null, // JERE LO CARGA: hora de Caracas (0-23) del corte de despacho en DroPanas
+  dispatchCutoffMinute: 0,
+  dispatchOnSaturday: null, // JERE LO CARGA: true/false
+  // Solo feriados nacionales de FECHA FIJA (2026 y 2027). Carnaval, Semana Santa
+  // y los feriados decretados los carga Jere en el panel.
+  holidays: [
+    '2026-01-01', '2026-04-19', '2026-05-01', '2026-06-24', '2026-07-05', '2026-07-24', '2026-10-12', '2026-12-24', '2026-12-25', '2026-12-31',
+    '2027-01-01', '2027-04-19', '2027-05-01', '2027-06-24', '2027-07-05', '2027-07-24', '2027-10-12', '2027-12-24', '2027-12-25', '2027-12-31',
+  ],
+  transitDaysByRegion: {}, // { 'GRAN CARACAS': { min: 1, max: 2 } } (ver tools/transit-stats.js)
+  transitDaysDefault: { min: 2, max: 3 },
+  // 7C. Fecha limite de retiro y cupon por retiro rapido.
+  tealcaStorageDays: null, // JERE LO CARGA: dias que Tealca guarda el paquete antes de devolverlo
+  tealcaStorageBusinessDays: false,
+  pickupDeadlineTemplateName: null, // JERE LO CARGA cuando Meta apruebe la plantilla
+  pickupDeadlineTemplateLanguage: 'es',
+  quickPickupCouponEnabled: false,
+  quickPickupHours: 48,
+  quickPickupDiscountPercent: 10,
+  quickPickupCouponValidDays: 30,
+  // 7D. Ultimo aviso antes de la devolucion.
+  lastNoticeEnabled: false,
+  lastNoticeTemplateName: null, // JERE LO CARGA: plantilla de Utilidad con 3 botones
+  lastNoticeTemplateLanguage: 'es',
+  lastNoticeHour: 10,
   optOutAutoReply: 'Listo, no te enviaremos más mensajes automáticos. Si necesitas algo de tu pedido, escríbenos por aquí cuando quieras.',
 };
 
