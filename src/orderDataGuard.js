@@ -21,7 +21,8 @@ const PHONE_RE = /(?<!\d)(?:\+?58[\s.\-,_]*)?0?4\d\d(?:[\s.\-,_]*\d){7}(?!\d)/g;
 
 function extractNumbers(text) {
   const out = { cedula: false, telefono: false };
-  let rest = String(text || '');
+  // Los links (tiktok, etc.) traen digitos que no son cedula ni telefono.
+  let rest = String(text || '').replace(/https?:\/\/\S+/gi, ' ');
   if (PHONE_RE.test(rest)) out.telefono = true;
   PHONE_RE.lastIndex = 0;
   rest = rest.replace(PHONE_RE, ' ');
@@ -112,4 +113,11 @@ function missingDataMessage(missing) {
   return `Perfecto 🙌 Para procesar tu pedido solo me falta tu ${list}. ¿Me lo pasas?`;
 }
 
-module.exports = { looksLikeOrderSummary, missingOrderData, missingDataMessage, extractNumbers, hasFullName };
+// El texto menciona los tres campos (nombre, cedula, telefono) como palabras
+// sueltas, sin datos reales: es un pedido de datos en prosa.
+function mentionsAllDataFields(text) {
+  const t = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return /\bnombre\b/.test(t) && /\bcedula\b/.test(t) && /\btelefono\b/.test(t) && !/\d{6,}/.test(t);
+}
+
+module.exports = { mentionsAllDataFields, looksLikeOrderSummary, missingOrderData, missingDataMessage, extractNumbers, hasFullName };
