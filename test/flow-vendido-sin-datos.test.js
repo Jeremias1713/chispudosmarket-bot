@@ -152,3 +152,44 @@ test('si el modelo ya pidio los datos en prosa no se duplica el pedido', async (
   assert.equal(n, 1);
   assert.equal(getSession(phone).orderDataRequested, true);
 });
+
+test('una persona pregunta "confirmas el envio y retiro?" y el cliente dice "si perfecto": queda vendido', async () => {
+  const phone = '584120000511';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: sesionLead({
+    stage: 'negociando',
+    card: { producto: 'Combo mixto', nombre: 'Alfonso Rojas', cedula: '21387871', telefono: '04143835162', ciudad: 'Puerto La Cruz' },
+    history: [
+      { role: 'assistant', content: 'Gracias, Alfonso, ya tengo tus datos.', at: '2026-08-01T00:00:00.000Z' },
+      { role: 'human', content: 'Amigo confirmas que te lo enviemos y que lo retiraras en la agencia de tealca?', at: '2026-08-01T00:10:00.000Z' },
+    ],
+  }) }));
+  classificationToReturn = { stage: 'negociando', razon: 'sigue', card: {} };
+  replyToReturn = { text: 'Perfecto, quedo atento a cualquier cosa.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Si perfecto' } }, 'Alfonso');
+  await esperarProcesamiento(600);
+  const s = getSession(phone);
+  assert.equal(s.orderClosed, true);
+  assert.ok(s.soldAt, 'tiene que guardar la fecha de venta');
+  assert.equal(s.stage, 'vendido');
+});
+
+test('el mismo "si perfecto" NO cierra si faltan datos o si no se pregunto por el envio', async () => {
+  const phone = '584120000512';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: sesionLead({
+    stage: 'negociando', card: { producto: 'Combo mixto', nombre: 'Alfonso Rojas' },
+    history: [{ role: 'human', content: 'Confirmas que lo retiras en la agencia de tealca?', at: '2026-08-01T00:10:00.000Z' }],
+  }) }));
+  classificationToReturn = null;
+  replyToReturn = { text: 'Perfecto.', images: [] };
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Si perfecto' } }, 'Alfonso');
+  await esperarProcesamiento(600);
+  assert.notEqual(getSession(phone).orderClosed, true, 'sin cedula/telefono no se cierra');
+  const phone2 = '584120000513';
+  writeRaw(dataDir, 'sessions.json', JSON.stringify({ [phone]: getSession(phone), [phone2]: sesionLead({
+    stage: 'negociando', card: { producto: 'Combo mixto', nombre: 'Ana Perez', cedula: '12345678', telefono: '04141234567' },
+    history: [{ role: 'human', content: 'Te gusta el producto?', at: '2026-08-01T00:10:00.000Z' }],
+  }) }));
+  await flow.handleIncomingMessage(phone2, { type: 'text', text: { body: 'Si perfecto' } }, 'Ana');
+  await esperarProcesamiento(600);
+  assert.notEqual(getSession(phone2).orderClosed, true, 'sin pregunta de confirmacion de envio no se cierra');
+});
