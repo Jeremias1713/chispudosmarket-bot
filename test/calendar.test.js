@@ -98,3 +98,24 @@ test('transitStats agrupa por region y usa el default con pocas muestras', () =>
   assert.deepEqual(r.suggested['GRAN CARACAS'], { min: 1, max: 1 });
   assert.equal(r.regions.find((x) => x.region === 'CENTRO OCCIDENTE').usesDefault, true);
 });
+
+test('el bloque pide la fecha en el cierre solo si el pedido aun no salio', () => {
+  const s = { stage: 'vendido', card: { agencia: 'Tealca SABANA GRANDE' } };
+  const d = calendar.datesForSession(s, caracas('2026-10-06', 10), base, loader);
+  const block = calendar.promptBlock(d);
+  assert.match(block, /CIERRE: FECHAS/);
+  assert.match(block, /Tu pedido sale hoy y llegaria el 7 o 8 de octubre \(estimado\)/);
+  const enviado = { stage: 'en_camino', shippingNotifiedAt: caracas('2026-10-06', 9).toISOString(), card: { agencia: 'Sabana Grande' } };
+  const d2 = calendar.datesForSession(enviado, caracas('2026-10-07', 10), base, loader);
+  assert.doesNotMatch(calendar.promptBlock(d2), /CIERRE: FECHAS/);
+});
+
+test('el prompt de la IA incluye la fecha en el cierre solo con calendario configurado', () => {
+  const ai = require('../src/ai');
+  const s = { stage: 'vendido', card: { agencia: 'Tealca SABANA GRANDE' } };
+  const d = calendar.datesForSession(s, caracas('2026-10-06', 10), base, loader);
+  const con = ai.buildSystemPrompt('', '', false, false, null, null, d);
+  const sin = ai.buildSystemPrompt('', '', false, false, null, null, null);
+  assert.match(con, /CIERRE: FECHAS/);
+  assert.doesNotMatch(sin, /CIERRE: FECHAS\: cuando/);
+});
