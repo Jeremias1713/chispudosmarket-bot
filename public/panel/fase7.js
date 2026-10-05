@@ -79,6 +79,10 @@
     ])
     actions.parentNode.insertBefore(card, actions)
     $('f7_save').addEventListener('click', saveConfig)
+    // Los interruptores se guardan al tocarlos (antes habia que acordarse de "Guardar Fase 7").
+    ;['f7_orderConfirmEnabled', 'f7_calendarEnabled', 'f7_quickPickupCouponEnabled', 'f7_lastNoticeEnabled', 'f7_storageBusiness'].forEach(function (id) {
+      $(id).addEventListener('change', saveConfig)
+    })
     $('f7_transitPreview').addEventListener('click', function () { transit(false) })
     $('f7_transitSave').addEventListener('click', function () { transit(true) })
   }
@@ -202,8 +206,12 @@
     if (view === 'view-metrics') { buildReport(); loadReport() }
   }
 
+  // OJO: .app-shell tambien tiene data-view (la vista activa), asi que un
+  // selector generico '[data-view]' se disparaba con CUALQUIER clic dentro del
+  // panel (por ejemplo al tocar un interruptor) y recargaba el formulario desde
+  // el servidor, apagando lo que recien se habia marcado. Solo cuentan las pestañas.
   document.addEventListener('click', function (ev) {
-    var tab = ev.target.closest && ev.target.closest('[data-view]')
-    if (tab && tab.getAttribute('data-view')) setTimeout(function () { onTab(tab.getAttribute('data-view')) }, 0)
+    var tab = ev.target.closest && ev.target.closest('.tab[data-view], .more-item[data-view]')
+    if (tab) setTimeout(function () { onTab(tab.getAttribute('data-view')) }, 0)
   })
 })()
