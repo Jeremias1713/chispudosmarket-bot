@@ -196,7 +196,8 @@ function promptBlock(dates) {
     return '\n  DATO YA CONFIRMADO, FECHAS DEL ENVIO: el pedido esta tardando mas de lo estimado. Si el cliente pregunta cuando llega, di que lo estas revisando con la transportadora y que le avisas apenas tengas novedad. NUNCA des una fecha ni calcules una por tu cuenta.\n';
   }
   const salida = dates.dispatched ? `salio ${dates.dispatchText === 'hoy' ? 'hoy' : dates.dispatchText}` : `sale ${dates.dispatchText}`;
-  return `\n  DATO YA CONFIRMADO, FECHAS DEL ENVIO: si el cliente pregunta cuando sale o cuando llega, responde EXACTAMENTE: ${salida} y llegaria ${dates.rangeText} (estimado). Nunca des otra fecha ni calcules por tu cuenta. Si es fin de semana o feriado, explica que el despacho sale el siguiente dia habil.\n`;
+  const cierre = dates.dispatched ? '' : ` CIERRE: FECHAS: cuando mandes el mensaje de cierre del pedido, agrega UNA sola frase corta con esa misma informacion, por ejemplo "🚚 Tu pedido ${salida} y llegaria ${dates.rangeText} (estimado)", despues del resumen y antes del plazo de retiro. Copia las fechas tal cual, sin cambiarlas ni calcular otras. No la repitas fuera del cierre salvo que el cliente pregunte.`;
+  return `\n  DATO YA CONFIRMADO, FECHAS DEL ENVIO: si el cliente pregunta cuando sale o cuando llega, responde EXACTAMENTE: ${salida} y llegaria ${dates.rangeText} (estimado). Nunca des otra fecha ni calcules por tu cuenta. Si es fin de semana o feriado, explica que el despacho sale el siguiente dia habil.${cierre}\n`;
 }
 
 module.exports = {
