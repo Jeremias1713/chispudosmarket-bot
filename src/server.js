@@ -299,6 +299,8 @@ if (require.main === module) {
     pickupReminders.start();
     require('./orderConfirm').start();
     require('./lastNotice').start();
+    // S8: reconciliador DroPanas (primera corrida = solo vista previa).
+    require('./dropanasReconciler').start();
     require('./diskJanitor').start();
   });
 }

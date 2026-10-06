@@ -188,6 +188,11 @@ const DEFAULTS = {
   lastNoticeTemplateName: null, // JERE LO CARGA: plantilla de Utilidad con 3 botones
   lastNoticeTemplateLanguage: 'es',
   lastNoticeHour: 10,
+  // ---- Sincronizacion DroPanas ----
+  // "Pagado" en DroPanas = el cliente retiro y pago (criterio confirmado por Jere).
+  dropanasPaidMeansDelivered: true,
+  // Reconciliador horario (S8): arranca apagado hasta que Jere aprueba la primera correccion.
+  dropanasReconcileEnabled: false,
   optOutAutoReply: 'Listo, no te enviaremos más mensajes automáticos. Si necesitas algo de tu pedido, escríbenos por aquí cuando quieras.',
 };
 

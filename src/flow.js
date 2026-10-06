@@ -1165,6 +1165,8 @@ module.exports = {
   sendRawReply,
   sendGreeting,
   mediaUrl,
+  // S5: dropanasAuto archiva el pedido anterior igual que una recompra del chat.
+  repurchasePatch,
   shouldSendAudio,
   setVoiceInbound,
   SOLD_STAGES,

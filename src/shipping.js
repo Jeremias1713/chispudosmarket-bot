@@ -38,6 +38,34 @@ const MARKER_KIND = {
   returnPendingNotifiedAt: 'return_pending',
 };
 
+// S5: las marcas de aviso son por chat, pero cada una pertenece a UN pedido.
+// Se guarda a cual (notifiedForOrderId / notifiedForGuia). Si el chat ya va
+// por otro pedido (recompra), una marca vieja no puede bloquear el aviso del
+// pedido nuevo: antes maybeNotify* respondia ya_avisado y no mandaba nada.
+function orderKeyOf(session) {
+  const card = session?.card || {};
+  const guia = String(card.guia || '').trim().toUpperCase() || null;
+  const dp = guia && guia.match(/^DP(\d+)$/);
+  const id = card.dropanasId ? String(card.dropanasId)
+    : session?.dropanasOrder?.id ? String(session.dropanasOrder.id)
+      : dp ? dp[1] : null;
+  return { id, guia };
+}
+
+function marksFromOtherOrder(session) {
+  const forId = session?.notifiedForOrderId ? String(session.notifiedForOrderId) : null;
+  const forGuia = session?.notifiedForGuia ? String(session.notifiedForGuia).toUpperCase() : null;
+  if (!forId && !forGuia) return false; // marcas viejas sin dueño: se asume el mismo pedido
+  const current = orderKeyOf(session);
+  if (forId && current.id) return forId !== current.id;
+  if (forGuia && current.guia) return forGuia !== current.guia;
+  return false;
+}
+
+function alreadyNotified(session, marker) {
+  return Boolean(session?.[marker]) && !marksFromOtherOrder(session);
+}
+
 // Patron "marcar ANTES de enviar": si el guardado de la marca falla (disco
 // lleno), NO se manda nada; antes se mandaba y despues se marcaba, y el mismo
 // aviso salia otra vez en cada reintento. Devuelve null si se puede enviar, o
@@ -47,7 +75,13 @@ function claimNotification(phone, session, marker) {
   if (!guard.ok) return { sent: false, reason: guard.reason };
   try {
     reserveAutomatic(phone, MARKER_KIND[marker] || 'shipping', new Date(), session);
-    updateSession(phone, { [marker]: new Date().toISOString() });
+    const current = orderKeyOf(session);
+    const patch = { [marker]: new Date().toISOString(), notifiedForOrderId: current.id, notifiedForGuia: current.guia };
+    // Las marcas que habia eran de otro pedido: se limpian para no heredarlas.
+    if (marksFromOtherOrder(session)) {
+      for (const other of Object.keys(MARKER_KIND)) if (other !== marker) patch[other] = null;
+    }
+    updateSession(phone, patch);
   } catch (err) {
     console.error('No se pudo guardar la marca', marker, 'de', `…${String(phone).slice(-4)}`, ':', err.message);
     return { sent: false, reason: 'error_guardado', error: err.message };
@@ -61,6 +95,17 @@ function releaseNotification(phone, marker) {
     updateSession(phone, { [marker]: null, [`${marker}FailedAt`]: new Date().toISOString() });
   } catch (err) {
     console.error('No se pudo deshacer la marca', marker, 'de', `…${String(phone).slice(-4)}`, ':', err.message);
+  }
+}
+
+// S6: se recuerda que marca corresponde a cada wamid de aviso automatico, para
+// poder reintentar o mandar a "Llamar hoy" si Meta despues lo rechaza.
+function rememberNotifyWamid(phone, wamid, marker) {
+  if (!wamid) return;
+  try {
+    updateSession(phone, require('./notifyFailures').rememberWamid(getSession(phone), wamid, marker));
+  } catch (err) {
+    console.error('No se pudo guardar el wamid del aviso de', `…${String(phone).slice(-4)}`, ':', err.message);
   }
 }
 
@@ -155,7 +200,7 @@ function arrivalText(template, values) {
 async function maybeNotifyShipping(phone, session) {
   const s = session || getSession(phone);
   if (!s.card?.guia) return { sent: false, reason: 'sin_guia' };
-  if (s.shippingNotifiedAt) return { sent: false, reason: 'ya_avisado' };
+  if (alreadyNotified(s, 'shippingNotifiedAt')) return { sent: false, reason: 'ya_avisado' };
 
   const settings = getSettings();
   const abierta = isWindowOpen(s);
@@ -217,6 +262,7 @@ async function maybeNotifyShipping(phone, session) {
       safeAppend(phone, 'human', `[plantilla automatica] ${settings.shippingTemplateName}`, {
         template: { name: settings.shippingTemplateName, origin: 'bot', params: paramsPlantilla, snapshot, wamid, status: 'sent' },
       });
+      rememberNotifyWamid(phone, wamid, 'shippingNotifiedAt');
     }
   } catch (err) {
     console.error('No se pudo mandar el aviso automatico de guia a', phone, err.response?.data || err.message);
@@ -256,7 +302,7 @@ const DEFAULT_ARRIVAL_FREE_TEXT =
 // mezclarlos.
 async function maybeNotifyArrival(phone, session) {
   const s = session || getSession(phone);
-  if (s.arrivalNotifiedAt) return { sent: false, reason: 'ya_avisado' };
+  if (alreadyNotified(s, 'arrivalNotifiedAt')) return { sent: false, reason: 'ya_avisado' };
 
   const settings = getSettings();
   const abierta = isWindowOpen(s);
@@ -290,6 +336,7 @@ async function maybeNotifyArrival(phone, session) {
       safeAppend(phone, 'human', `[plantilla automatica] ${templateName}`, {
         template: { name: templateName, origin: 'bot', params: paramsPlantilla, snapshot, wamid, status: 'sent' },
       });
+      rememberNotifyWamid(phone, wamid, 'arrivalNotifiedAt');
     }
   } catch (err) {
     console.error('No se pudo mandar el aviso automatico de llegada a', phone, err.response?.data || err.message);
@@ -302,7 +349,7 @@ async function maybeNotifyArrival(phone, session) {
 
 async function notifyStatusTemplate(phone, session, options) {
   const s = session || getSession(phone);
-  if (s[options.marker]) return { sent: false, reason: 'ya_avisado' };
+  if (alreadyNotified(s, options.marker)) return { sent: false, reason: 'ya_avisado' };
   const values = placeholderValues(s);
   const params = [values.nombre, values.producto];
   const blocked = claimNotification(phone, s, options.marker);
@@ -331,6 +378,7 @@ async function notifyStatusTemplate(phone, session, options) {
     safeAppend(phone, 'human', `[plantilla automatica] ${options.templateName}`, {
       template: { name: options.templateName, origin: 'dropanas', params, snapshot, wamid, status: 'sent' },
     });
+    rememberNotifyWamid(phone, wamid, options.marker);
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.message;
     console.error(`No se pudo mandar ${options.templateName} a`, phone, detail);
@@ -446,6 +494,12 @@ async function testSend(phone, datos) {
 }
 
 module.exports = {
+  alreadyNotified,
+  marksFromOtherOrder,
+  orderKeyOf,
+  claimNotification,
+  releaseNotification,
+  MARKER_KIND,
   quickPickupCouponText,
   maybeNotifyShipping,
   maybeNotifyArrival,
