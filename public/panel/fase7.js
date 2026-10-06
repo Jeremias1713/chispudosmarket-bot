@@ -151,7 +151,7 @@
     }).catch(function () {})
     call('/last-notice/call-today').then(function (r) {
       rowActions($('f7_callToday'), r.rows, '📞 Contactado hoy',
-        function (x) { return (x.name || x.phone) + ' · ' + x.agencia + ' · vence ' + x.deadline + (x.noReply ? ' · sin respuesta' : '') },
+        function (x) { return (x.name || x.phone) + ' · ' + (x.agencia || '-') + (x.motivo ? ' · ' + x.motivo + (x.code ? ' (' + x.code + ')' : '') : ' · vence ' + x.deadline) + (x.noReply ? ' · sin respuesta' : '') },
         function (x) { call('/last-notice/' + encodeURIComponent(x.phone) + '/contacted', { method: 'POST', body: '{}' }).then(loadLists) })
     }).catch(function () {})
   }
