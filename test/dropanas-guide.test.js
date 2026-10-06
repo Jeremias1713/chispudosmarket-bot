@@ -186,6 +186,9 @@ test('el automático no envía si el cliente ya no está esperando guía', async
         ...row, matchType: 'exacto', matchEvidence: 'telefono', phone: '584120000002',
         shippingStage: 'en_camino', sendEligible: false,
       })),
+      // S4: el chat de verdad tiene que estar en_camino (antes el test usaba una
+      // sesion vacia, que ahora se cerraria por la guia real con match por telefono).
+      getSession: () => ({ phone: '584120000002', stage: 'en_camino', orderClosed: true, card: {} }),
       capture: async () => { captured = true; },
     }
   );

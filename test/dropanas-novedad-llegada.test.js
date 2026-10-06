@@ -2,7 +2,10 @@
 // ya esta en la oficina. El bot avisa la LLEGADA (no la plantilla de novedad) y
 // el chat pasa a esperando_retiro (entra en los recordatorios 1, 3 y 5).
 'use strict';
-const { test } = require('node:test');
+const { setupTempDataDir, cleanup } = require('./helpers/tempDataDir');
+const dataDir = setupTempDataDir('dropanas-novedad-llegada');
+const { test, after } = require('node:test');
+
 const assert = require('node:assert/strict');
 const auto = require('../src/dropanasAuto');
 
@@ -88,3 +91,5 @@ test('maybeNotifyNovelty nunca se usa en este flujo', async () => {
     assert.equal(calls.novelty, 0);
   }
 });
+
+after(() => cleanup(dataDir));

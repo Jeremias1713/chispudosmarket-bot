@@ -260,16 +260,18 @@ test('un evento logístico sin teléfono explica por qué requiere revisión', a
 });
 
 for (const scenario of [
-  { event: 'order.status_changed', announced: 'Pendiente de devolución', expected: 'Pendiente de devolución' },
-  { event: 'order.delivered', announced: '', expected: 'Entregado' },
-  { event: 'incident.created', announced: '', expected: 'En novedad' },
+  // S3: cada escenario con su propio pedido; con el mismo pedido, un evento
+  // menos avanzado (novedad despues de entregado) ya no pisa al de la cola.
+  { id: 880, event: 'order.status_changed', announced: 'Pendiente de devolución', expected: 'Pendiente de devolución' },
+  { id: 881, event: 'order.delivered', announced: '', expected: 'Entregado' },
+  { id: 882, event: 'incident.created', announced: '', expected: 'En novedad' },
 ]) {
   test(`webhook ${scenario.event} conserva el estado anunciado y lo deja listo para automatizar`, async () => {
     delete process.env.DROPANAS_AUTO_SEND_ENABLED;
     const client = { get: async () => ({
       headers: { 'x-dropanas-mode': 'live' },
       data: { data: {
-        id: 880,
+        id: scenario.id,
         tipo_entrega: 'oficina',
         cliente: { nombre: 'Ana', apellido: 'Abreu', telefono: '04125550880' },
         productos: [{ nombre: 'Shilajit', cantidad: 1 }],
@@ -280,15 +282,15 @@ for (const scenario of [
       evento: scenario.event,
       sandbox: false,
       datos: {
-        orden_id: 880,
+        orden_id: scenario.id,
         status_nuevo: scenario.announced,
-        pedido: { numero_dropanas: 880, numero_guia: 'GUIA-880', transportadora: 'Tealca' },
+        pedido: { numero_dropanas: scenario.id, numero_guia: 'GUIA-880', transportadora: 'Tealca' },
       },
     }, { config, client });
 
     assert.equal(result.ok, true);
     assert.equal(result.event, scenario.event);
-    const pending = monitor.listPending().find((item) => item.order?.dropanasId === '880');
+    const pending = monitor.listPending().find((item) => item.order?.dropanasId === String(scenario.id));
     assert.equal(pending.kind, scenario.event);
     assert.equal(pending.order.estadoPedido, scenario.expected);
     assert.equal(pending.order.telefono, '584125550880');
