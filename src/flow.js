@@ -47,6 +47,7 @@ const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
+const attention = require('./attention');
 const calendar = require('./calendar');
 const orderConfirm = require('./orderConfirm');
 const lastNotice = require('./lastNotice');
@@ -634,6 +635,29 @@ async function handleIncomingMessage(from, message, profileName) {
   if (!getSettings().botEnabled) return;
   if (session.paused) return;
 
+  // Necesita atencion (ver attention.js): si el cliente se queja (no le
+  // funciona, le llego mal, le cobraron doble, pide una persona...), el bot se
+  // apaga en este chat, le avisa a Jere y le contesta UNA vez que una persona
+  // lo va a atender. La IA no contesta este mensaje.
+  if (rawText && !attention.isOpen(session)) {
+    const complaint = attention.detectComplaint(rawText, session);
+    if (complaint) {
+      // Mensajes que estaban esperando respuesta tambien quedan para el humano.
+      pendingContext.delete(from);
+      pendingRawTexts.delete(from);
+      attention.open(from, session, { reason: complaint.reason, source: 'regla', text: rawText });
+      const reply = getSettings().attentionAutoReply;
+      if (reply) {
+        try {
+          await sendRawReply(from, reply);
+        } catch (err) {
+          console.error('No se pudo mandar el aviso de atencion a', `…${String(from).slice(-4)}`, err.message);
+        }
+      }
+      return;
+    }
+  }
+
   pendingContext.set(from, {
     type,
     rawText,
@@ -1103,6 +1127,22 @@ async function processReply(from) {
         // es la unica excepcion (ver esa funcion), porque es evidencia nueva
         // legitima sin importar en que etapa logistica estaba el pedido.
         let stageChangeAllowed = !current.stageLocked && isAllowedClassifierTransition(current, classification.stage);
+        // Necesita atencion por IA (red de seguridad de las reglas de
+        // attention.js). El clasificador relee TODA la charla, asi que despues
+        // de que Jere marca "Resuelto" volveria a ver el reclamo viejo: durante
+        // 3 dias no reabre ni vuelve a poner la etapa por su cuenta.
+        if (classification.stage === 'necesita_atencion') {
+          const resolvedAt = Date.parse(current.attention?.resolvedAt || '');
+          const recentlyResolved = Number.isFinite(resolvedAt) && Date.now() - resolvedAt < 3 * 24 * 60 * 60 * 1000;
+          if (recentlyResolved) {
+            stageChangeAllowed = false;
+          } else if (!attention.isOpen(current) && !current.paused && getSettings().botEnabled) {
+            const lastUser = [...(current.history || [])].reverse().find((m) => m && m.role === 'user');
+            attention.open(from, current, { reason: 'ia', source: 'ia', text: classification.razon || lastUser?.content || '' });
+            // open() ya puso la etapa si correspondia; no se pisa con la del clasificador.
+            stageChangeAllowed = false;
+          }
+        }
         // El clasificador por IA tampoco puede dar por vendido un chat al que
         // todavia le faltan nombre, cedula o telefono (paso de verdad: lo
         // marco "vendido" porque el cliente "confirmo que lo quiere").

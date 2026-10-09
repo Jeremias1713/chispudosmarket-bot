@@ -193,6 +193,9 @@ const DEFAULTS = {
   dropanasPaidMeansDelivered: true,
   // Reconciliador horario (S8): arranca apagado hasta que Jere aprueba la primera correccion.
   dropanasReconcileEnabled: false,
+  // Necesita atencion: respuesta unica cuando el bot detecta un reclamo y se
+  // pausa en ese chat ('' = no contestar nada).
+  attentionAutoReply: 'Lamento mucho lo que pasó 🙏 Ya le pasé tu caso a una persona del equipo para que te ayude directamente por aquí. En breve te escribe.',
   optOutAutoReply: 'Listo, no te enviaremos más mensajes automáticos. Si necesitas algo de tu pedido, escríbenos por aquí cuando quieras.',
 };
 

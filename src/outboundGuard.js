@@ -30,6 +30,12 @@ function isMarketing(kind) {
 function canSendAutomatic(session, kind, now = new Date(), settings = getSettings()) {
   if (require('./diskJanitor').isDiskCritical()) return { ok: false, reason: 'disco_critico' };
   if (session?.optOut === true && isMarketing(kind)) return { ok: false, reason: 'opt_out' };
+  // Cliente con un reclamo abierto (attention.js): nada de marketing ni
+  // mensajes conversacionales automaticos hasta que una persona lo resuelva.
+  // Los avisos de envio/llegada/entrega si salen.
+  if (session?.attention?.open === true && (isMarketing(kind) || ['order_confirm', 'last_notice', 'return_reason'].includes(kind))) {
+    return { ok: false, reason: 'necesita_atencion' };
+  }
   if (settings.qualityGuardActive === true && isMarketing(kind)) return { ok: false, reason: 'calidad_en_riesgo' };
   const { date, hour } = caracasParts(now);
   // AUTO_SEND_ANYTIME=1 desactiva solo el horario (lo usan las pruebas, que

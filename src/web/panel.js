@@ -303,6 +303,8 @@ function toConvo(s) {
     lastInboundAt: inboundAt,
     windowOpen: inboundAt ? Date.now() - new Date(inboundAt).getTime() < WHATSAPP_WINDOW_MS : false,
     pendingReplyCount: pendingReplyCount(history),
+    // Reclamo abierto (attention.js): el panel lo marca y lo lista aparte.
+    attention: s.attention?.open ? { reason: s.attention.label || null, at: s.attention.at || null } : null,
   };
 }
 
@@ -680,7 +682,9 @@ router.post('/api/conversations/:phone/send-image', upload.single('file'), async
 router.post('/api/conversations/:phone/pause', (req, res) => {
   const phone = req.params.phone;
   const paused = Boolean(req.body?.paused);
-  const s = setPaused(phone, paused, paused ? 'manual' : null);
+  let s = setPaused(phone, paused, paused ? 'manual' : null);
+  // Reactivar el bot a mano en un chat con reclamo abierto = Resuelto.
+  if (!paused && s?.attention?.open) s = updateSession(phone, require('../attention').resolvePatch(s));
   res.json({ ok: true, paused: s.paused });
 });
 
@@ -1840,6 +1844,20 @@ router.get('/api/reports/returns', (req, res) => {
     return res.send(returnsReport.toCsv(report));
   }
   res.json(report);
+});
+
+// Necesita atencion: lista aparte y boton "Resuelto" (attention.js).
+router.get('/api/attention', (_req, res) => {
+  res.json({ rows: require('../attention').list(listSessions()) });
+});
+
+router.post('/api/attention/:phone/resolve', (req, res) => {
+  const phone = String(req.params.phone);
+  const s = getSession(phone);
+  if (!s?.stage) return res.status(404).json({ error: 'No existe esa conversacion.' });
+  const reactivate = req.body?.reactivate !== false;
+  const saved = updateSession(phone, require('../attention').resolvePatch(s, { reactivate }));
+  res.json({ ok: true, paused: Boolean(saved.paused), stage: saved.stage });
 });
 
 // S8: sincronizacion DroPanas (reconciliador). La primera correccion la
