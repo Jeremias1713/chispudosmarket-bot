@@ -157,10 +157,10 @@ function decide(session, order, { now = Date.now(), silent = false, deps = {} } 
   if (st.kind === 'returned') advance = current !== 'devolucion';
   else advance = current !== to && logisticRank(to) > logisticRank(current) && current !== 'devolucion';
   if (!advance) return { ...base, action: 'none', to };
-  if (session.stageLocked === true) {
-    // Fijado a mano: solo se sugiere (entregado/devolucion), nunca se aplica.
-    return { ...base, action: ['returned', 'delivered'].includes(st.kind) ? 'suggest' : 'none', to };
-  }
+  // Los chats con la etapa fijada a mano tambien se corrigen (pedido de Jere:
+  // hay etapas que solo se ponen a mano, y esos chats quedaban atras para
+  // siempre). Igual nunca se baja una etapa, y el candado se conserva para que
+  // la IA no la cambie despues.
   const marker = MARKER_FOR[st.kind] || null;
   const shipping = deps.shipping;
   const already = marker ? (shipping?.alreadyNotified ? shipping.alreadyNotified(session, marker) : Boolean(session[marker])) : true;
@@ -230,7 +230,7 @@ async function applyDecision(decision, session, order, deps, nowIso) {
   }
   const patch = {
     stage: decision.to,
-    stageLocked: false,
+    stageLocked: session.stageLocked === true,
     stageSource: 'reconciler',
     stageUpdatedAt: nowIso,
     stageReason: `Reconciliador: DroPanas dice ${decision.estado}`,
