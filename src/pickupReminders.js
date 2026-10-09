@@ -38,7 +38,9 @@ function reminderDays(session, settings) {
   return replaced ? [1, 3] : REMINDER_DAYS;
 }
 const MAX_FAILURES_PER_DAY = 3;
-const OFFICE_STATUSES = new Set(['en oficina', 'en agencia', 'listo para retirar']);
+// S1: la tabla de estados es una sola (dropanasStatus.js). "En novedad" tambien
+// cuenta como en oficina (el paquete esta en la agencia).
+const { classifyStatus, isOfficeKind } = require('./dropanasStatus');
 const DP_GUIDE = /^DP(\d+)$/i;
 const MAX_PER_ID_LOOKUPS = 40;
 let timer = null;
@@ -46,6 +48,31 @@ let running = false;
 // Conversaciones ya resueltas hoy (recordadas o descartadas). Asi, en los
 // chequeos de cada 15 minutos no se vuelve a consultar DroPanas por ellas.
 let decided = { date: null, phones: new Set() };
+let decidedLoaded = false;
+
+// S7: "decided" se guarda en dropanas-api-state.json (antes solo en memoria:
+// con cada reinicio de Render se volvia a consultar DroPanas por todos).
+function loadDecided() {
+  if (decidedLoaded) return;
+  decidedLoaded = true;
+  try {
+    const saved = require('./dropanasMonitor').loadState().pickupDecided;
+    if (saved?.date && Array.isArray(saved.phones)) decided = { date: saved.date, phones: new Set(saved.phones) };
+  } catch (err) {
+    console.error('No se pudo leer los recordatorios ya decididos:', err.message);
+  }
+}
+
+function persistDecided() {
+  try {
+    const monitor = require('./dropanasMonitor');
+    const state = monitor.loadState();
+    state.pickupDecided = { date: decided.date, phones: [...decided.phones].slice(-2000) };
+    monitor.saveState(state);
+  } catch (err) {
+    console.error('No se pudo guardar los recordatorios ya decididos:', err.message);
+  }
+}
 
 function localParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -154,12 +181,23 @@ async function officeStatus(sessions, deps) {
   } catch (error) {
     console.error('Recordatorios de retiro: no se pudo leer el listado de DroPanas:', error.message);
   }
+  // S7: cache compartido que llena el reconciliador (valido 2 horas).
+  const statusCache = deps.statusCache || require('./dropanasStatusCache');
+  const cached = byId ? null : statusCache.load();
+  const fetched = [];
   for (const session of sessions) {
     const keys = orderKeys(session);
     let order = null;
     if (byId) {
       for (const id of keys.ids) order = order || byId.get(id) || null;
       for (const guia of keys.guias) order = order || byGuia.get(guia) || null;
+    }
+    if (!order && !byId) {
+      for (const id of keys.ids) order = order || statusCache.getFresh(id, Date.now(), cached);
+      if (order) result.apiOk = true;
+    }
+    if (order || byId) {
+      // ya resuelto (listado o cache)
     } else if (keys.ids.length && perIdLookups < MAX_PER_ID_LOOKUPS) {
       // DroPanas limita a 100 consultas por minuto: consultar pedido por
       // pedido es solo un respaldo, con tope y con pausa entre consultas.
@@ -167,6 +205,7 @@ async function officeStatus(sessions, deps) {
       if (perIdLookups > 1) await new Promise((resolve) => setTimeout(resolve, deps.lookupPauseMs ?? 1500));
       try {
         order = (await deps.fetchOrder(keys.ids[0])).order;
+        if (order) fetched.push(order);
         result.apiOk = true;
       } catch (error) {
         order = null;
@@ -177,10 +216,11 @@ async function officeStatus(sessions, deps) {
       continue;
     }
     result.set(session.phone, {
-      state: OFFICE_STATUSES.has(fold(order.estadoPedido)) ? 'en_oficina' : 'otro_estado',
+      state: isOfficeKind(classifyStatus(order.estadoPedido).kind) ? 'en_oficina' : 'otro_estado',
       order,
     });
   }
+  if (fetched.length) statusCache.putMany(fetched);
   return result;
 }
 
@@ -262,6 +302,7 @@ async function plan(now = new Date(), overrides = {}) {
   const deps = { ...defaultDeps(), ...overrides };
   const settings = overrides.settings || getSettings();
   const today = localParts(now).date;
+  loadDecided();
   const waiting = [];
   const seen = new Set();
   for (const session of deps.listSessions()) {
@@ -302,6 +343,7 @@ async function run(now = new Date(), overrides = {}) {
     for (const session of needsAnchor) {
       try { deps.updateSession(session.phone, { pickupReminderAnchorDate: date }); } catch (error) { console.error('No se pudo guardar la fecha ancla de', `…${String(session.phone).slice(-4)}`, error.message); }
     }
+    loadDecided();
     if (decided.date !== date) decided = { date, phones: new Set() };
     // Si DroPanas no respondio, los descartados se vuelven a mirar en el
     // proximo chequeo (puede haber sido un corte momentaneo).
@@ -327,6 +369,7 @@ async function run(now = new Date(), overrides = {}) {
         results.push({ phone: session.phone, sent: false, error: error.message });
       }
     }
+    persistDecided();
     return results;
   } finally {
     running = false;
@@ -335,6 +378,8 @@ async function run(now = new Date(), overrides = {}) {
 
 function resetDecided() {
   decided = { date: null, phones: new Set() };
+  decidedLoaded = true;
+  persistDecided();
 }
 
 function start() {

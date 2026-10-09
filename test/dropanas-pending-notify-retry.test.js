@@ -48,15 +48,38 @@ test('un aviso ya entregado antes (ya_avisado) tambien se saca de la cola sin re
   assert.equal(monitor.listPending().some((item) => item.key === change.key), false);
 });
 
-test('deja de reintentar tras el maximo de intentos, sin trabarse', async () => {
+// S2: antes eran 8 intentos cada 10 minutos (80 minutos) y despues nunca mas.
+test('un pendiente que falla 9 veces sigue programado con backoff', async () => {
   const change = queueOrder(1004);
   let calls = 0;
-  const failing = async () => { calls += 1; return { acknowledged: [], results: [{ sent: false, reason: 'error' }] }; };
-  for (let i = 0; i < monitor.PENDING_RETRY_MAX + 3; i += 1) {
-    await monitor.retryPendingNotifications({ ignoreQuietHours: true, processChanges: failing });
+  const failing = async (items) => { calls += items.filter((i) => i.key === change.key).length; return { acknowledged: [], results: [{ orderId: 1004, sent: false, reason: 'error' }] }; };
+  let now = Date.parse(change.detectedAt);
+  for (let i = 0; i < 9; i += 1) {
+    await monitor.retryPendingNotifications({ ignoreQuietHours: true, now, processChanges: failing });
+    now += monitor.backoffMs(i + 1) + 1000;
   }
-  assert.equal(calls, monitor.PENDING_RETRY_MAX);
+  assert.equal(calls, 9);
   assert.equal(monitor.listPending().some((item) => item.key === change.key), true);
+  const state = monitor.loadState();
+  assert.ok(Date.parse(state.pendingNextAttemptAt[change.key]) > Date.parse(change.detectedAt));
+});
+
+test('antes del proximo reintento programado no se vuelve a intentar', async () => {
+  const change = queueOrder(1007);
+  let calls = 0;
+  const failing = async (items) => { calls += items.filter((i) => i.key === change.key).length; return { acknowledged: [], results: [{ orderId: 1007, sent: false, reason: 'error' }] }; };
+  const t0 = Date.parse(change.detectedAt);
+  await monitor.retryPendingNotifications({ ignoreQuietHours: true, now: t0, processChanges: failing });
+  await monitor.retryPendingNotifications({ ignoreQuietHours: true, now: t0 + 60 * 1000, processChanges: failing });
+  assert.equal(calls, 1);
+});
+
+test('un ya_avisado no confirmado se saca de la cola en el primer intento', async () => {
+  const change = queueOrder(1008);
+  const already = async () => ({ acknowledged: [], results: [{ orderId: 1008, sent: false, reason: 'ya_avisado' }] });
+  await monitor.retryPendingNotifications({ ignoreQuietHours: true, processChanges: already });
+  assert.equal(monitor.listPending().some((item) => item.key === change.key), false);
+  assert.ok(monitor.loadState().dismissed.some((d) => d.key === change.key && d.reason === 'ya_avisado'));
 });
 
 test('sin DROPANAS_AUTO_SEND_ENABLED no reintenta nada', async () => {
@@ -67,29 +90,20 @@ test('sin DROPANAS_AUTO_SEND_ENABLED no reintenta nada', async () => {
   process.env.DROPANAS_AUTO_SEND_ENABLED = 'true';
 });
 
-test('un aviso de hace mas de 5 dias no se reintenta solo (queda para revisar en el panel)', async () => {
+test('un aviso de hace mas de 5 dias sale a vencidos y avisa a Jere una vez', async () => {
   const change = queueOrder(1006);
   let calls = 0;
-  const later = Date.parse(change.detectedAt) + monitor.PENDING_RETRY_MAX_AGE_MS + 60 * 1000;
+  const pushes = [];
+  const later = Date.parse(change.detectedAt) + 6 * 24 * 60 * 60 * 1000;
   await monitor.retryPendingNotifications({ ignoreQuietHours: true,
     now: later,
+    notifyAdmin: (_t, body) => pushes.push(body),
     processChanges: async (items) => { calls += items.filter((i) => i.key === change.key).length; return { acknowledged: [], results: [] }; },
   });
   assert.equal(calls, 0);
-  assert.equal(monitor.listPending().some((item) => item.key === change.key), true);
-});
-
-test('de noche (hora de Venezuela) no manda avisos: quedan para las 8:00', async () => {
-  const change = queueOrder(1007);
-  let calls = 0;
-  const processChanges = async (items) => { calls += 1; return { acknowledged: items.map((i) => i.key), results: [] }; };
-  const night = await monitor.retryPendingNotifications({ now: '2026-09-24T03:30:00.000Z', processChanges }); // 23:30 VET
-  assert.equal(night.quietHours, true);
-  assert.equal(calls, 0);
-  assert.equal(monitor.listPending().some((item) => item.key === change.key), true);
-  await monitor.retryPendingNotifications({ now: '2026-09-24T12:05:00.000Z', processChanges }); // 8:05 VET
-  assert.equal(calls, 1);
   assert.equal(monitor.listPending().some((item) => item.key === change.key), false);
-  assert.equal(monitor.isQuietHours(new Date('2026-09-24T23:59:00.000Z')), false); // 19:59 VET: todavia se puede
-  assert.equal(monitor.isQuietHours(new Date('2026-09-25T00:00:00.000Z')), true); // 20:00 VET: ya no
+  assert.ok(monitor.loadState().expired.some((e) => e.key === change.key), JSON.stringify(monitor.loadState().expired.map((e) => e.key)) + ' ' + change.key);
+  assert.equal(pushes.length, 1);
+  assert.match(pushes[0], /vencieron sin enviarse/);
+  assert.ok(monitor.status().expired >= 1);
 });

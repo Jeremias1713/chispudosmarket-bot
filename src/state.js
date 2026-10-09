@@ -379,9 +379,20 @@ function deleteSessions(phones) {
 // (pura, sin tocar disco) para poder probarla sin depender de
 // sessions.json; esta funcion es la unica que la conecta con la
 // persistencia real.
-function applyTemplateStatus(statusEvent) {
+function applyTemplateStatus(statusEvent, options = {}) {
   const sessions = loadAll();
   const resultado = applyStatusUpdate(sessions, statusEvent);
+  // S6: si Meta rechazo un aviso automatico (llegada, guia, entregado...), se
+  // libera la marca para reintentarlo o se manda a "Llamar hoy".
+  if (resultado.updated && statusEvent?.status === 'failed' && resultado.phone) {
+    try {
+      const session = sessions[resultado.phone];
+      const msg = session?.history?.[resultado.messageIndex];
+      resultado.notifyFailure = require('./notifyFailures').applyFailure(session, msg, statusEvent, options);
+    } catch (err) {
+      console.error('No se pudo procesar el fallo del aviso automatico:', err.message);
+    }
+  }
   if (resultado.updated) saveAll(sessions);
   return resultado;
 }
@@ -416,8 +427,26 @@ function compactHistories({ olderThanMs, keepLast = 150, archiveDir, now = Date.
   return { sessions: touched, messages: archived };
 }
 
+// S8: el reconciliador revisa cientos de chats por corrida. Con updateSession
+// cada uno reescribia sessions.json entero; esto aplica todos los patches en
+// un solo guardado. Solo toca chats que ya existen. bumpUpdatedAt=false para
+// marcas internas (reconciledAt) que no deben reordenar el panel.
+function updateSessionsBulk(patchesByPhone, { bumpUpdatedAt = false } = {}) {
+  const sessions = loadAll();
+  let touched = 0;
+  const nowIso = new Date().toISOString();
+  for (const [phone, patch] of Object.entries(patchesByPhone || {})) {
+    if (!sessions[phone] || !patch) continue;
+    sessions[phone] = { ...sessions[phone], ...patch, ...(bumpUpdatedAt ? { updatedAt: nowIso } : {}) };
+    touched += 1;
+  }
+  if (touched) saveAll(sessions);
+  return touched;
+}
+
 module.exports = {
   getSession,
+  updateSessionsBulk,
   compactHistories,
   updateSession,
   resetSession,

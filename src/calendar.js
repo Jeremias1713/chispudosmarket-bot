@@ -171,11 +171,57 @@ function formatDayShort(ymd) {
 
 // Todo lo que el bot dice sobre fechas de UN pedido. null si el calendario no
 // esta configurado o no se conoce la agencia (no se inventan fechas).
+// Region para el transito. BUG REAL que corrige esto: antes se exigia
+// card.agencia, pero ese campo SOLO se llena cuando DroPanas manda la guia
+// (buildGuiaPatch). Durante la venta y en el mensaje de cierre siempre estaba
+// vacio, asi que el bot nunca decia cuando llegaba el pedido. Ahora se usa,
+// en orden: la agencia de la ficha, la agencia confirmada en el chat (el
+// resumen del cierre "Agencia: X"), la ciudad de la ficha y, si nada de eso
+// da una region, el transito por defecto (transitDaysDefault).
+function agencyFromChat(session) {
+  try {
+    const facts = require('./dropanasOrderAutomation').historyOrderFacts(session.history || []);
+    return facts.agency || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function regionForCity(city, loader) {
+  const text = fold(city);
+  if (text.length < 3) return null;
+  let list = [];
+  try {
+    list = (loader || require('./agencies').loadAgencies)();
+  } catch (err) {
+    return null;
+  }
+  const regions = new Set();
+  for (const a of list) {
+    if (!a.region) continue;
+    const hay = ` ${fold(a.name)} ${fold(a.city)} ${fold(a.address)} ${fold(a.region)} `;
+    if (hay.includes(` ${text} `)) regions.add(String(a.region).toUpperCase());
+  }
+  // Solo si la ciudad apunta a una unica region (si no, mejor el default).
+  return regions.size === 1 ? [...regions][0] : null;
+}
+
+function regionForSession(session, loader) {
+  const card = session.card || {};
+  const candidates = [card.agencia, card.agenciaConfirmadaEnChat];
+  for (const c of candidates) {
+    const r = String(c || '').trim() ? regionForAgency(c, loader) : null;
+    if (r) return r;
+  }
+  const chatAgency = agencyFromChat(session);
+  const fromChat = chatAgency ? regionForAgency(chatAgency, loader) : null;
+  if (fromChat) return fromChat;
+  return regionForCity(card.ciudad, loader);
+}
+
 function datesForSession(session, now = new Date(), settings = getSettings(), loader) {
   if (!isConfigured(settings) || !session) return null;
-  const agencia = session.card?.agencia;
-  if (!String(agencia || '').trim()) return null;
-  const region = regionForAgency(agencia, loader);
+  const region = regionForSession(session, loader);
   const dispatched = session.shippingNotifiedAt ? localParts(session.shippingNotifiedAt)?.ymd : null;
   const dispatch = dispatched || dispatchDate(now, settings);
   if (!dispatch) return null;
@@ -202,6 +248,6 @@ function promptBlock(dates) {
 
 module.exports = {
   businessDaysBetween, localParts, addDays, daysBetween, isConfigured, isBusinessDay, nextBusinessDay, addBusinessDays,
-  minutesToCutoff, dispatchDate, transitFor, arrivalRange, regionForAgency, formatDispatch, formatRange,
+  minutesToCutoff, dispatchDate, transitFor, arrivalRange, regionForAgency, regionForCity, regionForSession, formatDispatch, formatRange,
   formatDayShort, datesForSession, promptBlock,
 };

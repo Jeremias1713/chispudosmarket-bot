@@ -68,7 +68,6 @@ test('sin configurar (o sin agencia) no hay fechas ni bloque de prompt', () => {
   assert.equal(calendar.datesForSession(s, now, { ...base, dispatchCutoffHour: null }, loader), null);
   assert.equal(calendar.datesForSession(s, now, { ...base, dispatchOnSaturday: null }, loader), null);
   assert.equal(calendar.datesForSession(s, now, { ...base, calendarEnabled: false }, loader), null);
-  assert.equal(calendar.datesForSession({ stage: 'vendido', card: {} }, now, base, loader), null);
   assert.equal(calendar.promptBlock(null), '');
 });
 
@@ -118,4 +117,22 @@ test('el prompt de la IA incluye la fecha en el cierre solo con calendario confi
   const sin = ai.buildSystemPrompt('', '', false, false, null, null, null);
   assert.match(con, /CIERRE: FECHAS/);
   assert.doesNotMatch(sin, /CIERRE: FECHAS\: cuando/);
+});
+
+// Bug real: card.agencia solo se llena cuando llega la guia, asi que durante
+// la venta el bot nunca decia cuando llegaba el pedido.
+test('sin agencia en la ficha usa la del resumen del chat, la ciudad o el default', () => {
+  const now = caracas('2026-10-06', 10);
+  const chat = { stage: 'vendido', card: {}, history: [
+    { role: 'assistant', content: 'Resumen de tu pedido:\n- Producto: Shilajit x1\n- Agencia: Sabana Grande\nPago contra entrega.' },
+  ] };
+  const d1 = calendar.datesForSession(chat, now, base, loader);
+  assert.equal(d1.region, 'GRAN CARACAS');
+  assert.equal(d1.rangeText, 'el 7 o 8 de octubre');
+  const ciudad = { stage: 'negociando', card: { ciudad: 'Barquisimeto' } };
+  assert.equal(calendar.datesForSession(ciudad, now, base, loader).region, 'CENTRO OCCIDENTE');
+  const nada = calendar.datesForSession({ stage: 'negociando', card: {} }, now, base, loader);
+  assert.equal(nada.region, null);
+  assert.equal(nada.rangeText, 'el 8 o 9 de octubre');
+  assert.match(calendar.promptBlock(nada), /CIERRE: FECHAS/);
 });

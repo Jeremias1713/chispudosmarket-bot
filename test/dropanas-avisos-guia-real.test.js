@@ -80,9 +80,12 @@ test('una guia de otra orden sigue quedando para revision manual', async () => {
       listSessions: () => [{ phone: '584120000102', stage: 'esperando_retiro', card: { guia: 'DP35592' } }],
       updateSession: () => { updated = true; },
       maybeNotifyDelivered: async () => { notified += 1; return { sent: true }; },
+      notifyAdmin: () => {},
     }
   );
-  assert.equal(result.results[0].reason, 'guia_no_coincide');
+  // S5: con el pedido anterior todavia abierto son dos pedidos a la vez: no se
+  // toca nada y se avisa a Jere (antes el motivo era guia_no_coincide).
+  assert.equal(result.results[0].reason, 'dos_pedidos_abiertos');
   assert.equal(notified, 0);
   assert.equal(updated, false);
   assert.deepEqual(result.acknowledged, []);
@@ -120,9 +123,12 @@ test('un pedido cancelado no recibe el aviso de despacho', async () => {
       env: ENV,
       matchRows: (rows) => rows.map((row) => ({ ...row, matchType: 'exacto', phone: '584120000104', shippingStage: 'vendido', sendEligible: true })),
       capture: async () => { captured = true; return { filename: 'x.png' }; },
+      listSessions: () => [],
+      notifyAdmin: () => {},
     }
   );
-  assert.equal(result.results[0].reason, 'estado_sin_aviso_de_despacho');
+  // S1: cancelado tiene su propio camino (push a Jere y ack), nunca el despacho.
+  assert.equal(result.results[0].reason, 'cancelado');
   assert.equal(captured, false);
 });
 

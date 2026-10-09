@@ -209,6 +209,11 @@ function callToday(sessions, settings = getSettings(), now = new Date()) {
     if (s.phoneContactAt && calendar.localParts(s.phoneContactAt)?.ymd === today) continue;
     rows.push({ phone: s.phone, name: s.name || s.card?.nombre || '', agencia: s.card?.agencia || '', deadline, daysLeft: left, lastNoticeAnswer: s.lastNoticeAnswer || null, noReply: Boolean(noReply) });
   }
+  // S6: avisos que Meta rechazo (131049, 131050...) tambien hay que llamarlos.
+  const seen = new Set(rows.map((r) => r.phone));
+  for (const r of require('./notifyFailures').callTodayRows(sessions)) {
+    if (!seen.has(r.phone)) rows.push(r);
+  }
   return rows.sort((a, b) => a.daysLeft - b.daysLeft);
 }
 

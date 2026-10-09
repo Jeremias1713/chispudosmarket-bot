@@ -112,6 +112,7 @@ function mapOrder(item) {
     estadoAprobacion: String(item.estado_aprobacion || '').trim(),
     externalReference: String(item.external_reference || item.referencia_externa || '').trim(),
     updatedAt: item.updated_at || null,
+    createdAt: item.created_at || null,
     _source: 'dropanas-api-readonly',
   };
 }

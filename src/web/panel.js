@@ -1842,6 +1842,58 @@ router.get('/api/reports/returns', (req, res) => {
   res.json(report);
 });
 
+// S8: sincronizacion DroPanas (reconciliador). La primera correccion la
+// aprueba Jere y sale en silencio (cero mensajes).
+router.get('/api/dropanas/reconcile/status', (_req, res) => {
+  try {
+    const state = dropanasMonitor.loadState();
+    const status = dropanasMonitor.status();
+    res.json({
+      enabled: settingsStore.getSettings().dropanasReconcileEnabled === true,
+      lastReconcile: state.lastReconcile || null,
+      lastReconcileDry: state.lastReconcileDry || null,
+      firstApprovalPending: !state.lastReconcile,
+      unknownStatuses: state.unknownStatuses || {},
+      expired: status.expired,
+      expiredReasons: status.expiredReasons,
+      recentExpired: status.recentExpired,
+      nextRetryAt: status.nextRetryAt,
+      pending: status.pending,
+      log: require('../dropanasReconciler').readLog(100),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/api/dropanas/reconcile/preview', async (_req, res) => {
+  try {
+    const result = await require('../dropanasReconciler').run({ mode: 'dry' });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/api/dropanas/reconcile/apply', async (req, res) => {
+  try {
+    const first = !dropanasMonitor.loadState().lastReconcile;
+    // La primera vez siempre en silencio, diga lo que diga el body.
+    const silent = first || req.body?.silent !== false;
+    const result = await require('../dropanasReconciler').run({ mode: 'live', silent });
+    if (first) settingsStore.updateSettings({ dropanasReconcileEnabled: true });
+    res.json({ ok: true, first, silent, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/api/dropanas/reconcile/enabled', (req, res) => {
+  const enabled = req.body?.enabled === true;
+  settingsStore.updateSettings({ dropanasReconcileEnabled: enabled });
+  res.json({ ok: true, enabled });
+});
+
 // Fase 7D: lista "Llamar hoy" y marca "Contactado hoy" (con ella el ultimo aviso no se manda ese dia).
 router.get('/api/last-notice/call-today', (_req, res) => {
   res.json({ rows: require('../lastNotice').callToday(listSessions()) });
