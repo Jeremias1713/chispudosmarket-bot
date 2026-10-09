@@ -43,7 +43,7 @@
     if (!host) return
     var card = el('article', { class: 'card', id: 'sy_card' }, [
       el('h3', { text: '🔄 Sincronización' }),
-      el('div', { class: 'help', text: 'Compara el estado actual de cada pedido en DroPanas con la etapa del chat y corrige lo que quedó atrás. Nunca baja una etapa. Solo manda mensaje si el cambio en DroPanas es de las últimas 24 horas.' }),
+      el('div', { class: 'help', text: 'Compara el estado actual de cada pedido en DroPanas con la etapa del chat y corrige lo que quedó atrás. Nunca baja una etapa (tampoco en los chats fijados a mano, que también se corrigen). Solo manda mensaje si el cambio en DroPanas es de las últimas 24 horas.' }),
       el('div', { id: 'sy_summary', class: 'help' }),
       el('div', { class: 'field' }, [
         el('label', { class: 'switch' }, [el('input', { type: 'checkbox', id: 'sy_enabled' }), el('span', { text: 'Reconciliación automática cada hora' })]),
@@ -105,7 +105,7 @@
     box.textContent = ''
     var changes = rows.filter(function (r) { return r.accion === 'advance' || r.accion === 'suggest' })
     box.appendChild(table(['Teléfono', 'Cliente', 'DroPanas', 'Etapa actual → nueva', 'Mensaje'], changes.map(function (r) {
-      return ['…' + String(r.phone).slice(-4), r.cliente || '—', r.estado, st(r.etapaActual) + ' → ' + st(r.etapaNueva) + (r.accion === 'suggest' ? ' (fijado a mano: solo sugerencia)' : ''), r.mensaje ? 'sí' : 'no']
+      return ['…' + String(r.phone).slice(-4), r.cliente || '—', r.estado, st(r.etapaActual) + ' → ' + st(r.etapaNueva), r.mensaje ? 'sí' : 'no']
     })))
     var others = rows.filter(function (r) { return r.accion === 'report' })
     if (others.length) box.appendChild(el('div', { class: 'help', text: others.length + ' pedido(s) cancelados o con estado desconocido: no se tocan.' }))
