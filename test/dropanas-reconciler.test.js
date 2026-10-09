@@ -87,12 +87,19 @@ test('esperando_retiro + "En tránsito" (listado atrasado): no baja', async () =
   assert.equal(summary.corregidos, 0);
 });
 
-test('stageLocked + "Pagado": sin cambio, queda como sugerencia', async () => {
+test('stageLocked + "Pagado": se corrige igual y conserva el candado', async () => {
   const h = harness([chat('584120000106', 'esperando_retiro', { stageLocked: true })], [order(106, 'Pagado')]);
-  const { summary, preview } = await reconciler.run({ now: NOW, deps: h.deps });
-  assert.equal(h.store.get('584120000106').stage, 'esperando_retiro');
-  assert.equal(summary.sugerencias, 1);
-  assert.equal(preview[0].accion, 'suggest');
+  const { summary } = await reconciler.run({ now: NOW, deps: h.deps });
+  const s = h.store.get('584120000106');
+  assert.equal(s.stage, 'entregado');
+  assert.equal(s.stageLocked, true);
+  assert.equal(summary.corregidos, 1);
+});
+
+test('stageLocked + "En tránsito" atrasado: nunca baja la etapa', async () => {
+  const h = harness([chat('584120000113', 'esperando_retiro', { stageLocked: true })], [order(113, 'En tránsito', hoursAgo(1))]);
+  await reconciler.run({ now: NOW, deps: h.deps });
+  assert.equal(h.store.get('584120000113').stage, 'esperando_retiro');
 });
 
 test('listado 403: consulta individual con tope 80 y rotacion por reconciledAt', async () => {

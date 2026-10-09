@@ -20,7 +20,9 @@ const NOW = new Date('2026-10-06T14:00:00Z'); // 10:00 Caracas
 function seed(extra = {}) {
   state.updateSession(PHONE, {
     name: 'Maria Perez', stage: 'vendido', orderClosed: true, soldAt: '2026-10-06T13:00:00.000Z',
-    history: [{ role: 'user', content: 'hola', at: new Date(NOW.getTime() - 3600000).toISOString() }],
+    // La ventana de 24 h usa el reloj real: el mensaje tiene que ser de verdad reciente
+    // (antes era relativo a NOW fijo y el test empezo a fallar a los dias).
+    history: [{ role: 'user', content: 'hola', at: new Date(Date.now() - 3600000).toISOString() }],
     card: { nombre: 'Maria Perez', producto: 'Shilajit Viking', monto: 51900, agencia: 'Sabana Grande' },
     orderConfirm: undefined,
     ...extra,
