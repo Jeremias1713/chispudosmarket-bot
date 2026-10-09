@@ -37,6 +37,13 @@
         <span class="rail-tip">Pipeline</span>
       </button>
 
+      <button class="tab" role="tab" data-view="view-attention" data-label="Necesita atención"
+              aria-selected="false" aria-label="Necesita atención">
+        <svg viewBox="0 0 24 24"><path d="M12 2 1 21h22zm0 4.3L19.5 19h-15zM11 10v4h2v-4zm0 6v2h2v-2z"/></svg>
+        <span class="rail-tip">Necesita atención</span>
+        <span class="att-badge" id="attBadge" hidden></span>
+      </button>
+
       <button class="tab" role="tab" data-mobile="primary" data-mobile-label="Métricas" data-view="view-metrics" data-label="Métricas"
               aria-selected="false" aria-label="Métricas">
         <svg viewBox="0 0 24 24"><path d="M3 3v18h18v-2H5V3zm4 14h2V9H7zm4 0h2V5h-2zm4 0h2v-6h-2z"/></svg>
@@ -902,6 +909,21 @@
       </section>
 
       <!-- Cupones / codigos de descuento -->
+      <!-- Necesita atencion: clientes con reclamo, el bot en pausa (attention.js) -->
+      <section class="view" id="view-attention">
+        <div class="autos-scroll">
+          <div class="autos-inner">
+            <div class="card cfg" style="padding: var(--s5);">
+              <p class="help">
+                Clientes que se quejaron (no le funciona, le llegó mal, le cobraron doble, pidió hablar con una persona…).
+                En estos chats el bot está en pausa: contesta tú desde el chat y, cuando termines, marca "Resuelto".
+              </p>
+              <div id="att_list"><div class="help">Cargando…</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-coupons">
         <div class="autos-scroll">
           <div class="autos-inner">
@@ -1408,5 +1430,6 @@ Cambios: hasta 7 días con el producto sin abrir."></textarea>
 <script src="/panel/app.js"></script>
 <script src="/panel/fase7.js"></script>
 <script src="/panel/sync.js"></script>
+<script src="/panel/attention.js"></script>
 </body>
 </html>
