@@ -1224,6 +1224,22 @@ function templateBubble(m) {
     `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
 }
 
+// Mensaje con botones que mando el bot (confirmar pedido, ultimo aviso,
+// descuento por pagar el envio...): se muestran los botones tal cual los vio
+// el cliente y el estado real que informo WhatsApp (enviado/entregado/leido).
+function buttonsBlock(m) {
+  const it = m.interactive
+  if (!it || !Array.isArray(it.buttons) || !it.buttons.length) return ''
+  const chips = it.buttons.map((b) => `<span class="tpl-btn">${esc(b.title || '')}</span>`).join('')
+  const estado = it.status
+    ? `<span class="tpl-status tpl-status-${esc(it.status)}">${esc(ESTADO_LABEL[it.status] || it.status)}</span>`
+    : ''
+  const motivo = it.status === 'failed' && it.failReason ? `<div class="tpl-fail-reason">Motivo: ${esc(it.failReason)}</div>` : ''
+  return `<div class="bubble-btns-label">🔘 Mensaje con botones</div>` +
+    `<div class="tpl-buttons">${chips}</div>` + motivo +
+    (estado ? `<div class="tpl-status-row">${estado}</div>` : '')
+}
+
 function bubbleInner(m) {
   if (typeof m.content === 'string' && m.content.startsWith('[plantilla')) return templateBubble(m)
   // Nota de voz: ademas de la transcripcion (bubble-text), si se guardo el
@@ -1247,6 +1263,8 @@ function bubbleInner(m) {
     : ''
   return audio + img + video +
     `<span class="bubble-text">${esc(m.content).replace(/\n/g, '<br>')}</span>` +
+    buttonsBlock(m) +
+    (m.buttonReply ? `<span class="bubble-tap">👆 Respondió tocando el botón</span>` : '') +
     (m.audioSent ? '<span class="bubble-voice">🔊 Se envió también como nota de voz</span>' : '') +
     `<span class="bubble-meta">${ROLE_LABEL[m.role] ?? m.role} · ${fmtTime(m.at)}</span>`
 }
@@ -1274,7 +1292,7 @@ function renderMessages(messages, forceScrollBottom) {
   // Solo se agregan los mensajes nuevos al final si lo anterior no cambio
   // (lo normal: llego un mensaje). Redibujar todo cada vez reiniciaba los
   // audios que se estaban escuchando y recargaba las imagenes.
-  const sigs = messages.map((m) => `${m.role}|${m.at}|${m.content}|${m.template?.status || ''}|${m.attachment?.url || ''}|${m.audioSent ? 'a' : ''}`)
+  const sigs = messages.map((m) => `${m.role}|${m.at}|${m.content}|${m.template?.status || ''}|${m.attachment?.url || ''}|${m.audioSent ? 'a' : ''}|${m.interactive?.status || ''}`)
   const prev = renderedMessageSigs
   const samePrefix = !forceScrollBottom && prev.length && prev.length <= sigs.length
     && prev.every((sig, i) => sig === sigs[i]) && box.querySelector(':scope > .bubble')
