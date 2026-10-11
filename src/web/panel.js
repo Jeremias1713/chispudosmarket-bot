@@ -1966,6 +1966,15 @@ router.post('/api/settings', (req, res) => {
     return res.status(400).json({ error: 'Configuracion invalida: ' + errors.join(' ') });
   }
   const patch = { ...numericPatch, ...f7.patch };
+  // El descuento por pagar el envio no se puede prender sin el monto y los datos de pago.
+  if (f7.patch.prepayEnabled === true) {
+    const cur = settingsStore.getSettings();
+    const amount = 'prepayShippingAmount' in f7.patch ? f7.patch.prepayShippingAmount : cur.prepayShippingAmount;
+    const info = 'prepayPaymentInfo' in f7.patch ? f7.patch.prepayPaymentInfo : cur.prepayPaymentInfo;
+    if (!String(amount || '').trim() || !String(info || '').trim()) {
+      return res.status(400).json({ error: 'Para prender el descuento primero guarda el monto del envío y los datos de pago móvil.' });
+    }
+  }
   // Fase 7A: al prender la confirmacion se guarda desde cuando rige; las ventas
   // anteriores no se bloquean (ver orderConfirm.isGated).
   if (f7.patch.orderConfirmEnabled === true && !settingsStore.getSettings().orderConfirmActivatedAt) {
