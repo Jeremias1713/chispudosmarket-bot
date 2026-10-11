@@ -325,6 +325,9 @@ async function sendReply(to, text) {
 // saludo de bienvenida cuando estan configurados a mano: son texto ya
 // armado con su propio formato, no una respuesta libre de la IA, asi que no
 // hay que tocarlos ni un poco.
+// Etapas de venta cerrada en las que el pedido todavia no se despacho.
+const PRE_DISPATCH_STAGES = ['vendido', 'esperando_guia'];
+
 // Manda "🚚 Tu pedido sale ... y llegaria ... (estimado)" una sola vez por venta.
 async function sendCloseDates(phone, now = new Date()) {
   const s = getSession(phone);
@@ -1213,6 +1216,15 @@ async function processReply(from) {
           push.notifySale(from, updated);
         }
         if (stageChangeAllowed && SOLD_STAGES.includes(classification.stage) && !SOLD_STAGES.includes(current.stage)) {
+          // La mayoria de las ventas se detectan aca (no en isNewClose): el bot
+          // pregunta "¿confirmas?" y la venta la marca el clasificador en el
+          // turno siguiente. Antes, por este camino no salian ni la fecha
+          // estimada ni la oferta del descuento por pagar el envio. Solo si el
+          // pedido todavia no salio (vendido / esperando guia).
+          if (PRE_DISPATCH_STAGES.includes(classification.stage) && !updated.shippingNotifiedAt) {
+            try { await sendCloseDates(from); } catch (err) { console.error('No se pudo mandar la fecha estimada:', err.message); }
+            try { await prepay.offerAfterClose(from); } catch (err) { console.error('prepay: oferta:', err.message); }
+          }
           dropanasOrderAutomation.maybeCreate(from);
         }
       }
