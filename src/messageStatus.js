@@ -41,6 +41,20 @@ function applyStatusUpdate(sessions, statusEvent) {
     const history = (session && session.history) || [];
     for (let i = 0; i < history.length; i++) {
       const msg = history[i];
+      // Mensajes con botones del bot (whatsapp.buttonsHistoryExtra): mismo
+      // seguimiento de enviado/entregado/leido/fallo, guardado en msg.interactive.
+      if (msg && msg.interactive && msg.interactive.wamid === wamid) {
+        if (esRetroceso(msg.interactive.status, statusEvent.status)) {
+          return { updated: false, phone, messageIndex: i, omitido: 'retroceso' };
+        }
+        msg.interactive.status = statusEvent.status;
+        if (statusEvent.status === 'failed' && Array.isArray(statusEvent.errors) && statusEvent.errors[0]) {
+          const e = statusEvent.errors[0];
+          msg.interactive.failReason = e.title || e.message || 'Error desconocido de WhatsApp';
+          msg.interactive.failCode = e.code || null;
+        }
+        return { updated: true, phone, messageIndex: i, interactive: true };
+      }
       if (!msg || !msg.template || msg.template.wamid !== wamid) continue;
 
       if (esRetroceso(msg.template.status, statusEvent.status)) {

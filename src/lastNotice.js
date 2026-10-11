@@ -17,6 +17,8 @@ const LAST_HOUR = 19;
 const PICKUP = 'ld_pickup';
 const CHANGE = 'ld_change';
 const CANCEL = 'ld_cancel';
+// Lo que se guarda en el historial para que el panel muestre los botones.
+const buttonsHistoryExtra = (...a) => require('./whatsapp').buttonsHistoryExtra(...a);
 const BUTTONS = [
   { id: PICKUP, title: 'Voy a retirarlo' },
   { id: CHANGE, title: 'Cambiar agencia' },
@@ -82,8 +84,8 @@ async function sendNotice(session, settings, now, deps) {
   const text = noticeText(session, settings);
   try {
     if (open) {
-      await deps.sendButtons(phone, text, BUTTONS);
-      appendMessage(phone, 'assistant', text);
+      const res = await deps.sendButtons(phone, text, BUTTONS);
+      appendMessage(phone, 'assistant', text, buttonsHistoryExtra(BUTTONS, res));
     } else {
       const v = require('./shipping').placeholderValues(session);
       const params = [v.nombre, v.producto, v.agencia, pickupDeadline.deadlineText(session, settings)];
@@ -231,4 +233,4 @@ function start() {
 
 function stop() { if (timer) clearInterval(timer); timer = null; }
 
-module.exports = { run, eligible, noticeDate, handleReply, captureReason, classifyReason, buttonIdFrom, setPhoneContact, callToday, start, stop, PICKUP, CHANGE, CANCEL };
+module.exports = { run, eligible, noticeDate, handleReply, captureReason, classifyReason, buttonIdFrom, setPhoneContact, callToday, start, stop, PICKUP, CHANGE, CANCEL, BUTTONS };
