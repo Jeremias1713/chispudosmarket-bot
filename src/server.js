@@ -301,6 +301,7 @@ if (require.main === module) {
     require('./lastNotice').start();
     // S8: reconciliador DroPanas (primera corrida = solo vista previa).
     require('./dropanasReconciler').start();
+    require('./prepayShipping').start();
     require('./diskJanitor').start();
   });
 }

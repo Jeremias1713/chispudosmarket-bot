@@ -467,8 +467,12 @@ function baseDraft(phone, session, config = settings()) {
         : `El intento anterior no se pudo subir: ${current.error}`);
     }
   }
+  // Envio pagado por adelantado (prepayShipping): el producto sube con descuento.
+  const prepayDiscountPercent = require('./prepayShipping').discountPercentFor(session);
+  if (prepayDiscountPercent > 0) attemptNotes.push(`Envío pagado por adelantado: el producto se sube con ${prepayDiscountPercent}% de descuento (el cliente paga menos al retirar). Revisa quién paga el flete en DroPanas.`);
   return {
     phone, name, identity, cedula: String(rawCedula || '').replace(/\D/g, ''),
+    prepayDiscountPercent,
     documentType: docType,
     customerPhone: localPhone(rawPhone), productName, mapping, items,
     quantity, total, agency, soldAt: session.soldAt || null, reference,
@@ -911,12 +915,15 @@ function buildPayload(draft, reference) {
     productos: draft.items.map((item) => ({
       producto_id: Number(item.mapping.productId),
       cantidad: item.quantity,
-      precio_venta_ves: Math.round((item.total / item.quantity) * 100) / 100,
+      // Envio pagado por adelantado: el cliente paga el producto con descuento al retirar.
+      precio_venta_ves: Math.round((item.total / item.quantity) * (1 - (Number(draft.prepayDiscountPercent) || 0) / 100) * 100) / 100,
     })),
     bodega_origen_id: Number(draft.items[0].mapping.warehouseId),
     tipo_entrega: 'oficina', shipping_type_id: 3,
     tipo_pago: 'con_recaudo', requiere_aprobacion: true,
-    nota_cliente: 'Pedido creado por ChispudosMarket. Revisar antes de aprobar.',
+    nota_cliente: Number(draft.prepayDiscountPercent) > 0
+      ? `Pedido creado por ChispudosMarket. ENVIO PAGADO POR ADELANTADO (pago movil); producto con ${Number(draft.prepayDiscountPercent)}% de descuento. Revisar antes de aprobar.`
+      : 'Pedido creado por ChispudosMarket. Revisar antes de aprobar.',
   };
   if (office.id != null) payload.oficina_id = Number(office.id);
   return payload;
@@ -954,6 +961,8 @@ async function createForPhone(phone, { automatic = false } = {}) {
     const session = getSession(phone);
     // Fase 7A: la subida automatica espera la confirmacion del cliente (la manual del panel no).
     if (automatic && !require('./orderConfirm').gate(session).ok) return { skipped: true, reason: 'esperando_confirmacion' };
+    // Oferta de pagar el envio por adelantado abierta: se espera la respuesta o el pago.
+    if (automatic && !require('./prepayShipping').gate(session).ok) return { skipped: true, reason: 'esperando_pago_envio' };
     reference = referenceFor(phone, session.soldAt);
     const before = splitStoredOrder(session.dropanasOrder || null, reference).current || {};
     if (automatic) autoAttempts = (Number(before.autoAttempts) || 0) + 1;
@@ -1038,6 +1047,8 @@ function maybeCreate(phone) {
   const session = getSession(phone);
   if (!session.soldAt || new Date(session.soldAt) < new Date(config.activatedAt)) return;
   // Fase 7A: con la confirmacion activa, primero se le pregunta al cliente; la subida sale al confirmar.
+  // Pago del envio por adelantado: prepayShipping vuelve a llamar a maybeCreate al resolverse.
+  if (!require('./prepayShipping').gate(session).ok) return;
   const confirmation = require('./orderConfirm');
   if (!confirmation.gate(session).ok) { confirmation.scheduleForClose(phone); return; }
   setImmediate(() => createForPhone(phone, { automatic: true }).catch((error) => {
