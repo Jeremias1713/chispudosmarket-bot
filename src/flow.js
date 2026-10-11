@@ -48,6 +48,7 @@ const { getSettings } = require('./settings');
 const { generateSpeech, deleteSpeech } = require('./tts');
 const push = require('./push');
 const attention = require('./attention');
+const prepay = require('./prepayShipping');
 const calendar = require('./calendar');
 const orderConfirm = require('./orderConfirm');
 const lastNotice = require('./lastNotice');
@@ -585,6 +586,14 @@ async function handleIncomingMessage(from, message, profileName) {
     const lastNoticeId = lastNotice.buttonIdFrom(message);
     if (/^oc_/.test(buttonId)) {
       if (await orderConfirm.handleReply(from, buttonId)) return;
+    } else if (/^pp_/.test(buttonId)) {
+      // Descuento por pagar el envio por adelantado (prepayShipping.js).
+      if (await prepay.handleReply(from, buttonId)) return;
+    } else if (type === 'image' && await prepay.handleReceipt(from, { mediaUrl: mediaUrlIn || null })) {
+      // Captura del pago del envio: la revisa una persona, no la IA.
+      return;
+    } else if (rawText && type === 'text' && prepay.idFromText(rawText) && await prepay.handleReply(from, rawText)) {
+      return;
     } else if (lastNoticeId) {
       if (await lastNotice.handleReply(from, lastNoticeId)) return;
     } else if (rawText && type === 'text' && await lastNotice.captureReason(from, rawText)) {
@@ -901,7 +910,7 @@ async function processReply(from) {
         console.error('No se pudo avisar del pedido atrasado:', err.message);
       }
     }
-    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, deliveryDates);
+    const { text: reply, images } = await getAssistantReply(history, userText, knownCity, knownProduct, orderClosed, dataAlreadyRequested, shippingStage, knownCustomer, deliveryDates, prepay.promptBlock(session));
 
     // Red de seguridad de codigo, ademas del aviso en el prompt: si ya se
     // habia pedido nombre/cedula/telefono antes y el modelo igual intento
@@ -1079,6 +1088,11 @@ async function processReply(from) {
       push.notifySale(from, getSession(from));
     }
     if (isRepurchase) push.notifySale(from, getSession(from));
+    // Descuento por pagar el envio por adelantado: se ofrece justo despues del
+    // cierre y ANTES de cualquier subida a DroPanas (que espera la respuesta).
+    if (isNewClose || isRepurchase) {
+      try { await prepay.offerAfterClose(from); } catch (err) { console.error('prepay: oferta:', err.message); }
+    }
     // Clasificacion de etapa + ficha del cliente. Corre despues de mandar la
     // respuesta para no sumarle latencia. Si falla, no rompe nada: la
     // etapa/ficha simplemente no se actualiza este turno. Si la etapa esta

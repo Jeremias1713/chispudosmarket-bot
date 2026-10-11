@@ -1746,7 +1746,7 @@ function validateNumericSettings(body) {
 // asi el calendario y la fecha limite siguen apagados hasta que haya dato real.
 const FASE7_BOOLS = [
   'orderConfirmEnabled', 'calendarEnabled', 'dispatchOnSaturday', 'tealcaStorageBusinessDays',
-  'quickPickupCouponEnabled', 'lastNoticeEnabled',
+  'quickPickupCouponEnabled', 'lastNoticeEnabled', 'prepayEnabled',
 ];
 const FASE7_NUMS = {
   orderConfirmDelayMin: { min: 0, max: 240 },
@@ -1759,9 +1759,12 @@ const FASE7_NUMS = {
   quickPickupHours: { min: 1, max: 720 },
   quickPickupDiscountPercent: { min: 1, max: 90 },
   quickPickupCouponValidDays: { min: 1, max: 365 },
+  prepayDiscountPercent: { min: 1, max: 50 },
+  prepayOfferExpireMin: { min: 5, max: 1440 },
+  prepayPaymentExpireH: { min: 1, max: 72 },
   lastNoticeHour: { min: 0, max: 23 },
 };
-const FASE7_TEXTS = ['pickupDeadlineTemplateName', 'pickupDeadlineTemplateLanguage', 'lastNoticeTemplateName', 'lastNoticeTemplateLanguage'];
+const FASE7_TEXTS = ['pickupDeadlineTemplateName', 'pickupDeadlineTemplateLanguage', 'lastNoticeTemplateName', 'lastNoticeTemplateLanguage', 'prepayShippingAmount', 'prepayPaymentInfo'];
 
 function validateFase7Settings(body) {
   const patch = {};
@@ -1844,6 +1847,21 @@ router.get('/api/reports/returns', (req, res) => {
     return res.send(returnsReport.toCsv(report));
   }
   res.json(report);
+});
+
+// Pago del envio por adelantado (prepayShipping.js): pagos por confirmar.
+router.get('/api/prepay/pending', (_req, res) => {
+  res.json({ rows: require('../prepayShipping').pending(listSessions()) });
+});
+
+router.post('/api/prepay/:phone/decide', async (req, res) => {
+  try {
+    const r = await require('../prepayShipping').decide(String(req.params.phone), req.body?.paid === true);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Necesita atencion: lista aparte y boton "Resuelto" (attention.js).
@@ -1938,6 +1956,10 @@ router.post('/api/settings', (req, res) => {
   // anteriores no se bloquean (ver orderConfirm.isGated).
   if (f7.patch.orderConfirmEnabled === true && !settingsStore.getSettings().orderConfirmActivatedAt) {
     patch.orderConfirmActivatedAt = new Date().toISOString();
+  }
+  // Pago del envio por adelantado: solo se ofrece en ventas cerradas despues de prenderlo.
+  if (f7.patch.prepayEnabled === true && !settingsStore.getSettings().prepayActivatedAt) {
+    patch.prepayActivatedAt = new Date().toISOString();
   }
   const fields = [
     'businessName',

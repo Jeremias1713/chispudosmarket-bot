@@ -196,6 +196,15 @@ const DEFAULTS = {
   // Necesita atencion: respuesta unica cuando el bot detecta un reclamo y se
   // pausa en ese chat ('' = no contestar nada).
   attentionAutoReply: 'Lamento mucho lo que pasó 🙏 Ya le pasé tu caso a una persona del equipo para que te ayude directamente por aquí. En breve te escribe.',
+  // Descuento por pagar el envio por adelantado (prepayShipping.js). Apagado
+  // hasta que Jere cargue el monto del envio y sus datos de pago movil.
+  prepayEnabled: false,
+  prepayActivatedAt: null,
+  prepayDiscountPercent: 10,
+  prepayShippingAmount: '', // JERE LO CARGA: ej. "450 Bs" o "3 USD a tasa BCV"
+  prepayPaymentInfo: '', // JERE LO CARGA: datos de pago movil (banco, telefono, cedula)
+  prepayOfferExpireMin: 120,
+  prepayPaymentExpireH: 12,
   optOutAutoReply: 'Listo, no te enviaremos más mensajes automáticos. Si necesitas algo de tu pedido, escríbenos por aquí cuando quieras.',
 };
 
