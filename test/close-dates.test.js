@@ -71,3 +71,34 @@ test('sin calendario configurado (falta la hora de corte) no se manda ninguna fe
   await espera();
   assert.equal(enviados.filter((t) => t.startsWith('🚚')).length, 0);
 });
+
+// Caso real (…2494): el bot pregunta "¿Confirmas?", el cliente dice "Si" y la
+// venta la marca el CLASIFICADOR, no el cierre deterministico. Por ese camino
+// no salian ni la fecha ni la oferta del descuento.
+test('venta marcada por el clasificador: tambien salen la fecha y la oferta del descuento', async () => {
+  updateSettings({
+    calendarEnabled: true, dispatchCutoffHour: 15, dispatchOnSaturday: false,
+    prepayEnabled: true, prepayActivatedAt: '2026-01-01T00:00:00.000Z', prepayDiscountPercent: 10,
+    prepayShippingAmount: '4000 Bs', prepayPaymentInfo: 'Banco X 0414',
+  });
+  const botones = [];
+  whatsapp.sendButtons = async (to, text, buttons) => { botones.push({ text, buttons }); return { messages: [{ id: 'wb' }] }; };
+  const phone = '584120009103';
+  state.updateSession(phone, {
+    name: 'Jeison', stage: 'negociando', orderClosed: false, soldAt: null,
+    history: [{ role: 'assistant', content: 'Tendras 5 dias habiles para retirarlo. ¿Confirmas que podras hacerlo en ese plazo?', at: new Date().toISOString() }],
+    card: { nombre: 'Jeison Ramirez', cedula: '24018871', telefono: '04165522494', producto: 'Shilajit', ciudad: 'Guanare', monto: 36900 },
+  });
+  enviados.length = 0;
+  reply = '¡Perfecto! Entonces tu pedido esta confirmado.';
+  classifierMod.classifyConversation = async () => ({ stage: 'vendido', razon: 'confirmo', card: {} });
+  await flow.handleIncomingMessage(phone, { type: 'text', text: { body: 'Si perfectamente' } }, 'Jeison');
+  await espera(400);
+  classifierMod.classifyConversation = async () => null;
+  const s = state.getSession(phone);
+  assert.equal(s.stage, 'vendido');
+  assert.equal(enviados.filter((t) => t.startsWith('🚚')).length, 1, enviados.join(' || '));
+  assert.equal(botones.length, 1);
+  assert.match(botones[0].text, /3\.690 Bs del producto/);
+  assert.equal(s.prepay.status, 'offered');
+});
