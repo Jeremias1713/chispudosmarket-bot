@@ -24,6 +24,9 @@ const whatsappWindow = require('./whatsappWindow');
 
 const YES = 'pp_yes';
 const NO = 'pp_no';
+const OFFER_BUTTONS = [{ id: YES, title: 'Sí, quiero descuento' }, { id: NO, title: 'Pago al retirar' }];
+// Lo que se guarda en el historial para que el panel muestre los botones.
+const buttonsHistoryExtra = (...a) => require('./whatsapp').buttonsHistoryExtra(...a);
 const TICK_MS = 60 * 1000;
 const WAITING = ['offered', 'awaiting_payment', 'receipt_sent'];
 let timer = null;
@@ -98,8 +101,8 @@ async function offerAfterClose(phone, deps = defaultDeps(), settings = getSettin
   updateSession(phone, { prepay: { status: 'offered', soldAt: session.soldAt, percent, offeredAt: now.toISOString() } });
   const text = `💸 *Opcional:* si pagas el envío por adelantado (${String(settings.prepayShippingAmount).trim()}) por pago móvil, te descontamos el ${percent}% del producto y al retirar pagas menos. ¿Te interesa?`;
   try {
-    await deps.sendButtons(phone, text, [{ id: YES, title: 'Sí, quiero descuento' }, { id: NO, title: 'Pago al retirar' }]);
-    appendMessage(phone, 'assistant', text);
+    const res = await deps.sendButtons(phone, text, OFFER_BUTTONS);
+    appendMessage(phone, 'assistant', text, buttonsHistoryExtra(OFFER_BUTTONS, res));
   } catch (err) {
     console.error('prepay: no se pudo ofrecer el descuento:', err.message);
     // Si no salio, la venta sigue normal (contra entrega).
@@ -252,6 +255,6 @@ function start() {
 function stop() { if (timer) clearInterval(timer); timer = null; }
 
 module.exports = {
-  YES, NO, isConfigured, gate, offerAfterClose, handleReply, handleReceipt, decide, pending,
+  YES, NO, OFFER_BUTTONS, isConfigured, gate, offerAfterClose, handleReply, handleReceipt, decide, pending,
   discountPercentFor, tick, promptBlock, start, stop, discounted, idFromText,
 };

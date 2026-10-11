@@ -384,7 +384,7 @@ function applyTemplateStatus(statusEvent, options = {}) {
   const resultado = applyStatusUpdate(sessions, statusEvent);
   // S6: si Meta rechazo un aviso automatico (llegada, guia, entregado...), se
   // libera la marca para reintentarlo o se manda a "Llamar hoy".
-  if (resultado.updated && statusEvent?.status === 'failed' && resultado.phone) {
+  if (resultado.updated && !resultado.interactive && statusEvent?.status === 'failed' && resultado.phone) {
     try {
       const session = sessions[resultado.phone];
       const msg = session?.history?.[resultado.messageIndex];

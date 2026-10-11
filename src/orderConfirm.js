@@ -20,6 +20,9 @@ const whatsappWindow = require('./whatsappWindow');
 const TICK_MS = 60 * 1000;
 const YES = 'oc_yes';
 const CHANGE = 'oc_change';
+const BUTTONS = [{ id: YES, title: 'Sí, confirmo' }, { id: CHANGE, title: 'Quiero cambiar algo' }];
+// Lo que se guarda en el historial para que el panel muestre los botones.
+const buttonsHistoryExtra = (...a) => require('./whatsapp').buttonsHistoryExtra(...a);
 const AFFIRM_TEXT = /^\s*(si|sí|sii+|confirmo|confirmado|correcto|todo correcto|dale|ok|okey|listo|de acuerdo)[\s.!]*$/i;
 let timer = null;
 let running = false;
@@ -99,13 +102,14 @@ async function sendOne(session, now, settings, deps) {
   const monto = Number(session.card.monto);
   const autoSends = outboundGuard.nextAutoSends(session, 'order_confirm', now);
   updateSession(phone, { autoSends, orderConfirm: { ...oc, status: 'sent', sentAt: now.toISOString(), monto } });
+  let res;
   try {
-    await deps.sendButtons(phone, text, [{ id: YES, title: 'Sí, confirmo' }, { id: CHANGE, title: 'Quiero cambiar algo' }]);
+    res = await deps.sendButtons(phone, text, BUTTONS);
   } catch (err) {
     console.error('orderConfirm: no se pudo enviar la confirmacion:', err.message);
     return 'error';
   }
-  try { appendMessage(phone, 'assistant', text); } catch (err) { console.warn('orderConfirm: historial:', err.message); }
+  try { appendMessage(phone, 'assistant', text, buttonsHistoryExtra(BUTTONS, res)); } catch (err) { console.warn('orderConfirm: historial:', err.message); }
   return 'sent';
 }
 
@@ -119,8 +123,8 @@ async function sendReminder(session, now, settings, deps) {
     orderConfirm: { ...oc, reminderSentAt: now.toISOString() },
   });
   try {
-    await deps.sendButtons(session.phone, text, [{ id: YES, title: 'Sí, confirmo' }, { id: CHANGE, title: 'Quiero cambiar algo' }]);
-    appendMessage(session.phone, 'assistant', text);
+    const res = await deps.sendButtons(session.phone, text, BUTTONS);
+    appendMessage(session.phone, 'assistant', text, buttonsHistoryExtra(BUTTONS, res));
   } catch (err) {
     console.error('orderConfirm: recordatorio:', err.message);
   }
@@ -207,4 +211,4 @@ function start() {
 
 function stop() { if (timer) clearInterval(timer); timer = null; }
 
-module.exports = { isGated, gate, scheduleForClose, buildMessage, tick, confirm, handleReply, confirmByText, start, stop, YES, CHANGE };
+module.exports = { isGated, gate, scheduleForClose, buildMessage, tick, confirm, handleReply, confirmByText, start, stop, YES, CHANGE, BUTTONS };

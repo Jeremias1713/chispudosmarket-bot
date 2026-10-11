@@ -40,9 +40,40 @@ async function sendText(to, body) {
   });
 }
 
+// Limites de WhatsApp para un mensaje con botones de respuesta: texto de 1 a
+// 1024 caracteres, de 1 a 3 botones, titulo de 1 a 20 caracteres (unico) e id
+// de 1 a 256 caracteres (unico). Meta rechaza el mensaje entero si algo no
+// cumple, asi que se revisa antes de mandarlo. Devuelve la lista de problemas
+// (vacia = esta bien).
+function checkButtons(bodyText, buttons) {
+  const problems = [];
+  const body = String(bodyText || '');
+  if (!body.trim()) problems.push('el texto esta vacio');
+  if (body.length > 1024) problems.push(`el texto tiene ${body.length} caracteres (maximo 1024)`);
+  const list = Array.isArray(buttons) ? buttons : [];
+  if (list.length < 1 || list.length > 3) problems.push(`tiene ${list.length} botones (de 1 a 3)`);
+  const ids = new Set();
+  const titles = new Set();
+  for (const b of list) {
+    const id = String(b?.id || '');
+    const title = String(b?.title || '');
+    if (!id || id.length > 256) problems.push(`id de boton invalido: "${id}"`);
+    if (!title.trim() || [...title].length > 20) problems.push(`titulo de boton invalido (1 a 20 caracteres): "${title}"`);
+    if (ids.has(id)) problems.push(`id repetido: "${id}"`);
+    if (titles.has(title)) problems.push(`titulo repetido: "${title}"`);
+    ids.add(id);
+    titles.add(title);
+  }
+  return problems;
+}
+
+// Devuelve la respuesta de Meta ({ messages: [{ id: wamid }] }) para poder
+// seguir si llego y si lo leyo.
 async function sendButtons(to, bodyText, buttons) {
+  const problems = checkButtons(bodyText, buttons);
+  if (problems.length) throw new Error(`Mensaje con botones invalido: ${problems.join('; ')}`);
   const api = client();
-  await api.post('/messages', {
+  const res = await api.post('/messages', {
     messaging_product: 'whatsapp',
     ...addressee(to),
     type: 'interactive',
@@ -50,13 +81,28 @@ async function sendButtons(to, bodyText, buttons) {
       type: 'button',
       body: { text: bodyText },
       action: {
-        buttons: buttons.slice(0, 3).map((b) => ({
+        buttons: buttons.map((b) => ({
           type: 'reply',
-          reply: { id: b.id, title: b.title.slice(0, 20) },
+          reply: { id: b.id, title: b.title },
         })),
       },
     },
   });
+  return res?.data || null;
+}
+
+// Lo que se guarda en el historial junto al texto de un mensaje con botones,
+// para que el panel muestre los botones y si el mensaje llego/se leyo.
+function buttonsHistoryExtra(buttons, response) {
+  const wamid = response?.messages?.[0]?.id || null;
+  return {
+    interactive: {
+      kind: 'buttons',
+      buttons: (buttons || []).map((b) => ({ id: String(b.id), title: String(b.title) })),
+      wamid,
+      status: 'sent',
+    },
+  };
 }
 
 async function sendLocationRequest(to, bodyText) {
@@ -165,4 +211,4 @@ async function markAsRead(messageId) {
   }
 }
 
-module.exports = { isBsuid, addressee, sendText, sendButtons, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead, downloadMedia };
+module.exports = { isBsuid, addressee, sendText, sendButtons, checkButtons, buttonsHistoryExtra, sendLocationRequest, sendImageByLink, sendAudioByLink, sendTemplate, markAsRead, downloadMedia };

@@ -570,7 +570,14 @@ async function handleIncomingMessage(from, message, profileName) {
     const label = type === 'video' ? '[video]' : '[imagen]';
     appendMessage(from, 'user', rawText || label, attachment ? { attachment } : undefined);
   } else if (rawText) {
-    appendMessage(from, 'user', rawText);
+    // Si el cliente toco un boton (del bot o de una plantilla), se guarda cual
+    // para que el panel lo muestre como respuesta con boton.
+    const tapped = type === 'interactive' && message.interactive?.button_reply
+      ? { id: message.interactive.button_reply.id || '', title: message.interactive.button_reply.title || '' }
+      : type === 'button' && message.button
+        ? { id: message.button.payload || '', title: message.button.text || '' }
+        : null;
+    appendMessage(from, 'user', rawText, tapped ? { buttonReply: tapped } : undefined);
   } else if (type === 'location') {
     appendMessage(from, 'user', '[Comparti su ubicacion GPS]');
   } else {
