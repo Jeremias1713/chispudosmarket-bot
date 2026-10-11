@@ -19,7 +19,8 @@ const sess = (extra = {}) => ({ phone: '584120000009', stage: 'esperando_retiro'
 
 test('fecha limite: dias corridos o habiles, y null si no hay dato cargado', () => {
   assert.equal(pickupDeadline.deadlineFor(sess(), base), '2026-10-12');
-  assert.equal(pickupDeadline.deadlineFor(sess(), { ...base, tealcaStorageBusinessDays: true }), '2026-10-14');
+  // Habiles: se salta el fin de semana y el feriado fijo del 12 de octubre.
+  assert.equal(pickupDeadline.deadlineFor(sess(), { ...base, tealcaStorageBusinessDays: true }), '2026-10-15');
   assert.equal(pickupDeadline.deadlineFor(sess(), { ...base, tealcaStorageDays: null }), null);
   assert.equal(pickupDeadline.deadlineFor(sess({ arrivalNotifiedAt: null }), base), null);
   assert.equal(pickupDeadline.deadlineText(sess(), base), 'el lunes 12 de octubre');
