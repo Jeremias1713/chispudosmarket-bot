@@ -42,6 +42,10 @@ test('boton "Sí, quiero descuento" y captura: no pasan por la IA', async () => 
   await flow.handleIncomingMessage(PHONE, { type: 'interactive', interactive: { button_reply: { id: 'pp_yes', title: 'Sí, quiero descuento' } } }, 'Ana');
   await wait();
   assert.equal(getSession(PHONE).prepay.status, 'awaiting_payment');
+  // El panel muestra que el cliente respondio tocando el boton.
+  const tap = getSession(PHONE).history.find((m) => m.role === 'user' && m.buttonReply);
+  assert.deepEqual(tap.buttonReply, { id: 'pp_yes', title: 'Sí, quiero descuento' });
+  assert.equal(tap.content, 'Sí, quiero descuento');
   assert.match(enviados.join('\n'), /0414-0000000/);
   await flow.handleIncomingMessage(PHONE, { type: 'image', image: { id: 'img1' } }, 'Ana');
   await wait();
