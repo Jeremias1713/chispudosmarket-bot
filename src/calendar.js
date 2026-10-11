@@ -50,11 +50,17 @@ function isConfigured(settings = getSettings()) {
     && typeof settings.dispatchOnSaturday === 'boolean';
 }
 
+// Feriados nacionales de fecha fija de Venezuela (MM-DD). Van fijos en el
+// codigo: antes solo estaban en la lista editable del panel y, si esa lista se
+// guardaba vacia, el calendario los perdia. En el panel solo van los movibles.
+const FIXED_HOLIDAYS = ['01-01', '04-19', '05-01', '06-24', '07-05', '07-24', '10-12', '12-24', '12-25', '12-31'];
+
 // ymd: cadena YYYY-MM-DD.
 function isBusinessDay(ymd, settings = getSettings()) {
   const dow = dowOf(ymd);
   if (dow === 0) return false;
   if (dow === 6 && settings.dispatchOnSaturday === false) return false;
+  if (FIXED_HOLIDAYS.includes(String(ymd).slice(5))) return false;
   if ((settings.holidays || []).includes(ymd)) return false;
   return true;
 }
@@ -242,11 +248,22 @@ function promptBlock(dates) {
     return '\n  DATO YA CONFIRMADO, FECHAS DEL ENVIO: el pedido esta tardando mas de lo estimado. Si el cliente pregunta cuando llega, di que lo estas revisando con la transportadora y que le avisas apenas tengas novedad. NUNCA des una fecha ni calcules una por tu cuenta.\n';
   }
   const salida = dates.dispatched ? `salio ${dates.dispatchText === 'hoy' ? 'hoy' : dates.dispatchText}` : `sale ${dates.dispatchText}`;
-  const cierre = dates.dispatched ? '' : ` CIERRE: FECHAS: cuando mandes el mensaje de cierre del pedido, agrega UNA sola frase corta con esa misma informacion, por ejemplo "🚚 Tu pedido ${salida} y llegaria ${dates.rangeText} (estimado)", despues del resumen y antes del plazo de retiro. Copia las fechas tal cual, sin cambiarlas ni calcular otras. No la repitas fuera del cierre salvo que el cliente pregunte.`;
+  // La fecha del cierre la manda el CODIGO en un mensaje aparte (closeDatesText,
+  // ver flow.js): antes se le pedia a la IA que la agregara y la mayoria de las
+  // veces no lo hacia.
+  const cierre = dates.dispatched ? '' : ' CIERRE: FECHAS: NO pongas fechas en el mensaje de cierre del pedido; el sistema le manda la fecha estimada al cliente en un mensaje aparte justo despues.';
   return `\n  DATO YA CONFIRMADO, FECHAS DEL ENVIO: si el cliente pregunta cuando sale o cuando llega, responde EXACTAMENTE: ${salida} y llegaria ${dates.rangeText} (estimado). Nunca des otra fecha ni calcules por tu cuenta. Si es fin de semana o feriado, explica que el despacho sale el siguiente dia habil.${cierre}\n`;
 }
 
+// Mensaje fijo con la fecha estimada, para mandar apenas se cierra la venta.
+function closeDatesText(dates) {
+  if (!dates || dates.late) return null;
+  const salida = dates.dispatched ? `salió ${dates.dispatchText}` : `sale ${dates.dispatchText}`;
+  return `🚚 Tu pedido ${salida} y llegaría a la agencia ${dates.rangeText} (estimado). Te avisamos apenas llegue.`;
+}
+
 module.exports = {
+  closeDatesText,
   businessDaysBetween, localParts, addDays, daysBetween, isConfigured, isBusinessDay, nextBusinessDay, addBusinessDays,
   minutesToCutoff, dispatchDate, transitFor, arrivalRange, regionForAgency, regionForCity, regionForSession, formatDispatch, formatRange,
   formatDayShort, datesForSession, promptBlock,
