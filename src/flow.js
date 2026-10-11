@@ -325,6 +325,17 @@ async function sendReply(to, text) {
 // saludo de bienvenida cuando estan configurados a mano: son texto ya
 // armado con su propio formato, no una respuesta libre de la IA, asi que no
 // hay que tocarlos ni un poco.
+// Manda "🚚 Tu pedido sale ... y llegaria ... (estimado)" una sola vez por venta.
+async function sendCloseDates(phone, now = new Date()) {
+  const s = getSession(phone);
+  if (!s?.soldAt || s.closeDatesSoldAt === s.soldAt) return false;
+  const text = calendar.closeDatesText(calendar.datesForSession(s, now));
+  if (!text) return false;
+  updateSession(phone, { closeDatesSoldAt: s.soldAt });
+  await sendRawReply(phone, text);
+  return true;
+}
+
 async function sendRawReply(to, text) {
   await sendText(to, text);
   // El mensaje ya salio: si falla el guardado en el historial (disco lleno) no
@@ -1095,6 +1106,11 @@ async function processReply(from) {
       push.notifySale(from, getSession(from));
     }
     if (isRepurchase) push.notifySale(from, getSession(from));
+    // Fecha estimada de llegada: la manda el codigo (no la IA) apenas se cierra
+    // la venta, una vez por venta. Sin calendario configurado no se manda nada.
+    if (isNewClose || isRepurchase) {
+      try { await sendCloseDates(from); } catch (err) { console.error('No se pudo mandar la fecha estimada:', err.message); }
+    }
     // Descuento por pagar el envio por adelantado: se ofrece justo despues del
     // cierre y ANTES de cualquier subida a DroPanas (que espera la respuesta).
     if (isNewClose || isRepurchase) {

@@ -24,7 +24,8 @@ test('antes del corte sale hoy, despues sale el siguiente dia habil', () => {
 });
 
 test('viernes tarde: sin sabado sale el lunes, con sabado sale el sabado', () => {
-  assert.equal(calendar.dispatchDate(caracas('2026-10-09', 15), { ...base, holidays: [] }), '2026-10-12');
+  // 2026-10-16 viernes, 19 lunes (sin feriado).
+  assert.equal(calendar.dispatchDate(caracas('2026-10-16', 15), { ...base, holidays: [] }), '2026-10-19');
   assert.equal(calendar.dispatchDate(caracas('2026-10-09', 15), { ...base, dispatchOnSaturday: true }), '2026-10-10');
 });
 
@@ -98,12 +99,13 @@ test('transitStats agrupa por region y usa el default con pocas muestras', () =>
   assert.equal(r.regions.find((x) => x.region === 'CENTRO OCCIDENTE').usesDefault, true);
 });
 
-test('el bloque pide la fecha en el cierre solo si el pedido aun no salio', () => {
+test('la fecha del cierre la manda el codigo (mensaje fijo) y la IA no la repite', () => {
   const s = { stage: 'vendido', card: { agencia: 'Tealca SABANA GRANDE' } };
   const d = calendar.datesForSession(s, caracas('2026-10-06', 10), base, loader);
   const block = calendar.promptBlock(d);
-  assert.match(block, /CIERRE: FECHAS/);
-  assert.match(block, /Tu pedido sale hoy y llegaria el 7 o 8 de octubre \(estimado\)/);
+  assert.match(block, /CIERRE: FECHAS: NO pongas fechas/);
+  assert.equal(calendar.closeDatesText(d), '🚚 Tu pedido sale hoy y llegaría a la agencia el 7 o 8 de octubre (estimado). Te avisamos apenas llegue.');
+  assert.equal(calendar.closeDatesText(null), null);
   const enviado = { stage: 'en_camino', shippingNotifiedAt: caracas('2026-10-06', 9).toISOString(), card: { agencia: 'Sabana Grande' } };
   const d2 = calendar.datesForSession(enviado, caracas('2026-10-07', 10), base, loader);
   assert.doesNotMatch(calendar.promptBlock(d2), /CIERRE: FECHAS/);
@@ -135,4 +137,11 @@ test('sin agencia en la ficha usa la del resumen del chat, la ciudad o el defaul
   assert.equal(nada.region, null);
   assert.equal(nada.rangeText, 'el 8 o 9 de octubre');
   assert.match(calendar.promptBlock(nada), /CIERRE: FECHAS/);
+});
+
+test('los feriados fijos cuentan aunque la lista del panel este vacia', () => {
+  const sinLista = { ...base, holidays: [] };
+  assert.equal(calendar.isBusinessDay('2026-12-25', sinLista), false);
+  assert.equal(calendar.isBusinessDay('2026-07-24', sinLista), false);
+  assert.equal(calendar.isBusinessDay('2026-10-13', sinLista), true);
 });

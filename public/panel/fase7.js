@@ -53,9 +53,11 @@
       el('option', { value: 'false', text: 'No, el sábado no' }),
     ])
     var body = el('div', { class: 'cfg-body' }, [
-      el('div', { class: 'help', text: 'Todo arranca APAGADO. Cada pieza tiene su interruptor; carga primero los datos que necesita.' }),
+      el('div', { class: 'help', id: 'f7_loadMsg', text: 'Cargando la configuración guardada…' }),
+      el('div', { class: 'help', text: 'Cada interruptor se guarda solo al tocarlo. Los demás datos (hora de corte, sábado, feriados, plantillas…) se guardan con el botón "Guardar Fase 7".' }),
       check('f7_orderConfirmEnabled', '7A · Confirmar el pedido con botones antes de subirlo a DroPanas'),
       check('f7_calendarEnabled', '7B · Fechas de despacho y llegada (necesita hora de corte y sábado)'),
+      el('div', { class: 'help', id: 'f7_calendarStatus' }),
       field('Hora de corte de despacho (0-23, hora de Caracas)', num('f7_cutoffHour', 'ej. 14')),
       field('¿Se despacha el sábado?', yesNo),
       field('Feriados movibles (AAAA-MM-DD separados por coma: Carnaval, Semana Santa, decretados)', el('textarea', { id: 'f7_holidays', rows: '3' })),
@@ -93,15 +95,85 @@
     if (anchor) anchor.parentNode.insertBefore(card, anchor)
     else firstCard.parentNode.appendChild(card)
     $('f7_save').addEventListener('click', saveConfig)
-    // Los interruptores se guardan al tocarlos (antes habia que acordarse de "Guardar Fase 7").
-    ;['f7_orderConfirmEnabled', 'f7_calendarEnabled', 'f7_quickPickupCouponEnabled', 'f7_lastNoticeEnabled', 'f7_storageBusiness', 'f7_prepayEnabled'].forEach(function (id) {
-      $(id).addEventListener('change', saveConfig)
+    // Cada interruptor guarda SOLO su propio dato. Antes mandaba el formulario
+    // entero: si se tocaba antes de que terminara de cargar (Render a veces
+    // tarda), se guardaba todo vacio y se borraban la hora de corte, el sabado,
+    // los feriados y los demas interruptores (el bot dejaba de dar fechas).
+    Object.keys(SWITCHES).forEach(function (id) {
+      $(id).addEventListener('change', function () { saveSwitch(id) })
     })
+    setEnabled(false)
     $('f7_transitPreview').addEventListener('click', function () { transit(false) })
     $('f7_transitSave').addEventListener('click', function () { transit(true) })
   }
 
   function say(msg) { var m = $('f7_msg'); if (m) m.textContent = msg }
+
+  var SWITCHES = {
+    f7_orderConfirmEnabled: 'orderConfirmEnabled',
+    f7_calendarEnabled: 'calendarEnabled',
+    f7_quickPickupCouponEnabled: 'quickPickupCouponEnabled',
+    f7_lastNoticeEnabled: 'lastNoticeEnabled',
+    f7_storageBusiness: 'tealcaStorageBusinessDays',
+    f7_prepayEnabled: 'prepayEnabled',
+  }
+  // Hasta que no llega la configuracion guardada no se puede tocar nada.
+  var loaded = false
+  function setEnabled(on) {
+    var card = $('f7_card')
+    if (!card) return
+    card.querySelectorAll('.cfg-body input, .cfg-body select, .cfg-body textarea, #f7_save').forEach(function (x) { x.disabled = !on })
+  }
+
+  function loadConfig() {
+    var msg = $('f7_loadMsg')
+    if (msg) msg.textContent = 'Cargando la configuración guardada…'
+    if (!loaded) setEnabled(false)
+    return call('/settings').then(function (s) {
+      fillConfig(s)
+      loaded = true
+      setEnabled(true)
+      if (msg) msg.textContent = ''
+    }).catch(function (e) {
+      if (msg) msg.textContent = 'No se pudo cargar la configuración (' + e.message + '). Recarga la página antes de cambiar algo.'
+    })
+  }
+
+  // Igual que calendar.isConfigured del servidor: sin estos datos el bot no da fechas.
+  function calendarStatus(s) {
+    var box = $('f7_calendarStatus')
+    if (!box) return
+    var faltan = []
+    if (s.dispatchCutoffHour == null || s.dispatchCutoffHour === '') faltan.push('la hora de corte')
+    if (typeof s.dispatchOnSaturday !== 'boolean') faltan.push('si se despacha el sábado')
+    if (s.calendarEnabled !== true) box.textContent = '⚪ Apagado: el bot no da fechas de llegada.'
+    else if (faltan.length) box.textContent = '⚠️ Prendido pero el bot NO está dando fechas: falta ' + faltan.join(' y ') + '. Cárgalo y toca "Guardar Fase 7".'
+    else box.textContent = '✅ El bot está dando fechas: corte a las ' + s.dispatchCutoffHour + ':00, sábado ' + (s.dispatchOnSaturday ? 'sí' : 'no') + '.' +
+      (Number(s.dispatchCutoffHour) < 6 ? ' ⚠️ Ojo: ' + s.dispatchCutoffHour + ' es de madrugada. Si el corte es en la tarde, usa formato 24 h (ej. 15 = 3 de la tarde).' : '')
+  }
+
+  function saveSwitch(id) {
+    var input = $(id)
+    if (!loaded) { input.checked = !input.checked; return }
+    var body = {}
+    body[SWITCHES[id]] = input.checked
+    if (id === 'f7_prepayEnabled' && input.checked && (!$('f7_prepayAmount').value.trim() || !$('f7_prepayInfo').value.trim())) {
+      $('f7_prepayHint').textContent = 'Primero escribe el monto del envío y los datos de pago móvil (abajo), toca "Guardar Fase 7" y después prende este interruptor.'
+      input.checked = false
+      return
+    }
+    if (id === 'f7_prepayEnabled') $('f7_prepayHint').textContent = ''
+    input.disabled = true
+    say('Guardando…')
+    call('/settings', { method: 'POST', body: JSON.stringify(body) })
+      .then(function (s) {
+        input.checked = s[SWITCHES[id]] === true
+        calendarStatus(s)
+        say(input.checked ? 'Prendido y guardado.' : 'Apagado y guardado.')
+      })
+      .catch(function (e) { input.checked = !input.checked; say('No se guardó: ' + e.message) })
+      .then(function () { input.disabled = false })
+  }
 
   function fillConfig(s) {
     $('f7_orderConfirmEnabled').checked = s.orderConfirmEnabled === true
@@ -109,6 +181,7 @@
     $('f7_quickPickupCouponEnabled').checked = s.quickPickupCouponEnabled === true
     $('f7_lastNoticeEnabled').checked = s.lastNoticeEnabled === true
     $('f7_storageBusiness').checked = s.tealcaStorageBusinessDays === true
+    calendarStatus(s)
     $('f7_cutoffHour').value = s.dispatchCutoffHour == null ? '' : s.dispatchCutoffHour
     $('f7_saturday').value = s.dispatchOnSaturday === true ? 'true' : s.dispatchOnSaturday === false ? 'false' : ''
     $('f7_storageDays').value = s.tealcaStorageDays == null ? '' : s.tealcaStorageDays
@@ -124,39 +197,30 @@
   }
 
   function saveConfig() {
+    // Nunca se guarda un formulario que no termino de cargar (lo dejaria todo vacio).
+    if (!loaded) { say('Espera a que cargue la configuración.'); return }
     var sat = $('f7_saturday').value
     var body = {
-      orderConfirmEnabled: $('f7_orderConfirmEnabled').checked,
-      calendarEnabled: $('f7_calendarEnabled').checked,
-      quickPickupCouponEnabled: $('f7_quickPickupCouponEnabled').checked,
-      lastNoticeEnabled: $('f7_lastNoticeEnabled').checked,
-      tealcaStorageBusinessDays: $('f7_storageBusiness').checked,
       dispatchCutoffHour: $('f7_cutoffHour').value === '' ? null : Number($('f7_cutoffHour').value),
       dispatchOnSaturday: sat === '' ? null : sat === 'true',
       tealcaStorageDays: $('f7_storageDays').value === '' ? null : Number($('f7_storageDays').value),
       holidays: $('f7_holidays').value,
       pickupDeadlineTemplateName: $('f7_deadlineTpl').value,
       lastNoticeTemplateName: $('f7_lastNoticeTpl').value,
-      prepayEnabled: $('f7_prepayEnabled').checked,
       prepayShippingAmount: $('f7_prepayAmount').value,
       prepayPaymentInfo: $('f7_prepayInfo').value,
     }
     if ($('f7_prepayPercent').value !== '') body.prepayDiscountPercent = Number($('f7_prepayPercent').value)
     if ($('f7_prepayOfferMin').value !== '') body.prepayOfferExpireMin = Number($('f7_prepayOfferMin').value)
     if ($('f7_prepayPayH').value !== '') body.prepayPaymentExpireH = Number($('f7_prepayPayH').value)
-    var warn = ''
-    if (body.prepayEnabled && (!body.prepayShippingAmount.trim() || !body.prepayPaymentInfo.trim())) {
-      // No se puede prender sin esos datos: se avisa justo debajo del interruptor
-      // (antes el aviso quedaba lejos y lo pisaba "Guardado").
-      warn = 'Primero escribe el monto del envío y los datos de pago móvil (abajo) y después prende este interruptor.'
-      $('f7_prepayEnabled').checked = false
-      body.prepayEnabled = false
-    }
-    $('f7_prepayHint').textContent = warn
+    // Si se borran los datos del descuento, el descuento se apaga.
+    if ($('f7_prepayEnabled').checked && (!body.prepayShippingAmount.trim() || !body.prepayPaymentInfo.trim())) body.prepayEnabled = false
     say('Guardando…')
+    $('f7_save').disabled = true
     call('/settings', { method: 'POST', body: JSON.stringify(body) })
-      .then(function (s) { fillConfig(s); say(warn ? 'Guardado, pero el descuento sigue apagado: faltan datos.' : 'Guardado') })
-      .catch(function (e) { say(e.message) })
+      .then(function (s) { fillConfig(s); say('✔ Guardado') })
+      .catch(function (e) { say('No se guardó: ' + e.message) })
+      .then(function () { $('f7_save').disabled = false })
   }
 
   function transit(confirm) {
@@ -255,7 +319,7 @@
   function onTab(view) {
     if (view === 'view-config') {
       buildConfigCard()
-      call('/settings').then(fillConfig).catch(function () {})
+      loadConfig()
       loadLists()
     }
     if (view === 'view-metrics') { buildReport(); loadReport() }
