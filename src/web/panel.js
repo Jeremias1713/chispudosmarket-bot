@@ -547,6 +547,8 @@ router.get('/api/conversations/:phone', (req, res) => {
     attachment: m.attachment || null,
     audioSent: Boolean(m.audioSent),
     template: m.template || null,
+    interactive: m.interactive || null,
+    buttonReply: m.buttonReply || null,
   }));
   const body = { conversation: toConvo({ ...s, phone }), messages };
   // Version del contenido: si el panel ya tiene exactamente esto (misma
