@@ -68,7 +68,7 @@
       field('Plantilla del último aviso (Utilidad, 3 botones)', txt('f7_lastNoticeTpl', 'nombre de la plantilla')),
       el('h4', { text: '💸 Descuento por pagar el envío por adelantado' }),
       check('f7_prepayEnabled', 'Ofrecer el descuento al cerrar el pedido (necesita monto del envío y datos de pago móvil)'),
-      field('Descuento sobre el producto (%)', num('f7_prepayPercent', 'ej. 10')),
+      field('Descuento general sobre el producto (%). Cada producto puede tener el suyo (en Bs o %) en la pestaña Productos', num('f7_prepayPercent', 'ej. 10')),
       field('Monto del envío que paga por adelantado (tal cual lo verá el cliente)', txt('f7_prepayAmount', 'ej. 450 Bs')),
       field('Datos de pago móvil (banco, teléfono, cédula)', el('textarea', { id: 'f7_prepayInfo', rows: '3', placeholder: 'Banco de Venezuela\n0414-0000000\nV-12.345.678' })),
       field('Si no contesta la oferta, sigue contra entrega después de (minutos)', num('f7_prepayOfferMin', '120')),
@@ -175,7 +175,7 @@
       box.textContent = ''
       if (!r.rows.length) { box.appendChild(el('div', { class: 'help', text: 'Nada por ahora.' })); return }
       r.rows.forEach(function (x) {
-        var label = (x.name || '…' + String(x.phone).slice(-4)) + ' · ' + (x.status === 'receipt_sent' ? 'mandó la captura' : 'esperando la captura') + ' · ' + x.percent + '%' + (x.total ? ' · producto ' + x.total + ' Bs' : '')
+        var label = (x.name || '…' + String(x.phone).slice(-4)) + ' · ' + (x.status === 'receipt_sent' ? 'mandó la captura' : 'esperando la captura') + ' · descuento ' + (x.discountBs != null ? x.discountBs + ' Bs' : x.percent + '%') + (x.total ? ' · producto ' + x.total + ' Bs' : '')
         box.appendChild(el('div', { class: 'field' }, [
           el('span', { text: label + ' ' }),
           x.receiptUrl ? el('a', { href: x.receiptUrl, target: '_blank', rel: 'noopener', text: 'Ver captura' }) : null,
