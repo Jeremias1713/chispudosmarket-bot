@@ -41,8 +41,12 @@
 
   function buildConfigCard() {
     if ($('f7_card')) return
-    var actions = document.querySelector('#view-config .settings-actions')
-    if (!actions) return
+    // Va como tarjeta propia de Configuracion. Antes se metia antes del primer
+    // ".settings-actions" de la vista, que es el de "Cobertura de agencias", y
+    // la Fase 7 terminaba adentro de esa tarjeta.
+    var anchor = document.getElementById('cfg_notifCard')
+    var firstCard = document.querySelector('#view-config details.cfg')
+    if (!anchor && !firstCard) return
     var yesNo = el('select', { id: 'f7_saturday' }, [
       el('option', { value: '', text: 'Sin cargar (calendario apagado)' }),
       el('option', { value: 'true', text: 'Sí, se despacha el sábado' }),
@@ -68,6 +72,7 @@
       field('Plantilla del último aviso (Utilidad, 3 botones)', txt('f7_lastNoticeTpl', 'nombre de la plantilla')),
       el('h4', { text: '💸 Descuento por pagar el envío por adelantado' }),
       check('f7_prepayEnabled', 'Ofrecer el descuento al cerrar el pedido (necesita monto del envío y datos de pago móvil)'),
+      el('div', { class: 'help', id: 'f7_prepayHint' }),
       field('Descuento general sobre el producto (%). Cada producto puede tener el suyo (en Bs o %) en la pestaña Productos', num('f7_prepayPercent', 'ej. 10')),
       field('Monto del envío que paga por adelantado (tal cual lo verá el cliente)', txt('f7_prepayAmount', 'ej. 450 Bs')),
       field('Datos de pago móvil (banco, teléfono, cédula)', el('textarea', { id: 'f7_prepayInfo', rows: '3', placeholder: 'Banco de Venezuela\n0414-0000000\nV-12.345.678' })),
@@ -85,7 +90,8 @@
       el('summary', { class: 'cfg-head' }, [el('span', { class: 'cfg-title', text: 'Fase 7 · Bajar devoluciones' }), el('span', { class: 'cfg-sub', text: 'Confirmación, calendario, fecha límite, último aviso' })]),
       body,
     ])
-    actions.parentNode.insertBefore(card, actions)
+    if (anchor) anchor.parentNode.insertBefore(card, anchor)
+    else firstCard.parentNode.appendChild(card)
     $('f7_save').addEventListener('click', saveConfig)
     // Los interruptores se guardan al tocarlos (antes habia que acordarse de "Guardar Fase 7").
     ;['f7_orderConfirmEnabled', 'f7_calendarEnabled', 'f7_quickPickupCouponEnabled', 'f7_lastNoticeEnabled', 'f7_storageBusiness', 'f7_prepayEnabled'].forEach(function (id) {
@@ -138,13 +144,18 @@
     if ($('f7_prepayPercent').value !== '') body.prepayDiscountPercent = Number($('f7_prepayPercent').value)
     if ($('f7_prepayOfferMin').value !== '') body.prepayOfferExpireMin = Number($('f7_prepayOfferMin').value)
     if ($('f7_prepayPayH').value !== '') body.prepayPaymentExpireH = Number($('f7_prepayPayH').value)
+    var warn = ''
     if (body.prepayEnabled && (!body.prepayShippingAmount.trim() || !body.prepayPaymentInfo.trim())) {
-      say('Para prender el descuento carga el monto del envío y los datos de pago móvil.')
+      // No se puede prender sin esos datos: se avisa justo debajo del interruptor
+      // (antes el aviso quedaba lejos y lo pisaba "Guardado").
+      warn = 'Primero escribe el monto del envío y los datos de pago móvil (abajo) y después prende este interruptor.'
       $('f7_prepayEnabled').checked = false
       body.prepayEnabled = false
     }
+    $('f7_prepayHint').textContent = warn
+    say('Guardando…')
     call('/settings', { method: 'POST', body: JSON.stringify(body) })
-      .then(function (s) { fillConfig(s); say('Guardado') })
+      .then(function (s) { fillConfig(s); say(warn ? 'Guardado, pero el descuento sigue apagado: faltan datos.' : 'Guardado') })
       .catch(function (e) { say(e.message) })
   }
 

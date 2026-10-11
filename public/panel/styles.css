@@ -1530,6 +1530,8 @@ input[type="range"]:focus { box-shadow: 0 0 0 3px var(--primary-soft); }
   .clock { display: none; }
   .conn span:not(.conn-dot) { display: none; }
   .switch span { display: none; }
+  /* En Configuracion el texto ES la explicacion del interruptor: no se oculta. */
+  .cfg-body .switch span { display: inline; }
   .stage-lock span { display: none; }
   .stage-picker select { min-width: 0; }
 
