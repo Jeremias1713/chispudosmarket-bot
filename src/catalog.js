@@ -71,6 +71,12 @@ function blankProduct() {
     // novedad en una etapa que todavia no es una venta cerrada. El de 2h es
     // el primero, mas suave; el de 5h es el segundo, mas directo. Si se deja
     // vacio, no se manda nada para ese paso.
+    // Descuento si el cliente paga el envio por adelantado (prepayShipping.js):
+    // '' = usa el % general de Fase 7; 'percent' = % de este producto;
+    // 'amount' = Bs fijos que se le quitan a este producto en el pedido;
+    // 'none' = este producto no tiene descuento.
+    prepayDiscountType: '',
+    prepayDiscountValue: null,
     remarketingEnabled: true,
     remarketing2h: '',
     remarketing5h: '',

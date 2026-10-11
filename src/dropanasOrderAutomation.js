@@ -468,11 +468,13 @@ function baseDraft(phone, session, config = settings()) {
     }
   }
   // Envio pagado por adelantado (prepayShipping): el producto sube con descuento.
-  const prepayDiscountPercent = require('./prepayShipping').discountPercentFor(session);
-  if (prepayDiscountPercent > 0) attemptNotes.push(`Envío pagado por adelantado: el producto se sube con ${prepayDiscountPercent}% de descuento (el cliente paga menos al retirar). Revisa quién paga el flete en DroPanas.`);
+  const prepayItemDiscounts = require('./prepayShipping').discountLinesFor(session, items);
+  const prepayDiscountBs = prepayItemDiscounts ? Math.round(prepayItemDiscounts.reduce((a, b) => a + b, 0) * 100) / 100 : 0;
+  if (prepayDiscountBs > 0) attemptNotes.push(`Envío pagado por adelantado: el producto se sube con ${prepayDiscountBs} Bs de descuento (el cliente paga menos al retirar). Revisa quién paga el flete en DroPanas.`);
   return {
     phone, name, identity, cedula: String(rawCedula || '').replace(/\D/g, ''),
-    prepayDiscountPercent,
+    prepayItemDiscounts: prepayDiscountBs > 0 ? prepayItemDiscounts : null,
+    prepayDiscountBs,
     documentType: docType,
     customerPhone: localPhone(rawPhone), productName, mapping, items,
     quantity, total, agency, soldAt: session.soldAt || null, reference,
@@ -903,6 +905,22 @@ function deterministicIdempotencyKey(reference) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+// Precio unitario que sube a DroPanas, con el descuento por envio pagado por
+// adelantado (en Bs por linea; los borradores viejos traen un %).
+function unitPriceAfterPrepay(item, index, draft) {
+  const lineDisc = Array.isArray(draft.prepayItemDiscounts) ? Number(draft.prepayItemDiscounts[index]) || 0 : null;
+  const lineTotal = lineDisc != null
+    ? Math.max(0, item.total - lineDisc)
+    : item.total * (1 - (Number(draft.prepayDiscountPercent) || 0) / 100);
+  return Math.round((lineTotal / item.quantity) * 100) / 100;
+}
+
+function prepayNoteDiscount(draft) {
+  if (Number(draft.prepayDiscountBs) > 0) return `${Number(draft.prepayDiscountBs)} Bs`;
+  if (Number(draft.prepayDiscountPercent) > 0) return `${Number(draft.prepayDiscountPercent)}%`;
+  return '';
+}
+
 function buildPayload(draft, reference) {
   const office = draft.official.office;
   const payload = {
@@ -912,17 +930,17 @@ function buildPayload(draft, reference) {
       state_id: Number(office.state_id), city_id: Number(office.city_id),
       direccion: office.direccion || office.nombre, referencia: `Retiro en oficina Tealca ${office.nombre}`,
     },
-    productos: draft.items.map((item) => ({
+    productos: draft.items.map((item, i) => ({
       producto_id: Number(item.mapping.productId),
       cantidad: item.quantity,
       // Envio pagado por adelantado: el cliente paga el producto con descuento al retirar.
-      precio_venta_ves: Math.round((item.total / item.quantity) * (1 - (Number(draft.prepayDiscountPercent) || 0) / 100) * 100) / 100,
+      precio_venta_ves: unitPriceAfterPrepay(item, i, draft),
     })),
     bodega_origen_id: Number(draft.items[0].mapping.warehouseId),
     tipo_entrega: 'oficina', shipping_type_id: 3,
     tipo_pago: 'con_recaudo', requiere_aprobacion: true,
-    nota_cliente: Number(draft.prepayDiscountPercent) > 0
-      ? `Pedido creado por ChispudosMarket. ENVIO PAGADO POR ADELANTADO (pago movil); producto con ${Number(draft.prepayDiscountPercent)}% de descuento. Revisar antes de aprobar.`
+    nota_cliente: prepayNoteDiscount(draft)
+      ? `Pedido creado por ChispudosMarket. ENVIO PAGADO POR ADELANTADO (pago movil); producto con ${prepayNoteDiscount(draft)} de descuento. Revisar antes de aprobar.`
       : 'Pedido creado por ChispudosMarket. Revisar antes de aprobar.',
   };
   if (office.id != null) payload.oficina_id = Number(office.id);

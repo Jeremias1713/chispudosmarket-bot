@@ -17,7 +17,13 @@
 // La IA nunca calcula montos: todo texto con montos lo arma este modulo.
 // Estado en session.prepay:
 //   { status: 'offered'|'awaiting_payment'|'receipt_sent'|'paid'|'declined'|'rejected'|'expired',
-//     soldAt, percent, offeredAt, chosenAt, receiptAt, receiptUrl, paidAt, decidedBy }
+//     soldAt, percent, offeredAt, chosenAt, receiptAt, receiptUrl, paidAt, decidedBy,
+//     total, discountBs, lines: [{ productName, total, discountBs }] }
+//
+// Cuanto se descuenta: cada producto puede tener su propio descuento en
+// Productos (prepayDiscountType: 'percent' | 'amount' (Bs) | 'none'); si no
+// tiene, se usa el % general de Fase 7. El monto se calcula al ofrecer y queda
+// guardado: lo que se le prometio al cliente es lo que se sube a DroPanas.
 const { getSettings } = require('./settings');
 const { listSessions, getSession, updateSession, appendMessage } = require('./state');
 const whatsappWindow = require('./whatsappWindow');
@@ -34,7 +40,6 @@ let running = false;
 
 function isConfigured(settings = getSettings()) {
   return settings.prepayEnabled === true
-    && Number(settings.prepayDiscountPercent) > 0
     && String(settings.prepayShippingAmount || '').trim() !== ''
     && String(settings.prepayPaymentInfo || '').trim() !== '';
 }
@@ -63,6 +68,65 @@ function productTotal(session) {
   } catch (err) {
     return null;
   }
+}
+
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
+// Regla de descuento de un producto del catalogo (o la general).
+function ruleFor(product, settings = getSettings()) {
+  const type = product?.prepayDiscountType || '';
+  const value = Number(product?.prepayDiscountValue);
+  if (type === 'none') return { type: 'none', value: 0 };
+  if ((type === 'percent' || type === 'amount') && Number.isFinite(value) && value > 0) return { type, value };
+  const general = Number(settings.prepayDiscountPercent);
+  return { type: 'percent', value: Number.isFinite(general) && general > 0 ? general : 0, general: true };
+}
+
+// Producto del catalogo que corresponde a una linea del pedido.
+function productForItem(item) {
+  const catalog = require('./catalog');
+  const mapId = String(item?.mapping?.id || '');
+  if (mapId.startsWith('catalogo-')) {
+    const p = catalog.listProducts().find((x) => x.id === mapId.slice('catalogo-'.length));
+    if (p) return p;
+  }
+  try { return item?.productName ? catalog.findProduct(item.productName) || null : null; } catch (err) { return null; }
+}
+
+function lineDiscount(total, rule) {
+  if (rule.type === 'amount') return round2(total > 0 ? Math.min(rule.value, total) : rule.value);
+  if (rule.type === 'percent') return total > 0 ? round2(total * rule.value / 100) : 0;
+  return 0;
+}
+
+// Cuanto se le descuenta a esta venta: { total, discountBs, lines }.
+function computeDiscount(session, settings = getSettings()) {
+  let items = [];
+  try {
+    const draft = require('./dropanasOrderAutomation').baseDraft(session.phone, session);
+    items = Array.isArray(draft?.items) ? draft.items : [];
+  } catch (err) {
+    items = [];
+  }
+  if (!items.length) {
+    const monto = Number(session?.card?.monto);
+    items = [{ productName: String(session?.card?.producto || ''), total: Number.isFinite(monto) && monto > 0 ? monto : 0 }];
+  }
+  const lines = items.map((item) => {
+    const total = Number(item.total) > 0 ? Number(item.total) : 0;
+    const rule = ruleFor(productForItem(item), settings);
+    return { productName: item.productName || '', total, discountBs: lineDiscount(total, rule) };
+  });
+  const total = round2(lines.reduce((s, l) => s + l.total, 0));
+  const discountBs = round2(lines.reduce((s, l) => s + l.discountBs, 0));
+  return { total: total > 0 ? total : null, discountBs, lines };
+}
+
+// Descuento guardado de esta venta en Bs (ventas viejas: con el %).
+function storedDiscountBs(session, total) {
+  const p = session?.prepay || {};
+  if (Number.isFinite(Number(p.discountBs)) && p.discountBs != null) return Number(p.discountBs);
+  return total ? round2(total * (Number(p.percent) || 0) / 100) : 0;
 }
 
 function discounted(total, percent) {
@@ -96,10 +160,17 @@ async function offerAfterClose(phone, deps = defaultDeps(), settings = getSettin
   if (settings.prepayActivatedAt && new Date(session.soldAt) < new Date(settings.prepayActivatedAt)) return false;
   if (session.attention?.open === true || session.paused) return false;
   if (!whatsappWindow.isWindowOpen(session)) return false;
-  const percent = Number(settings.prepayDiscountPercent);
+  const percent = Number(settings.prepayDiscountPercent) || 0;
+  const d = computeDiscount({ ...session, phone }, settings);
+  // Sin descuento para estos productos (o sin precio para calcularlo): no se ofrece.
+  if (!(d.discountBs > 0)) return false;
   // Marca ANTES de enviar: es preferible no ofrecer a ofrecer dos veces.
-  updateSession(phone, { prepay: { status: 'offered', soldAt: session.soldAt, percent, offeredAt: now.toISOString() } });
-  const text = `💸 *Opcional:* si pagas el envío por adelantado (${String(settings.prepayShippingAmount).trim()}) por pago móvil, te descontamos el ${percent}% del producto y al retirar pagas menos. ¿Te interesa?`;
+  updateSession(phone, { prepay: {
+    status: 'offered', soldAt: session.soldAt, percent, offeredAt: now.toISOString(),
+    total: d.total, discountBs: d.discountBs, lines: d.lines,
+  } });
+  const cuenta = d.total ? ` (al retirar pagas ${money(d.total - d.discountBs)} Bs en vez de ${money(d.total)} Bs)` : '';
+  const text = `💸 *Opcional:* si pagas el envío por adelantado (${String(settings.prepayShippingAmount).trim()}) por pago móvil, te descontamos ${money(d.discountBs)} Bs del producto${cuenta}. ¿Te interesa?`;
   try {
     const res = await deps.sendButtons(phone, text, OFFER_BUTTONS);
     appendMessage(phone, 'assistant', text, buttonsHistoryExtra(OFFER_BUTTONS, res));
@@ -165,11 +236,11 @@ async function decide(phone, paid, deps = defaultDeps(), now = new Date()) {
     return { ok: false, error: 'Ese chat no tiene un pago de envío pendiente.' };
   }
   if (paid) {
-    const percent = Number(session.prepay.percent);
     setStatus(phone, 'paid', { paidAt: now.toISOString(), decidedBy: 'panel' });
-    const total = productTotal({ ...session, phone });
-    const resto = total ? `: al retirar pagas ${money(discounted(total, percent))} Bs en vez de ${money(total)} Bs` : '';
-    await say(phone, `✅ ¡Pago del envío recibido! Te aplicamos el ${percent}% de descuento${resto}.`, deps);
+    const total = Number(session.prepay.total) > 0 ? Number(session.prepay.total) : productTotal({ ...session, phone });
+    const desc = storedDiscountBs(session, total);
+    const resto = total ? `: al retirar pagas ${money(round2(total - desc))} Bs en vez de ${money(total)} Bs` : '';
+    await say(phone, `✅ ¡Pago del envío recibido! Te aplicamos ${money(desc)} Bs de descuento${resto}.`, deps);
   } else {
     setStatus(phone, 'rejected', { decidedAt: now.toISOString(), decidedBy: 'panel' });
     await say(phone, 'No pudimos verificar el pago del envío, así que tu pedido queda con el pago completo al retirar en la agencia. Si ya pagaste, escríbenos y lo revisamos.', deps);
@@ -187,6 +258,7 @@ function pending(sessions = listSessions()) {
       name: s.card?.nombre || s.name || '',
       status: s.prepay.status,
       percent: s.prepay.percent,
+      discountBs: storedDiscountBs(s, Number(s.prepay.total) > 0 ? Number(s.prepay.total) : productTotal(s)),
       chosenAt: s.prepay.chosenAt || null,
       receiptAt: s.prepay.receiptAt || null,
       receiptUrl: s.prepay.receiptUrl || null,
@@ -196,6 +268,22 @@ function pending(sessions = listSessions()) {
 }
 
 // Para dropanasOrderAutomation: descuento a aplicar en esta venta (o 0).
+// Para dropanasOrderAutomation: descuento en Bs de cada linea del pedido, o
+// null si esta venta no tiene descuento. Usa lo guardado al ofrecer (lo que se
+// le prometio al cliente); si las lineas cambiaron, reparte el total guardado.
+function discountLinesFor(session, items) {
+  if (!sameSale(session) || session.prepay.status !== 'paid') return null;
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return null;
+  const p = session.prepay;
+  if (Array.isArray(p.lines) && p.lines.length === list.length) return p.lines.map((l) => Number(l.discountBs) || 0);
+  const totals = list.map((i) => Number(i.total) || 0);
+  const sum = totals.reduce((a, b) => a + b, 0);
+  const desc = storedDiscountBs(session, sum);
+  if (!(desc > 0) || !(sum > 0)) return null;
+  return totals.map((t) => round2(desc * t / sum));
+}
+
 function discountPercentFor(session) {
   return sameSale(session) && session.prepay.status === 'paid' ? Number(session.prepay.percent) || 0 : 0;
 }
@@ -256,5 +344,5 @@ function stop() { if (timer) clearInterval(timer); timer = null; }
 
 module.exports = {
   YES, NO, OFFER_BUTTONS, isConfigured, gate, offerAfterClose, handleReply, handleReceipt, decide, pending,
-  discountPercentFor, tick, promptBlock, start, stop, discounted, idFromText,
+  discountPercentFor, discountLinesFor, computeDiscount, ruleFor, tick, promptBlock, start, stop, discounted, idFromText,
 };

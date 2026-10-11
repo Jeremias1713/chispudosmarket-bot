@@ -2385,6 +2385,9 @@ function openProduct(p) {
   $('p_sku').value = p?.sku || ''
   $('p_dropanas_product_id').value = p?.dropanasProductId || ''
   $('p_dropanas_warehouse_id').value = p?.dropanasWarehouseId || ''
+  $('p_prepay_type').value = p?.prepayDiscountType || ''
+  $('p_prepay_value').value = p?.prepayDiscountValue ?? ''
+  $('p_prepay_value').disabled = !['amount', 'percent'].includes($('p_prepay_type').value)
   $('p_description').value = p?.description || ''
   $('p_prompt').value = p?.prompt || ''
   $('p_triggers').value = (p?.triggers || []).join(', ')
@@ -2406,6 +2409,12 @@ function closeProductDrawer() {
 }
 
 $('newProduct').addEventListener('click', () => openProduct(null))
+$('p_prepay_type').addEventListener('change', () => {
+  const on = ['amount', 'percent'].includes($('p_prepay_type').value)
+  $('p_prepay_value').disabled = !on
+  $('p_prepay_value').placeholder = $('p_prepay_type').value === 'percent' ? 'ej. 10' : 'ej. 5000'
+  if (!on) $('p_prepay_value').value = ''
+})
 $('closeProduct').addEventListener('click', closeProductDrawer)
 
 $('saveProduct').addEventListener('click', async () => {
@@ -2421,6 +2430,8 @@ $('saveProduct').addEventListener('click', async () => {
     sku: $('p_sku').value.trim(),
     dropanasProductId: $('p_dropanas_product_id').value.trim(),
     dropanasWarehouseId: $('p_dropanas_warehouse_id').value.trim(),
+    prepayDiscountType: $('p_prepay_type').value,
+    prepayDiscountValue: $('p_prepay_value').value.trim(),
     description: $('p_description').value,
     prompt: $('p_prompt').value,
     triggers: $('p_triggers').value,
@@ -2433,6 +2444,14 @@ $('saveProduct').addEventListener('click', async () => {
   }
   if (!body.name) {
     $('productMsg').textContent = 'Falta el nombre'
+    return
+  }
+  if (['amount', 'percent'].includes(body.prepayDiscountType) && !(Number(body.prepayDiscountValue) > 0)) {
+    $('productMsg').textContent = 'Pon cuánto se descuenta si paga el envío por adelantado'
+    return
+  }
+  if (body.prepayDiscountType === 'percent' && Number(body.prepayDiscountValue) > 90) {
+    $('productMsg').textContent = 'El descuento en % no puede pasar de 90'
     return
   }
   try {

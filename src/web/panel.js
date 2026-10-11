@@ -1578,6 +1578,18 @@ function sanitizeProductInput(body) {
     const id = Number(body.dropanasWarehouseId);
     patch.dropanasWarehouseId = Number.isInteger(id) && id > 0 ? id : null;
   }
+  // Descuento por pagar el envio por adelantado, propio de este producto.
+  if (body.prepayDiscountType !== undefined) {
+    const type = ['percent', 'amount', 'none'].includes(body.prepayDiscountType) ? body.prepayDiscountType : '';
+    const value = Number(body.prepayDiscountValue);
+    patch.prepayDiscountType = type;
+    patch.prepayDiscountValue = null;
+    if (type === 'percent' || type === 'amount') {
+      const ok = Number.isFinite(value) && value > 0 && (type === 'amount' || value <= 90);
+      if (ok) patch.prepayDiscountValue = Math.round(value * 100) / 100;
+      else patch.prepayDiscountType = '';
+    }
+  }
   return patch;
 }
 
@@ -1761,7 +1773,7 @@ const FASE7_NUMS = {
   quickPickupHours: { min: 1, max: 720 },
   quickPickupDiscountPercent: { min: 1, max: 90 },
   quickPickupCouponValidDays: { min: 1, max: 365 },
-  prepayDiscountPercent: { min: 1, max: 50 },
+  prepayDiscountPercent: { min: 0, max: 50 },
   prepayOfferExpireMin: { min: 5, max: 1440 },
   prepayPaymentExpireH: { min: 1, max: 72 },
   lastNoticeHour: { min: 0, max: 23 },
