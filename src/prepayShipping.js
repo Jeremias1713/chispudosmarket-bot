@@ -82,15 +82,17 @@ function ruleFor(product, settings = getSettings()) {
   return { type: 'percent', value: Number.isFinite(general) && general > 0 ? general : 0, general: true };
 }
 
-// Producto del catalogo que corresponde a una linea del pedido.
+// Producto del catalogo que corresponde a una linea del pedido (mismo criterio
+// que el precio: ver catalog.productForOrderItem).
 function productForItem(item) {
-  const catalog = require('./catalog');
-  const mapId = String(item?.mapping?.id || '');
-  if (mapId.startsWith('catalogo-')) {
-    const p = catalog.listProducts().find((x) => x.id === mapId.slice('catalogo-'.length));
-    if (p) return p;
-  }
-  try { return item?.productName ? catalog.findProduct(item.productName) || null : null; } catch (err) { return null; }
+  try { return require('./catalog').productForOrderItem(item?.productName, item?.mapping) || null; } catch (err) { return null; }
+}
+
+// "4000" -> "4.000 Bs"; un texto con letras (ej. "450 Bs", "5$") va tal cual.
+function shippingAmountText(raw) {
+  const t = String(raw || '').trim();
+  const n = Number(t.replace(/\./g, '').replace(',', '.'));
+  return /^[\d.,\s]+$/.test(t) && Number.isFinite(n) && n > 0 ? `${money(n)} Bs` : t;
 }
 
 function lineDiscount(total, rule) {
@@ -170,7 +172,7 @@ async function offerAfterClose(phone, deps = defaultDeps(), settings = getSettin
     total: d.total, discountBs: d.discountBs, lines: d.lines,
   } });
   const cuenta = d.total ? ` (al retirar pagas ${money(d.total - d.discountBs)} Bs en vez de ${money(d.total)} Bs)` : '';
-  const text = `💸 *Opcional:* si pagas el envío por adelantado (${String(settings.prepayShippingAmount).trim()}) por pago móvil, te descontamos ${money(d.discountBs)} Bs del producto${cuenta}. ¿Te interesa?`;
+  const text = `💸 *Opcional:* si pagas el envío por adelantado (${shippingAmountText(settings.prepayShippingAmount)}) por pago móvil, te descontamos ${money(d.discountBs)} Bs del producto${cuenta}. ¿Te interesa?`;
   try {
     const res = await deps.sendButtons(phone, text, OFFER_BUTTONS);
     appendMessage(phone, 'assistant', text, buttonsHistoryExtra(OFFER_BUTTONS, res));
@@ -206,7 +208,7 @@ async function handleReply(phone, idOrText, deps = defaultDeps(), settings = get
   if (!sameSale(session) || session.prepay.status !== 'offered') return idOrText === YES || idOrText === NO;
   if (id === YES) {
     setStatus(phone, 'awaiting_payment', { chosenAt: now.toISOString() });
-    await say(phone, `¡Genial! 🙌 Estos son los datos para pagar el envío (${String(settings.prepayShippingAmount).trim()}):\n\n${String(settings.prepayPaymentInfo).trim()}\n\nCuando pagues, mándame la captura por aquí y te confirmamos el descuento.`, deps);
+    await say(phone, `¡Genial! 🙌 Estos son los datos para pagar el envío (${shippingAmountText(settings.prepayShippingAmount)}):\n\n${String(settings.prepayPaymentInfo).trim()}\n\nCuando pagues, mándame la captura por aquí y te confirmamos el descuento.`, deps);
   } else {
     setStatus(phone, 'declined', { chosenAt: now.toISOString(), decidedBy: 'cliente' });
     await say(phone, 'Perfecto 👍 Pagas todo al retirar en la agencia, como siempre.', deps);
