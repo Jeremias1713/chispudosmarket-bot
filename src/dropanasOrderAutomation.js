@@ -392,10 +392,16 @@ function baseDraft(phone, session, config = settings()) {
     const mapping = edited || findMapping(productName, mappingPool);
     const quantity = Number(row?.quantity ?? row?.cantidad ?? 0);
     const explicitTotal = Number(row?.total ?? row?.monto);
+    // Precio: manda el de Productos (lo que Jere actualiza y lo que la IA le
+    // dice al cliente). La tabla de "Subir pedidos" queda solo de respaldo
+    // para cantidades que no estan cargadas en Productos.
+    const catalogProduct = catalog.productForOrderItem(productName, mapping);
+    const catalogTotal = catalog.catalogPriceFor(catalogProduct, quantity);
     const mappedTotal = Number(mapping?.prices?.[quantity] || 0);
-    const total = Number.isFinite(explicitTotal) && explicitTotal > 0 ? explicitTotal : mappedTotal;
+    const total = Number.isFinite(explicitTotal) && explicitTotal > 0 ? explicitTotal : (catalogTotal || mappedTotal);
+    const priceSource = Number.isFinite(explicitTotal) && explicitTotal > 0 ? 'ficha' : catalogTotal ? 'productos' : mappedTotal ? 'subir_pedidos' : null;
     const mentioned = mentionedProducts(productName, mappingPool);
-    return { productName, mapping, quantity, total, mentioned };
+    return { productName, mapping, quantity, total, mentioned, catalogProductId: catalogProduct?.id || null, priceSource };
   });
   const productName = items.map((item) => item.productName).filter(Boolean).join(' + ');
   const mapping = items.length === 1 ? items[0].mapping : null;
@@ -470,6 +476,9 @@ function baseDraft(phone, session, config = settings()) {
   // Envio pagado por adelantado (prepayShipping): el producto sube con descuento.
   const prepayItemDiscounts = require('./prepayShipping').discountLinesFor(session, items);
   const prepayDiscountBs = prepayItemDiscounts ? Math.round(prepayItemDiscounts.reduce((a, b) => a + b, 0) * 100) / 100 : 0;
+  for (const item of items) {
+    if (item.priceSource === 'subir_pedidos') attemptNotes.push(`${item.productName || 'Producto'} x${item.quantity}: ese precio sale de la tabla vieja de "Subir pedidos" porque en Productos no está cargado el precio para ${item.quantity} unidad(es). Cárgalo en Productos para que coincida con lo que dice el bot.`);
+  }
   if (prepayDiscountBs > 0) attemptNotes.push(`Envío pagado por adelantado: el producto se sube con ${prepayDiscountBs} Bs de descuento (el cliente paga menos al retirar). Revisa quién paga el flete en DroPanas.`);
   return {
     phone, name, identity, cedula: String(rawCedula || '').replace(/\D/g, ''),

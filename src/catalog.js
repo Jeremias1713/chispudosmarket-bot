@@ -296,7 +296,45 @@ function deleteProduct(id) {
   return next.length !== products.length;
 }
 
+// Producto del catalogo (pestaña Productos) que corresponde a una linea de
+// pedido de DroPanas. Productos es la fuente de verdad de precios y del
+// descuento por pagar el envio; la tabla vieja de "Subir pedidos" solo
+// aporta el ID de DroPanas. En orden:
+//  1. mapeo que ya sale del catalogo (id "catalogo-<id>");
+//  2. producto con el mismo ID de DroPanas;
+//  3. el UNICO producto activo que comparte una palabra significativa con el
+//     nombre del pedido o con el nombre/alias del mapeo (ej. "Resina de
+//     Shilajit" -> "Shilajit gomitas masticables"). Si hay dos posibles, null.
+function productForOrderItem(productName, mapping) {
+  const products = loadProducts().filter((p) => p.active !== false);
+  const mapId = String(mapping?.id || '');
+  if (mapId.startsWith('catalogo-')) {
+    const p = products.find((x) => x.id === mapId.slice('catalogo-'.length));
+    if (p) return p;
+  }
+  const pid = Number(mapping?.productId);
+  if (Number.isInteger(pid) && pid > 0) {
+    const byId = products.filter((p) => Number(p.dropanasProductId) === pid);
+    if (byId.length === 1) return byId[0];
+  }
+  const text = ` ${[productName, mapping?.label, ...(mapping?.aliases || [])].map(foldText).join(' ')} `;
+  const hits = products.filter((p) => significantWords(p.name).some((w) => text.includes(` ${w} `) || text.includes(` ${w}s `)));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// Precio de `quantity` unidades segun el catalogo, o null si no esta cargado.
+function catalogPriceFor(product, quantity) {
+  const q = Number(quantity);
+  if (!product || !Number.isInteger(q) || q < 1) return null;
+  const row = normalizeQuantityPrices(product.quantityPrices).find((r) => Number(r.quantity) === q);
+  if (row && Number(row.total) > 0) return Number(row.total);
+  if (q === 1 && Number(product.price) > 0) return Number(product.price);
+  return null;
+}
+
 module.exports = {
+  productForOrderItem,
+  catalogPriceFor,
   loadProducts,
   findProduct,
   findProductByIndex,
