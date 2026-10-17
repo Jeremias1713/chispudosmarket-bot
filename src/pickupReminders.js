@@ -33,7 +33,19 @@ const REMINDER_DAYS = [1, 3, 5];
 // Fase 7C/7D: si Jere cargo los dias de guarda de Tealca y el ultimo aviso esta
 // prendido, el recordatorio del dia 5 lo reemplaza el ULTIMO AVISO (lastNotice),
 // que sale la vispera de la fecha limite.
+// Modo del calendario de recordatorios:
+//  'fixed' (por defecto): dias 1, 3 y 5 desde la llegada. Los dias 1 y 3 van
+//    con la plantilla de recordatorio; el dia 5 lo cubre el ULTIMO AVISO
+//    (lastNotice.js) si esta prendido, y si no, sale un recordatorio normal.
+//    No necesita los dias de guarda de Tealca.
+//  'deadline': el comportamiento anterior (el dia 5 lo reemplaza el ultimo
+//    aviso solo si hay fecha limite cargada).
+function scheduleMode(settings) {
+  return settings?.reminderScheduleMode === 'deadline' ? 'deadline' : 'fixed';
+}
+
 function reminderDays(session, settings) {
+  if (scheduleMode(settings) === 'fixed') return settings.lastNoticeEnabled === true ? [1, 3] : REMINDER_DAYS;
   const replaced = settings.lastNoticeEnabled === true && require('./pickupDeadline').deadlineFor(session, settings);
   return replaced ? [1, 3] : REMINDER_DAYS;
 }
@@ -125,6 +137,8 @@ function clientIsTalking(session, now) {
 // confirmation: 'en_oficina' | 'otro_estado' | null (no se pudo consultar).
 function eligible(session, settings, now = new Date(), confirmation = null) {
   if (!settings.pickupReminderEnabled || session.stage !== 'esperando_retiro') return false;
+  // Chat pausado (lo atiende una persona) o cliente que pidio no recibir mensajes: nada automatico.
+  if (session.paused === true || session.optOut === true) return false;
   if (!String(session.card?.guia || '').trim()) return false;
   const today = localParts(now).date;
   if (session.pickupReminderLastDate === today) return false;
@@ -134,6 +148,10 @@ function eligible(session, settings, now = new Date(), confirmation = null) {
   if (confirmation !== 'en_oficina' && !session.arrivalNotifiedAt) return false;
   const anchor = anchorDate(session);
   if (!anchor) return false;
+  // Ya recibio el ultimo aviso de ESTE pedido (o contesto sus botones): no mas recordatorios.
+  const guia = String(session.card?.guia || '');
+  if (session.lastNoticeSentAt && session.lastNoticeGuia === guia) return false;
+  if (session.lastNoticeAnswer && (!session.lastNoticeGuia || session.lastNoticeGuia === guia)) return false;
   const days = reminderDays(session, settings);
   const index = days.indexOf(daysBetween(anchor, today));
   if (index === -1) return false;
@@ -237,19 +255,42 @@ function upgradeGuide(session, order, deps) {
   return deps.updateSession(session.phone, { card }) || { ...session, card };
 }
 
+// Dia (0 = llegada) en que esta hoy este pedido, o null sin fecha de llegada.
+function dayNumber(session, now = new Date()) {
+  const anchor = anchorDate(session);
+  return anchor ? daysBetween(anchor, localParts(now).date) : null;
+}
+
+// Plantilla y parametros del recordatorio. Con plantilla de recordatorio
+// cargada (recordatorio_retiro_pedido): nombre, producto, guia, monto, en ese
+// orden. Sin ella, lo de antes: fecha limite (si hay) o la de llegada.
+function reminderTemplate(session, settings) {
+  const values = placeholderValues(session);
+  const reminderName = String(settings.pickupReminderTemplateName || '').trim();
+  if (reminderName) {
+    return {
+      templateName: reminderName,
+      templateLanguage: settings.pickupReminderTemplateLanguage || 'es',
+      params: [values.nombre, values.producto, values.guia, values.monto],
+    };
+  }
+  // Fase 7C: con plantilla de fecha limite aprobada y fecha conocida, el
+  // recordatorio dice hasta cuando puede retirar. Sin eso, la de llegada.
+  const limite = require('./pickupDeadline').deadlineText(session, settings);
+  const useDeadline = Boolean(settings.pickupDeadlineTemplateName && limite);
+  return {
+    templateName: useDeadline ? settings.pickupDeadlineTemplateName : (settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca'),
+    templateLanguage: useDeadline ? (settings.pickupDeadlineTemplateLanguage || 'es') : (settings.pickupTemplateLanguage || 'es'),
+    params: useDeadline
+      ? [values.nombre, values.producto, values.agencia, limite]
+      : [values.nombre, values.producto, values.guia, values.monto],
+  };
+}
+
 async function sendReminder(session, settings, now = new Date(), deps = defaultDeps()) {
   const guard = canSendAutomatic(session, 'pickup_reminder', now, settings);
   if (!guard.ok) return { phone: session.phone, sent: false, reason: guard.reason };
-  const values = placeholderValues(session);
-  // Fase 7C: con plantilla de fecha limite aprobada y fecha conocida, el
-  // recordatorio dice hasta cuando puede retirar. Sin eso, la de siempre.
-  const limite = require('./pickupDeadline').deadlineText(session, settings);
-  const useDeadline = Boolean(settings.pickupDeadlineTemplateName && limite);
-  const params = useDeadline
-    ? [values.nombre, values.producto, values.agencia, limite]
-    : [values.nombre, values.producto, values.guia, values.monto];
-  const templateName = useDeadline ? settings.pickupDeadlineTemplateName : (settings.pickupTemplateName || 'pedido_ha_llegado_a_tealca');
-  const templateLanguage = useDeadline ? (settings.pickupDeadlineTemplateLanguage || 'es') : (settings.pickupTemplateLanguage || 'es');
+  const { templateName, templateLanguage, params } = reminderTemplate(session, settings);
   const previousCount = reminderCount(session);
   // La marca va ANTES de enviar. Si este guardado falla, se propaga el error y
   // NO se manda nada.
@@ -321,7 +362,7 @@ async function plan(now = new Date(), overrides = {}) {
   for (const session of waiting) {
     const info = status.get(session.phone) || { state: null, order: null };
     if (info.state === 'en_oficina' && !anchorDate(session)) needsAnchor.push(session);
-    if (eligible(session, settings, now, info.state)) due.push({ session, order: info.order, confirmation: info.state });
+    if (eligible(session, settings, now, info.state)) due.push({ session, order: info.order, confirmation: info.state, day: dayNumber(session, now), ...reminderTemplate(session, settings) });
     else skipped.push({ phone: session.phone, confirmation: info.state, estado: info.order?.estadoPedido || null });
   }
   return { date: today, due, skipped, needsAnchor, deps, settings, apiOk: Boolean(status.apiOk) };
@@ -391,5 +432,6 @@ function start() {
 
 module.exports = {
   start, run, plan, eligible, resetDecided, localParts, sendReminder, officeStatus, orderKeys,
+  scheduleMode, reminderDays, reminderTemplate, dayNumber, anchorDate, reminderCount, clientIsTalking, daysBetween,
   CONFIRMED_MAX_REMINDERS, REMINDER_DAYS, LAST_HOUR,
 };
