@@ -70,8 +70,20 @@
       field('Días que Tealca guarda el paquete', num('f7_storageDays', 'sin cargar = sin fecha límite')),
       check('f7_storageBusiness', 'Los días de guarda son hábiles'),
       field('Plantilla de fecha límite (aprobada en Meta)', txt('f7_deadlineTpl', 'nombre de la plantilla')),
-      check('f7_lastNoticeEnabled', '7D · Último aviso antes de la devolución (necesita días de guarda)'),
-      field('Plantilla del último aviso (Utilidad, 3 botones)', txt('f7_lastNoticeTpl', 'nombre de la plantilla')),
+      el('h4', { text: '📦 Recordatorios de retiro (días 1, 3 y 5)' }),
+      field('Calendario de recordatorios', el('select', { id: 'f7_reminderMode' }, [
+        el('option', { value: 'fixed', text: 'Fijo: días 1, 3 y 5 desde la llegada (no necesita días de guarda)' }),
+        el('option', { value: 'deadline', text: 'Por fecha límite de Tealca (necesita días de guarda)' }),
+      ])),
+      field('Plantilla de recordatorio, días 1 y 3 (nombre, producto, guía, monto)', txt('f7_reminderTpl', 'recordatorio_retiro_pedido')),
+      field('Idioma de esa plantilla', txt('f7_reminderTplLang', 'es')),
+      check('f7_lastNoticeEnabled', '7D · Último aviso el día 5, con 3 botones (si está apagado, el día 5 sale un recordatorio normal)'),
+      field('Plantilla del último aviso (Utilidad, 3 botones; nombre, producto, guía, monto)', txt('f7_lastNoticeTpl', 'ultimo_aviso_retiro_pedido')),
+      field('Máximo de últimos avisos por día (los atrasados salen de a poco, el más viejo primero)', num('f7_lastNoticeCap', '25')),
+      el('div', { class: 'field' }, [
+        el('button', { class: 'btn', type: 'button', id: 'f7_remindPreview', text: 'Ver quién recibiría hoy' }),
+        el('div', { id: 'f7_remindPreviewOut', class: 'help' }),
+      ]),
       el('h4', { text: '💸 Descuento por pagar el envío por adelantado' }),
       check('f7_prepayEnabled', 'Ofrecer el descuento al cerrar el pedido (necesita monto del envío y datos de pago móvil)'),
       el('div', { class: 'help', id: 'f7_prepayHint' }),
@@ -104,6 +116,7 @@
     })
     setEnabled(false)
     $('f7_transitPreview').addEventListener('click', function () { transit(false) })
+    $('f7_remindPreview').addEventListener('click', remindPreview)
     $('f7_transitSave').addEventListener('click', function () { transit(true) })
   }
 
@@ -188,6 +201,10 @@
     $('f7_holidays').value = (s.holidays || []).join(', ')
     $('f7_deadlineTpl').value = s.pickupDeadlineTemplateName || ''
     $('f7_lastNoticeTpl').value = s.lastNoticeTemplateName || ''
+    $('f7_reminderMode').value = s.reminderScheduleMode === 'deadline' ? 'deadline' : 'fixed'
+    $('f7_reminderTpl').value = s.pickupReminderTemplateName || ''
+    $('f7_reminderTplLang').value = s.pickupReminderTemplateLanguage || 'es'
+    $('f7_lastNoticeCap').value = s.lastNoticeDailyCap == null ? '' : s.lastNoticeDailyCap
     $('f7_prepayEnabled').checked = s.prepayEnabled === true
     $('f7_prepayPercent').value = s.prepayDiscountPercent == null ? '' : s.prepayDiscountPercent
     $('f7_prepayAmount').value = s.prepayShippingAmount || ''
@@ -207,9 +224,13 @@
       holidays: $('f7_holidays').value,
       pickupDeadlineTemplateName: $('f7_deadlineTpl').value,
       lastNoticeTemplateName: $('f7_lastNoticeTpl').value,
+      pickupReminderTemplateName: $('f7_reminderTpl').value,
+      pickupReminderTemplateLanguage: $('f7_reminderTplLang').value,
+      reminderScheduleMode: $('f7_reminderMode').value,
       prepayShippingAmount: $('f7_prepayAmount').value,
       prepayPaymentInfo: $('f7_prepayInfo').value,
     }
+    if ($('f7_lastNoticeCap').value !== '') body.lastNoticeDailyCap = Number($('f7_lastNoticeCap').value)
     if ($('f7_prepayPercent').value !== '') body.prepayDiscountPercent = Number($('f7_prepayPercent').value)
     if ($('f7_prepayOfferMin').value !== '') body.prepayOfferExpireMin = Number($('f7_prepayOfferMin').value)
     if ($('f7_prepayPayH').value !== '') body.prepayPaymentExpireH = Number($('f7_prepayPayH').value)
@@ -221,6 +242,27 @@
       .then(function (s) { fillConfig(s); say('✔ Guardado') })
       .catch(function (e) { say('No se guardó: ' + e.message) })
       .then(function () { $('f7_save').disabled = false })
+  }
+
+  // Solo lectura: a quien le tocaria hoy un recordatorio o el ultimo aviso, con
+  // la plantilla y los datos que se mandarian. No envia nada.
+  function remindPreview() {
+    var out = $('f7_remindPreviewOut')
+    out.textContent = 'Consultando DroPanas…'
+    call('/pickup-reminders/preview').then(function (r) {
+      out.textContent = ''
+      var row = function (x, tipo) {
+        return el('div', { class: 'field' }, [el('span', {
+          text: (x.nombre || '…' + String(x.phone).slice(-4)) + ' · día ' + (x.dia == null ? '?' : x.dia) + ' · ' + tipo + ': ' + x.plantilla + ' · [' + (x.params || []).join(', ') + ']',
+        })])
+      }
+      out.appendChild(el('div', { text: 'Hoy ' + r.fecha + (r.dropanasRespondio ? '' : ' (DroPanas no respondió: puede faltar gente)') }))
+      out.appendChild(el('strong', { text: 'Recordatorios: ' + r.recordara.length }))
+      r.recordara.forEach(function (x) { out.appendChild(row(x, 'recordatorio')) })
+      var u = r.ultimoAviso || { saldrian: [] }
+      out.appendChild(el('strong', { text: 'Último aviso' + (u.prendido ? '' : ' (APAGADO: así saldría si lo prendes)') + ': ' + u.saldrian.length + (u.enEspera ? ' · ' + u.enEspera + ' quedan para los próximos días por el tope diario' : '') }))
+      u.saldrian.forEach(function (x) { out.appendChild(row(x, 'último aviso')) })
+    }).catch(function (e) { out.textContent = e.message })
   }
 
   function transit(confirm) {
