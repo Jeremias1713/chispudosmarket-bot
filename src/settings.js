@@ -185,7 +185,17 @@ const DEFAULTS = {
   quickPickupCouponValidDays: 30,
   // 7D. Ultimo aviso antes de la devolucion.
   lastNoticeEnabled: false,
-  lastNoticeTemplateName: null, // JERE LO CARGA: plantilla de Utilidad con 3 botones
+  lastNoticeTemplateName: 'ultimo_aviso_retiro_pedido', // Utilidad, 3 botones; params nombre, producto, guia, monto
+  // Recordatorios de retiro dias 1 y 3 (y 5 si el ultimo aviso esta apagado).
+  // Params: nombre, producto, guia, monto. Vacio = se usa la de llegada.
+  pickupReminderTemplateName: 'recordatorio_retiro_pedido',
+  pickupReminderTemplateLanguage: 'es',
+  // 'fixed' = dias 1, 3 y 5 desde la llegada (no necesita dias de guarda);
+  // 'deadline' = segun la fecha limite de Tealca (tealcaStorageDays).
+  reminderScheduleMode: 'fixed',
+  reminderFixedActivatedAt: null,
+  // Maximo de ultimos avisos por dia (los pedidos atrasados salen de a poco, el mas viejo primero).
+  lastNoticeDailyCap: 25,
   lastNoticeTemplateLanguage: 'es',
   lastNoticeHour: 10,
   // ---- Sincronizacion DroPanas ----

@@ -15,10 +15,10 @@ function lastInboundAt(history) {
   return null;
 }
 
-function isWindowOpen(session) {
+function isWindowOpen(session, now = new Date()) {
   const at = lastInboundAt(session.history || []);
   if (!at) return false; // nunca escribio: no hay ventana abierta para texto libre
-  return Date.now() - new Date(at).getTime() < WHATSAPP_WINDOW_MS;
+  return new Date(now).getTime() - new Date(at).getTime() < WHATSAPP_WINDOW_MS;
 }
 
 module.exports = { WHATSAPP_WINDOW_MS, lastInboundAt, isWindowOpen };

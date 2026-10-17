@@ -28,7 +28,8 @@ test('fecha limite: dias corridos o habiles, y null si no hay dato cargado', () 
 });
 
 test('con ultimo aviso prendido y dias de guarda cargados, el dia 5 ya no lleva recordatorio', () => {
-  const settings = { pickupReminderEnabled: true, pickupReminderHour: 10, pickupTemplateName: 'x', ...base, lastNoticeEnabled: true };
+  // Modo 'deadline' (el de antes); el modo fijo se prueba en pickup-schedule-fixed.test.js.
+  const settings = { pickupReminderEnabled: true, pickupReminderHour: 10, pickupTemplateName: 'x', ...base, lastNoticeEnabled: true, reminderScheduleMode: 'deadline' };
   const at = (n) => new Date(Date.parse(ARRIVED) + n * 86400000);
   const s = sess({ pickupReminderCount: 2, pickupReminderGuia: 'G1' });
   assert.equal(reminders.eligible(s, settings, at(5), 'en_oficina'), false);

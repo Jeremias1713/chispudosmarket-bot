@@ -1152,6 +1152,31 @@ router.post('/api/conversations/:phone/guia', upload.single('imagen'), async (re
 // nunca se avisa en bloque a clientes antiguos al activar la función.
 // Vista previa (NO manda nada) de a quien le toca hoy el recordatorio diario
 // de retiro, con la confirmacion de DroPanas de cada pedido.
+function item_day(due, session) {
+  return due.find((d) => d.session === session)?.day ?? null;
+}
+
+// Vista previa del ultimo aviso. Si esta apagado, se calcula como si estuviera
+// prendido, para ver a quien le llegaria antes de activarlo. No manda nada.
+async function lastNoticePreview(now = new Date()) {
+  const lastNotice = require('../lastNotice');
+  const settings = settingsStore.getSettings();
+  const prendido = settings.lastNoticeEnabled === true;
+  const r = await lastNotice.plan(now, { settings: { ...settings, lastNoticeEnabled: true } });
+  return {
+    prendido,
+    modo: settings.reminderScheduleMode === 'deadline' ? 'deadline' : 'fixed',
+    tope: r.cap, enviadosHoy: r.sentToday, enEspera: r.waiting,
+    saldrian: r.due.map(({ session, day }) => ({
+      phone: session.phone,
+      nombre: session.card?.nombre || session.name || null,
+      dia: day,
+      plantilla: settings.lastNoticeTemplateName || null,
+      params: lastNotice.noticeParams(session),
+    })),
+  };
+}
+
 router.get('/api/pickup-reminders/preview', async (_req, res) => {
   try {
     const { date, due, skipped, apiOk } = await pickupReminders.plan(new Date(), { ignoreDecided: true });
@@ -1169,9 +1194,13 @@ router.get('/api/pickup-reminders/preview', async (_req, res) => {
         guia: session.card?.guia || null,
         guiaReal: order?.guia || null,
         confirmacion: confirmation || 'aviso_reciente_del_bot',
+        dia: item_day(due, session),
+        plantilla: due.find((d) => d.session === session)?.templateName || null,
+        params: due.find((d) => d.session === session)?.params || [],
       })),
       noRecordara: skipped.length,
       motivos,
+      ultimoAviso: await lastNoticePreview(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1777,8 +1806,9 @@ const FASE7_NUMS = {
   prepayOfferExpireMin: { min: 5, max: 1440 },
   prepayPaymentExpireH: { min: 1, max: 72 },
   lastNoticeHour: { min: 0, max: 23 },
+  lastNoticeDailyCap: { min: 1, max: 500 },
 };
-const FASE7_TEXTS = ['pickupDeadlineTemplateName', 'pickupDeadlineTemplateLanguage', 'lastNoticeTemplateName', 'lastNoticeTemplateLanguage', 'prepayShippingAmount', 'prepayPaymentInfo'];
+const FASE7_TEXTS = ['pickupDeadlineTemplateName', 'pickupDeadlineTemplateLanguage', 'lastNoticeTemplateName', 'lastNoticeTemplateLanguage', 'pickupReminderTemplateName', 'pickupReminderTemplateLanguage', 'prepayShippingAmount', 'prepayPaymentInfo'];
 
 function validateFase7Settings(body) {
   const patch = {};
@@ -1808,6 +1838,10 @@ function validateFase7Settings(body) {
     const bad = clean.filter((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d));
     if (bad.length) errors.push(`"holidays": fechas con formato invalido (usa AAAA-MM-DD): ${bad.join(', ')}.`);
     else patch.holidays = [...new Set(clean)].sort();
+  }
+  if (body.reminderScheduleMode !== undefined) {
+    if (['fixed', 'deadline'].includes(body.reminderScheduleMode)) patch.reminderScheduleMode = body.reminderScheduleMode;
+    else errors.push('"reminderScheduleMode" tiene que ser "fixed" o "deadline".');
   }
   if (body.transitDaysDefault !== undefined) {
     const min = Number(body.transitDaysDefault?.min);
