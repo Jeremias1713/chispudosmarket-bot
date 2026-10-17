@@ -617,12 +617,20 @@ async function handleIncomingMessage(from, message, profileName) {
       return;
     } else if (lastNoticeId) {
       if (await lastNotice.handleReply(from, lastNoticeId)) return;
+    } else if (rawText && type === 'text' && lastNotice.idFromText(getSession(from), rawText)) {
+      // Ultimo aviso sin botones (plantilla aprobada sin ellos): contesto escribiendo.
+      if (await lastNotice.handleReply(from, lastNotice.idFromText(getSession(from), rawText))) return;
     } else if (rawText && type === 'text' && await lastNotice.captureReason(from, rawText)) {
       return;
     } else if (rawText && orderConfirm.confirmByText(from, rawText)) {
       const reply = '¡Perfecto! Tu pedido queda confirmado y lo enviamos en el próximo despacho.';
       try { await sendRawReply(from, reply); } catch (err) { console.warn('orderConfirm: respuesta:', err.message); }
       return;
+    }
+    // Ultimo aviso que salio como plantilla sin botones y el cliente escribio
+    // otra cosa: se le ofrecen los 3 botones una vez (la IA igual contesta).
+    if (rawText && type === 'text') {
+      try { await lastNotice.offerButtonsIfPending(from); } catch (err) { console.warn('lastNotice: botones:', err.message); }
     }
   }
 
