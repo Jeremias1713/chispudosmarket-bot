@@ -13,7 +13,8 @@ after(() => cleanup(dataDir));
 
 const PHONE = '584125550001';
 // Llego el lunes 5 oct; guarda 7 dias -> limite lunes 12; vispera domingo 11 -> uso 5 dias para tener una vispera habil.
-const base = { lastNoticeEnabled: true, lastNoticeHour: 10, tealcaStorageDays: 5, tealcaStorageBusinessDays: false, holidays: [], dispatchOnSaturday: false, lastNoticeTemplateName: 'ultimo_aviso_retiro' };
+// Estos tests son del modo 'deadline' (vispera de la fecha limite); el modo fijo dias 1/3/5 esta en pickup-schedule-fixed.test.js.
+const base = { reminderScheduleMode: 'deadline', lastNoticeEnabled: true, lastNoticeHour: 10, tealcaStorageDays: 5, tealcaStorageBusinessDays: false, holidays: [], dispatchOnSaturday: false, lastNoticeTemplateName: 'ultimo_aviso_retiro' };
 const ARRIVED = '2026-10-05T14:00:00.000Z';
 const EVE = new Date('2026-10-09T15:00:00Z'); // viernes 11:00 Caracas = vispera del limite (sabado 10)
 const session = (extra = {}) => ({
@@ -42,7 +43,7 @@ test('la vispera de la fecha limite sale el aviso con 3 botones y la marca queda
   const r = await lastNotice.run(EVE, d);
   assert.equal(r[0].sent, true);
   assert.deepEqual(d.calls.buttons[0].buttons.map((b) => b.id), ['ld_pickup', 'ld_change', 'ld_cancel']);
-  assert.match(d.calls.buttons[0].text, /tienes hasta el sábado 10 de octubre/);
+  assert.match(d.calls.buttons[0].text, /Tienes hasta el sábado 10 de octubre/);
   assert.equal(state.getSession(PHONE).lastNoticeGuia, 'G77');
   assert.equal((await lastNotice.run(new Date(EVE.getTime() + 3600000), d)).length, 0); // una sola vez
 });
@@ -69,7 +70,8 @@ test('con ventana cerrada va la plantilla; sin plantilla cargada no sale', async
   const d = deps();
   const r = await lastNotice.run(EVE, d);
   assert.equal(r[0].viaTemplate, true);
-  assert.deepEqual(d.calls.templates[0].values, ['Ana Perez', 'Shilajit', 'Sabana Grande', 'el sábado 10 de octubre']);
+  // Plantilla ultimo_aviso_retiro_pedido: nombre, producto, guia, monto (sin monto en la ficha = '-').
+  assert.deepEqual(d.calls.templates[0].values, ['Ana Perez', 'Shilajit', 'G77', '-']);
   state.updateSession(PHONE, { lastNoticeSentAt: null, lastNoticeGuia: null });
   const r2 = await lastNotice.run(EVE, { ...deps(), settings: { ...base, lastNoticeTemplateName: null } });
   assert.equal(r2[0].reason, 'sin_plantilla');
