@@ -45,7 +45,7 @@ const { matchTrigger, findProduct } = require('./catalog');
 const { detectOptOut } = require('./optOut');
 const { getImage, MEDIA_DIR } = require('./library');
 const { getSettings } = require('./settings');
-const { generateSpeech, deleteSpeech } = require('./tts');
+const { generateSpeech, deleteSpeech, deleteSpeechLater } = require('./tts');
 const push = require('./push');
 const attention = require('./attention');
 const prepay = require('./prepayShipping');
@@ -299,6 +299,9 @@ async function maybeSendAudio(to, text) {
     const link = mediaUrl(speech.filename);
     if (!link) return; // sin PUBLIC_URL no hay como mandarlo
     await sendAudioByLink(to, link);
+    // WhatsApp descarga el mp3 despues: no se borra ya, se borra en 15 min.
+    deleteSpeechLater(speech.filepath);
+    speech = null;
     try { markLastAssistantAudio(to); } catch (e) { /* la marca es solo informativa */ }
   } catch (err) {
     console.warn('No se pudo mandar la nota de voz, sigo solo con texto:', err.message);
