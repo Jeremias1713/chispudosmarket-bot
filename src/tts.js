@@ -44,14 +44,19 @@ async function generateSpeech(text) {
 
   const buffer = Buffer.from(await response.arrayBuffer());
   fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  sweepOldSpeech();
   const filename = `voz-${crypto.randomBytes(6).toString('hex')}.mp3`;
   const filepath = path.join(MEDIA_DIR, filename);
   fs.writeFileSync(filepath, buffer);
   return { filename, filepath };
 }
 
-// Borra el mp3 despues de mandado: es un archivo de paso, no algo que el
-// negocio necesite conservar (a diferencia de las fotos de la biblioteca).
+// Borra el mp3 un rato DESPUES de mandado. WhatsApp no baja el archivo en el
+// momento en que se le pide el envio: lo descarga despues desde nuestro link
+// /media. Si se borra enseguida, Meta encuentra un 404 y el audio nunca le
+// llega al cliente (aunque el envio figure como hecho). Por eso se espera.
+const SPEECH_TTL_MS = 15 * 60 * 1000;
+
 function deleteSpeech(filepath) {
   try {
     fs.unlinkSync(filepath);
@@ -60,4 +65,27 @@ function deleteSpeech(filepath) {
   }
 }
 
-module.exports = { generateSpeech, deleteSpeech };
+function deleteSpeechLater(filepath, ms = SPEECH_TTL_MS) {
+  const t = setTimeout(() => deleteSpeech(filepath), ms);
+  if (t.unref) t.unref();
+}
+
+// Limpieza de respaldo: si el servidor se reinicio antes de borrar, quedan
+// voz-*.mp3 viejos. Se borran los que tengan mas de una hora.
+function sweepOldSpeech(now = Date.now(), maxAgeMs = 60 * 60 * 1000) {
+  let removed = 0;
+  try {
+    for (const name of fs.readdirSync(MEDIA_DIR)) {
+      if (!/^voz-[0-9a-f]+\.mp3$/.test(name)) continue;
+      const fp = path.join(MEDIA_DIR, name);
+      try {
+        if (now - fs.statSync(fp).mtimeMs > maxAgeMs) { fs.unlinkSync(fp); removed++; }
+      } catch (e) { /* ya no estaba */ }
+    }
+  } catch (err) {
+    // sin carpeta de media todavia
+  }
+  return removed;
+}
+
+module.exports = { generateSpeech, deleteSpeech, deleteSpeechLater, sweepOldSpeech, SPEECH_TTL_MS };
