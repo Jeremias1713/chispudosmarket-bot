@@ -15,7 +15,10 @@ function client() {
     if (!apiKey) {
       throw new Error('Falta OPENAI_API_KEY en las variables de entorno.');
     }
-    _client = new OpenAI({ apiKey });
+    // Reintenta solo (con espera creciente) los errores pasajeros: limite por
+    // minuto (429), errores 5xx y cortes de red. Antes usaba el tiempo maximo
+    // por defecto (10 min), y un cliente podia quedar esperando muchisimo.
+    _client = new OpenAI({ apiKey, maxRetries: 4, timeout: 45 * 1000 });
   }
   return _client;
 }

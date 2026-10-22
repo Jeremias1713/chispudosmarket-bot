@@ -1250,9 +1250,18 @@ async function processReply(from) {
       causeCode: err.cause && err.cause.code,
       stack: err.stack,
     });
-    const reply = 'Disculpa, tuve un problema para responderte. Me repetis eso en un momento?';
-    await sendText(from, reply);
-    appendMessage(from, 'assistant', reply);
+    // Se registra el motivo (panel > /api/ai-errors y push a Jere una vez por
+    // hora). Al cliente se le pide repetir COMO MUCHO una vez cada 30 minutos:
+    // antes le llegaba el mismo "Disculpa" a cada mensaje que mandaba.
+    try { require('./aiErrors').record(err, from); } catch (e) { /* registro opcional */ }
+    const s = getSession(from);
+    const lastNotice = Date.parse(s?.aiErrorNoticeAt || '') || 0;
+    if (Date.now() - lastNotice > 30 * 60 * 1000) {
+      const reply = 'Disculpa, tuve un problema para responderte. Me repetís eso en un momento?';
+      updateSession(from, { aiErrorNoticeAt: new Date().toISOString() });
+      await sendText(from, reply);
+      appendMessage(from, 'assistant', reply);
+    }
   }
 }
 

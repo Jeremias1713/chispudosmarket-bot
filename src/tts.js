@@ -13,7 +13,8 @@ const OpenAI = require('openai');
 const { MEDIA_DIR } = require('./library');
 
 const TTS_MODEL = process.env.TTS_MODEL || 'tts-1';
-const TTS_VOICE = process.env.TTS_VOICE || 'alloy';
+// Voz femenina por defecto (nova). Se puede cambiar con TTS_VOICE en Render: nova o shimmer (mujer), alloy (neutra).
+const TTS_VOICE = process.env.TTS_VOICE || 'nova';
 
 let _client = null;
 function client() {
