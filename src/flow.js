@@ -617,12 +617,20 @@ async function handleIncomingMessage(from, message, profileName) {
       return;
     } else if (lastNoticeId) {
       if (await lastNotice.handleReply(from, lastNoticeId)) return;
+    } else if (rawText && type === 'text' && lastNotice.idFromText(getSession(from), rawText)) {
+      // Ultimo aviso sin botones (plantilla aprobada sin ellos): contesto escribiendo.
+      if (await lastNotice.handleReply(from, lastNotice.idFromText(getSession(from), rawText))) return;
     } else if (rawText && type === 'text' && await lastNotice.captureReason(from, rawText)) {
       return;
     } else if (rawText && orderConfirm.confirmByText(from, rawText)) {
       const reply = '¡Perfecto! Tu pedido queda confirmado y lo enviamos en el próximo despacho.';
       try { await sendRawReply(from, reply); } catch (err) { console.warn('orderConfirm: respuesta:', err.message); }
       return;
+    }
+    // Ultimo aviso que salio como plantilla sin botones y el cliente escribio
+    // otra cosa: se le ofrecen los 3 botones una vez (la IA igual contesta).
+    if (rawText && type === 'text') {
+      try { await lastNotice.offerButtonsIfPending(from); } catch (err) { console.warn('lastNotice: botones:', err.message); }
     }
   }
 
@@ -1242,9 +1250,18 @@ async function processReply(from) {
       causeCode: err.cause && err.cause.code,
       stack: err.stack,
     });
-    const reply = 'Disculpa, tuve un problema para responderte. Me repetis eso en un momento?';
-    await sendText(from, reply);
-    appendMessage(from, 'assistant', reply);
+    // Se registra el motivo (panel > /api/ai-errors y push a Jere una vez por
+    // hora). Al cliente se le pide repetir COMO MUCHO una vez cada 30 minutos:
+    // antes le llegaba el mismo "Disculpa" a cada mensaje que mandaba.
+    try { require('./aiErrors').record(err, from); } catch (e) { /* registro opcional */ }
+    const s = getSession(from);
+    const lastNotice = Date.parse(s?.aiErrorNoticeAt || '') || 0;
+    if (Date.now() - lastNotice > 30 * 60 * 1000) {
+      const reply = 'Disculpa, tuve un problema para responderte. Me repetís eso en un momento?';
+      updateSession(from, { aiErrorNoticeAt: new Date().toISOString() });
+      await sendText(from, reply);
+      appendMessage(from, 'assistant', reply);
+    }
   }
 }
 

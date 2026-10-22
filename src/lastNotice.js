@@ -128,7 +128,7 @@ async function sendNotice(session, settings, now, deps) {
   if (!open && !settings.lastNoticeTemplateName) return { phone, sent: false, reason: 'sin_plantilla' };
   // Marca ANTES de enviar (si el guardado falla, se propaga y no sale nada).
   updateSession(phone, {
-    lastNoticeSentAt: iso(now), lastNoticeGuia: guia,
+    lastNoticeSentAt: iso(now), lastNoticeGuia: guia, lastNoticeVia: open ? 'buttons' : 'template', lastNoticeButtonsOfferedAt: null,
     autoSends: outboundGuard.nextAutoSends(session, 'last_notice', now),
   });
   const text = noticeText(session, settings);
@@ -248,6 +248,55 @@ async function handleReply(phone, id, deps = defaultDeps(), now = new Date()) {
   return true;
 }
 
+// ---- Plantilla sin botones ----
+// La plantilla ultimo_aviso_retiro_pedido puede estar aprobada SIN botones.
+// Entonces el cliente contesta escribiendo: se reconocen sus palabras y, si
+// escribe otra cosa, se le ofrecen los 3 botones una vez (su mensaje ya abrio
+// la ventana de 24 h, asi que los botones del bot si se pueden mandar).
+
+// Ultimo aviso de ESTE pedido enviado y todavia sin respuesta.
+function pendingAnswer(session) {
+  if (!session?.lastNoticeSentAt || session.lastNoticeAnswer || session.stage !== 'esperando_retiro') return false;
+  return session.lastNoticeGuia === String(session.card?.guia || '');
+}
+
+const TEXT_ANSWERS = [
+  [CANCEL, /\b(ya no (lo )?(quiero|necesito)|no lo quiero|no (lo )?voy a (retirar|buscar)|cancel(a|ar|en|o)?( el pedido)?|devuelvanlo|que lo devuelvan)\b/],
+  [CHANGE, /\b(cambi(ar|o|en|e)? (de |la |el )?(agencia|oficina)|otra (agencia|oficina)|a otra agencia)\b/],
+  [PICKUP, /\b(voy a (retirarlo|retirar|buscarlo|buscar|ir|pasar)|lo (retiro|busco|voy a retirar|voy a buscar|paso buscando)|(hoy|manana|ahorita) (voy|paso|lo retiro|lo busco)|si,? (voy|lo retiro|lo busco)|ya voy)\b/],
+];
+
+function fold(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Id del boton que corresponde a lo que escribio, o '' (solo mensajes cortos
+// y solo si tiene un ultimo aviso pendiente de respuesta).
+function idFromText(session, text) {
+  if (!pendingAnswer(session)) return '';
+  const t = fold(text);
+  if (!t || t.length > 120) return '';
+  for (const [id, re] of TEXT_ANSWERS) if (re.test(t)) return id;
+  return '';
+}
+
+// Si el aviso salio como plantilla (sin botones) y el cliente escribio otra
+// cosa, se le mandan los 3 botones una sola vez. No corta la conversacion: la
+// IA igual contesta lo que haya preguntado.
+async function offerButtonsIfPending(phone, deps = { sendButtons: (...a) => require('./whatsapp').sendButtons(...a) }, now = new Date()) {
+  const s = getSession(phone);
+  if (!pendingAnswer(s) || s.lastNoticeVia !== 'template' || s.lastNoticeButtonsOfferedAt || s.paused === true) return false;
+  updateSession(phone, { lastNoticeButtonsOfferedAt: iso(now) });
+  const text = 'Sobre tu pedido en la oficina de Tealca, para avisarnos más rápido toca una opción:';
+  try {
+    const res = await deps.sendButtons(phone, text, BUTTONS);
+    appendMessage(phone, 'assistant', text, buttonsHistoryExtra(BUTTONS, res));
+  } catch (err) {
+    console.warn('lastNotice: no se pudieron ofrecer los botones:', err.message);
+  }
+  return true;
+}
+
 function classifyReason(text) {
   for (const [key, re] of REASON_RULES) if (re.test(text)) return key;
   return 'otro';
@@ -312,4 +361,4 @@ function start() {
 
 function stop() { if (timer) clearInterval(timer); timer = null; }
 
-module.exports = { run, plan, eligible, noticeDate, noticeText, noticeParams, NOTICE_DAY, MAX_PICKUP_MESSAGES, handleReply, captureReason, classifyReason, buttonIdFrom, setPhoneContact, callToday, start, stop, PICKUP, CHANGE, CANCEL, BUTTONS };
+module.exports = { idFromText, offerButtonsIfPending, pendingAnswer, run, plan, eligible, noticeDate, noticeText, noticeParams, NOTICE_DAY, MAX_PICKUP_MESSAGES, handleReply, captureReason, classifyReason, buttonIdFrom, setPhoneContact, callToday, start, stop, PICKUP, CHANGE, CANCEL, BUTTONS };

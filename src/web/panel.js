@@ -1719,6 +1719,11 @@ router.post('/api/agencies/import', upload.single('file'), (req, res) => {
 
 /* ---------- configuracion ---------- */
 
+// Fallos recientes de la IA (OpenAI): motivo y cuantos, sin entrar a Render.
+router.get('/api/ai-errors', (_req, res) => {
+  res.json(require('../aiErrors').summary());
+});
+
 router.get('/api/settings', (_req, res) => {
   res.json(settingsStore.getSettings());
 });

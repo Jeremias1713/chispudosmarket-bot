@@ -78,7 +78,7 @@
       field('Plantilla de recordatorio, días 1 y 3 (nombre, producto, guía, monto)', txt('f7_reminderTpl', 'recordatorio_retiro_pedido')),
       field('Idioma de esa plantilla', txt('f7_reminderTplLang', 'es')),
       check('f7_lastNoticeEnabled', '7D · Último aviso el día 5, con 3 botones (si está apagado, el día 5 sale un recordatorio normal)'),
-      field('Plantilla del último aviso (Utilidad, 3 botones; nombre, producto, guía, monto)', txt('f7_lastNoticeTpl', 'ultimo_aviso_retiro_pedido')),
+      field('Plantilla del último aviso (nombre, producto, guía, monto). Puede no tener botones: el bot entiende si el cliente escribe "ya no lo quiero", "lo retiro mañana" o "cambiar agencia", y si escribe otra cosa le manda los 3 botones una vez', txt('f7_lastNoticeTpl', 'ultimo_aviso_retiro_pedido')),
       field('Máximo de últimos avisos por día (los atrasados salen de a poco, el más viejo primero)', num('f7_lastNoticeCap', '25')),
       el('div', { class: 'field' }, [
         el('button', { class: 'btn', type: 'button', id: 'f7_remindPreview', text: 'Ver quién recibiría hoy' }),
