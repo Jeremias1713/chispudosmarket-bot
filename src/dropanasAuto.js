@@ -21,7 +21,7 @@ const { detectOrderConflict, buildGuiaPatch } = require('./orderGuard');
 const { foldName, compareNames } = require('./nameMatch');
 const shipping = require('./shipping');
 const { matchOrder } = require('./orderMatch');
-const { logisticRank, hasDropanasLink, NON_LOGISTIC_STAGES } = require('./stageRules');
+const { logisticRank, hasDropanasLink, NON_LOGISTIC_STAGES, stageGuessedWithoutGuide } = require('./stageRules');
 const { classifyStatus, isOfficeKind, recordUnknown } = require('./dropanasStatus');
 
 // Cola en serie. Antes, si entraba un cambio mientras otro se estaba
@@ -489,6 +489,25 @@ async function runChanges(changes, overrides = {}) {
           const saved = deps.updateSession(row.phone, closePatch);
           // Por si getSession no refleja todavia el cierre recien guardado.
           if (!(saved && saved.card)) closedNow.set(row.phone, closePatch);
+          eligible = true;
+        }
+      }
+      // Bug real: la IA (o el panel) habia puesto el chat en "en_camino" o
+      // "esperando_retiro" antes de que existiera la guia, y cuando DroPanas la
+      // generaba el aviso se descartaba (estado_no_esperando_guia): el cliente
+      // nunca recibia su numero de guia. Si la guia es de este pedido y nunca
+      // se aviso, se manda. La etapa vuelve a "en_camino" (el paquete recien
+      // sale) salvo que este fijada a mano.
+      if (!eligible && STRONG_EVIDENCE.has(row.matchEvidence)) {
+        const current = deps.getSession(row.phone);
+        if (stageGuessedWithoutGuide(current) && guideRelation(current, row).kind === 'none') {
+          if (!current.stageLocked && current.stage !== 'en_camino') {
+            deps.updateSession(row.phone, {
+              stage: 'en_camino',
+              stageUpdatedAt: new Date().toISOString(),
+              stageReason: 'DroPanas genero la guia (la etapa se habia puesto antes de tener guia)',
+            });
+          }
           eligible = true;
         }
       }
