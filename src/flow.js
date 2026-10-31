@@ -52,7 +52,7 @@ const prepay = require('./prepayShipping');
 const calendar = require('./calendar');
 const orderConfirm = require('./orderConfirm');
 const lastNotice = require('./lastNotice');
-const { SOLD_STAGES, isAllowedAutoTransition, isAllowedClassifierTransition, logisticRank } = require('./stageRules');
+const { SOLD_STAGES, isAllowedAutoTransition, isAllowedClassifierTransition, logisticRank, classifierStageWithoutGuide } = require('./stageRules');
 const dropanasOrderAutomation = require('./dropanasOrderAutomation');
 
 const SPLIT_GAP_MIN_MS = parseInt(process.env.SPLIT_GAP_MIN_MS || '6000', 10);
@@ -1177,6 +1177,9 @@ async function processReply(from) {
         // implicaria retroceder un rango logistico ya alcanzado; "devolucion"
         // es la unica excepcion (ver esa funcion), porque es evidencia nueva
         // legitima sin importar en que etapa logistica estaba el pedido.
+        // Sin guia real no hay "en_camino"/"esperando_retiro": si no, despues el
+        // aviso de la guia de DroPanas no sale nunca (ver stageRules.js).
+        classification.stage = classifierStageWithoutGuide({ ...current, card: mergedCard }, classification.stage);
         let stageChangeAllowed = !current.stageLocked && isAllowedClassifierTransition(current, classification.stage);
         // Necesita atencion por IA (red de seguridad de las reglas de
         // attention.js). El clasificador relee TODA la charla, asi que despues

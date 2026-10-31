@@ -157,7 +157,32 @@ function isAllowedClassifierTransition(session, nextStage) {
   return true;
 }
 
+// Etapas que solo existen si el paquete ya salio con una guia real. Bug real:
+// el clasificador de IA ponia "esperando_retiro" o "en_camino" leyendo la
+// charla (por ejemplo "ya llego?" o "el negocio confirmo que esta listo")
+// antes de que existiera la guia. Despues, cuando DroPanas generaba la guia,
+// el aviso no salia nunca (estado_no_esperando_guia) y el cliente se quedaba
+// sin su numero de guia.
+const NEEDS_GUIDE_STAGES = ['en_camino', 'esperando_retiro', 'novedad', 'pendiente_devolucion'];
+
+// Lo que el clasificador propone, corregido: sin guia no hay etapa de envio.
+// Si la charla todavia no era una venta, queda en "vendido" (la venta si se
+// detecta); si ya era una venta, se queda en su etapa actual.
+function classifierStageWithoutGuide(session, nextStage) {
+  if (!NEEDS_GUIDE_STAGES.includes(nextStage) || session?.card?.guia) return nextStage;
+  return logisticRank(session?.stage) >= 1 ? session.stage : 'vendido';
+}
+
+// Chat que quedo en una etapa de envio SIN guia (la puso la IA o alguien a
+// mano antes de que existiera la guia) y al que nunca se le mando el aviso.
+function stageGuessedWithoutGuide(session) {
+  return NEEDS_GUIDE_STAGES.includes(session?.stage) && !session?.card?.guia && !session?.shippingNotifiedAt;
+}
+
 module.exports = {
+  NEEDS_GUIDE_STAGES,
+  classifierStageWithoutGuide,
+  stageGuessedWithoutGuide,
   LOGISTIC_OWNED_STAGES,
   hasDropanasLink,
   isAllowedClassifierTransition,

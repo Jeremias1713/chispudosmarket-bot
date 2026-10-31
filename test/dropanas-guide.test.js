@@ -188,13 +188,43 @@ test('el automático no envía si el cliente ya no está esperando guía', async
       })),
       // S4: el chat de verdad tiene que estar en_camino (antes el test usaba una
       // sesion vacia, que ahora se cerraria por la guia real con match por telefono).
-      getSession: () => ({ phone: '584120000002', stage: 'en_camino', orderClosed: true, card: {} }),
+      getSession: () => ({ phone: '584120000002', stage: 'en_camino', orderClosed: true, card: {}, shippingNotifiedAt: '2026-10-01T12:00:00.000Z' }),
       capture: async () => { captured = true; },
     }
   );
   assert.equal(result.results[0].reason, 'estado_no_esperando_guia');
   assert.equal(captured, false);
 });
+
+// Bug real (…1200, …4422): la IA puso "en_camino"/"esperando_retiro" antes de
+// que existiera la guia y despues la guia de DroPanas nunca se le mandaba.
+for (const stage of ['en_camino', 'esperando_retiro']) {
+  test(`la guia se manda aunque la IA haya puesto ${stage} sin guia`, async () => {
+    const updates = [];
+    let notified = null;
+    let session = { phone: '584120000009', stage, orderClosed: true, card: { nombre: 'Ana' } };
+    const result = await auto.processChanges(
+      [{ key: 'k9', order: { dropanasId: '19', guia: '85020362', carrier: 'tealca' } }],
+      {
+        env: { DROPANAS_AUTO_SEND_ENABLED: 'true' },
+        matchRows: (rows) => rows.map((row) => ({
+          ...row, matchType: 'exacto', matchEvidence: 'orden', phone: '584120000009', sendEligible: false,
+        })),
+        getSession: () => session,
+        updateSession: (_p, patch) => { updates.push(patch); session = { ...session, ...patch }; return session; },
+        detectOrderConflict: () => null,
+        buildGuiaPatch: ({ session: s, guia, guiaImageUrl }) => ({ card: { ...s.card, guia, guiaImageUrl } }),
+        capture: async () => ({ filename: 'guias/x.png' }),
+        mediaUrl: (f) => `https://example.test/media/${f}`,
+        maybeNotifyShipping: async (phone, s) => { notified = s; return { sent: true }; },
+      }
+    );
+    assert.equal(result.results[0].sent, true);
+    assert.equal(notified.card.guia, '85020362');
+    assert.equal(session.stage, 'en_camino');
+    assert.deepEqual(result.acknowledged, ['k9']);
+  });
+}
 
 test('en oficina avisa llegada y solo después mueve de en camino a esperando retiro', async () => {
   const updates = [];
