@@ -122,27 +122,115 @@ function tryRestoreFromBackup() {
   return null;
 }
 
+// Rendimiento con volumen: antes CADA getSession/updateSession/appendMessage
+// leia y parseaba sessions.json entero (con miles de chats son decenas de MB:
+// 0,2 a 0,5 s por lectura con el proceso bloqueado). Un mensaje entrante hace
+// muchas de esas llamadas, asi que con mas chats a la vez el bot se atrasaba
+// en todo. Ahora el archivo se parsea una vez y se reutiliza mientras no
+// cambie en disco (misma firma de stat). Lo que se escribe sigue yendo al
+// disco igual que antes, en cada guardado.
+let mem = null; // { key, sessions }
+
+function fileKey() {
+  const st = fs.statSync(STATE_PATH);
+  return `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+}
+
 function loadAll() {
+  if (mem && mem.dirty) return mem.sessions; // cambios todavia no escritos: la memoria manda
+  let key;
+  try {
+    key = fileKey();
+  } catch (err) {
+    mem = null;
+    if (err.code === 'ENOENT') return {}; // primera vez: todavia no hay archivo, es normal
+    throw err;
+  }
+  if (mem && mem.key === key) return mem.sessions;
+  const parsed = readFromDisk();
+  mem = parsed.restored ? null : { key, sessions: parsed.sessions };
+  return parsed.sessions;
+}
+
+// Lectura directa del disco (sin la memoria de arriba). Devuelve un objeto
+// nuevo cada vez: lo usa listSessions, que entrega todo a otros modulos.
+function readFromDisk() {
   let raw;
   try {
     raw = fs.readFileSync(STATE_PATH, 'utf8');
   } catch (err) {
-    if (err.code === 'ENOENT') return {}; // primera vez: todavia no hay archivo, es normal
+    if (err.code === 'ENOENT') return { sessions: {} }; // primera vez: todavia no hay archivo, es normal
     throw err; // otro error de lectura (permisos, disco): no lo escondemos
   }
 
   try {
-    return JSON.parse(raw);
+    return { sessions: JSON.parse(raw) };
   } catch (parseErr) {
     const restored = tryRestoreFromBackup();
-    if (restored !== null) return restored;
+    if (restored !== null) return { sessions: restored, restored: true };
     // Sin ninguna copia utilizable: mejor fallar ruidosamente que sobrescribir
     // el archivo corrupto con un objeto vacio y perder todo para siempre.
     throw new Error(`sessions.json esta corrupto y no hay ninguna copia de seguridad valida para restaurar: ${parseErr.message}`);
   }
 }
 
+// Guardado agrupado: con volumen, cada mensaje hace varias escrituras de
+// sessions.json entero (decenas de MB, 0,1 a 0,4 s cada una con el proceso
+// bloqueado). Ahora los cambios quedan en memoria (que es lo que leen todos)
+// y se escriben juntos en el disco a los SESSIONS_FLUSH_MS (400 ms por
+// defecto). Al apagarse el servicio se escribe lo pendiente. Con el disco en
+// estado critico se escribe en el momento, como antes, para que quien llama
+// se entere si no se pudo guardar. En los tests se escribe siempre al momento.
+const FLUSH_MS = process.env.NODE_TEST_CONTEXT
+  ? 0
+  : Math.max(0, Number(process.env.SESSIONS_FLUSH_MS ?? 400) || 0);
+let flushTimer = null;
+
+function diskCritical() {
+  try {
+    return require('./diskJanitor').isDiskCritical(); // require perezoso: evita ciclo de modulos
+  } catch (err) {
+    return false;
+  }
+}
+
 function saveAll(sessions) {
+  if (!FLUSH_MS || diskCritical()) {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    writeNow(sessions);
+    return;
+  }
+  mem = { key: null, sessions, dirty: true };
+  readCache = null;
+  if (!flushTimer) {
+    flushTimer = setTimeout(flushSessions, FLUSH_MS);
+    if (flushTimer.unref) flushTimer.unref();
+  }
+}
+
+// Escribe ya lo que este pendiente en memoria. Si falla, lo pendiente se
+// conserva y se reintenta en 5 s (no se pierde nada de lo que ya contesto).
+function flushSessions() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (!mem || !mem.dirty) return;
+  const pending = mem.sessions;
+  try {
+    writeNow(pending);
+  } catch (err) {
+    console.error('AVISO: no se pudo guardar sessions.json, se reintenta en 5 s:', err.message);
+    mem = { key: null, sessions: pending, dirty: true };
+    flushTimer = setTimeout(flushSessions, 5000);
+    if (flushTimer.unref) flushTimer.unref();
+  }
+}
+
+process.once('exit', flushSessions);
+process.once('SIGTERM', () => {
+  flushSessions();
+  process.exit(0);
+});
+
+function writeNow(sessions) {
   // FASE 1 (H04): copia de seguridad del contenido anterior antes de tocar el
   // archivo, y escritura atomica (archivo temporal + rename, que en el mismo
   // filesystem es una operacion atomica) para que una interrupcion a mitad de
@@ -162,6 +250,7 @@ function saveAll(sessions) {
   try {
     write();
   } catch (err) {
+    mem = null; // lo que quedo en memoria puede no coincidir con el disco
     if (err.code !== 'ENOSPC') throw err;
     // Disco lleno: se libera lo que se pueda (temporal, copias, medios viejos)
     // y se reintenta UNA vez. Si vuelve a fallar se relanza: quien llama tiene
@@ -178,6 +267,17 @@ function saveAll(sessions) {
     write();
   }
   readCache = null;
+  try {
+    mem = { key: fileKey(), sessions };
+  } catch (err) {
+    mem = null;
+  }
+}
+
+// Copia de una sesion para devolver afuera: quien la recibe puede modificarla
+// sin tocar la que esta en memoria (antes cada lectura era un objeto nuevo).
+function copy(session) {
+  return session == null ? session : structuredClone(session);
 }
 
 function blankSession() {
@@ -217,7 +317,7 @@ function getSession(phone) {
     sessions[phone] = blankSession();
     saveAll(sessions);
   }
-  return sessions[phone];
+  return copy(sessions[phone]);
 }
 
 function updateSession(phone, patch) {
@@ -228,7 +328,7 @@ function updateSession(phone, patch) {
     updatedAt: new Date().toISOString(),
   };
   saveAll(sessions);
-  return sessions[phone];
+  return copy(sessions[phone]);
 }
 
 // FASE 1 (H03): antes esto reemplazaba TODA la sesion por una en blanco,
@@ -254,7 +354,7 @@ function resetSession(phone) {
     updatedAt: new Date().toISOString(),
   };
   saveAll(sessions);
-  return sessions[phone];
+  return copy(sessions[phone]);
 }
 
 // Agrega un mensaje al historial con marca de tiempo. role es 'user'
@@ -269,7 +369,7 @@ function appendMessage(phone, role, content, extra) {
   history.push({ role, content, at: new Date().toISOString(), ...(extra || {}) });
   sessions[phone] = { ...session, history, updatedAt: new Date().toISOString() };
   saveAll(sessions);
-  return sessions[phone];
+  return copy(sessions[phone]);
 }
 
 // Marca el ULTIMO mensaje del bot como "se mando tambien como nota de voz"
@@ -317,7 +417,10 @@ function markFollowUp(phone) {
 // Devuelve todas las conversaciones, cada una con su numero de telefono
 // incluido. Usado por el panel web para listar chats.
 function listSessions() {
-  const sessions = loadAll();
+  // Objeto nuevo leido del disco: los demas modulos pueden recorrerlo o
+  // modificarlo sin tocar la copia en memoria de loadAll.
+  flushSessions();
+  const sessions = readFromDisk().sessions;
   return Object.entries(sessions).map(([phone, data]) => ({ phone, ...data }));
 }
 
@@ -332,6 +435,7 @@ function listSessions() {
 // loadAll()/saveAll() como siempre.
 let readCache = null;
 function listSessionsCached() {
+  flushSessions();
   let stat;
   try {
     stat = fs.statSync(STATE_PATH);
@@ -460,4 +564,5 @@ module.exports = {
   listSessionsCached,
   deleteSessions,
   applyTemplateStatus,
+  flushSessions,
 };
